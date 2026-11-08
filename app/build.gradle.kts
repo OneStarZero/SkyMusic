@@ -7,17 +7,10 @@ android {
     namespace = "com.skymusic"
     compileSdk = 34
 
-    defaultConfig {
-        applicationId = "com.skymusic"
-        minSdk = 23         // 最低支持 Android 6.0
-        targetSdk = 34      // 最高支持 Android 14
-        versionCode = 1
-        versionName = "0.0.1"
-    }
-
-    // 👇 【核心修复：必须放在 buildTypes 之前，这样下面才能调用它】 👇
+    // 1. 签名配置必须放在最前面，且用 create() 显式创建
     signingConfigs {
         create("release") {
+            // 指向 GitHub Actions 在根目录解压出的 mykey.jks
             storeFile = file(System.getenv("KEYSTORE_PATH") ?: "../mykey.jks")
             storePassword = System.getenv("KEYSTORE_PASSWORD")
             keyAlias = System.getenv("KEY_ALIAS")
@@ -25,14 +18,22 @@ android {
         }
     }
 
+    defaultConfig {
+        applicationId = "com.skymusic"
+        minSdk = 23
+        targetSdk = 34
+        versionCode = 1
+        versionName = "0.0.1"
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // 现在这里可以正常找到 "release" 了
+            // 2. 现在这里引用就不会找不到 release 了
             signingConfig = signingConfigs.getByName("release")
         }
     }
-    
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -40,10 +41,8 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    
     androidResources {
-        // 修复废弃警告
-        noCompress.add("html") 
+        noCompress.add("html")
     }
 }
 
