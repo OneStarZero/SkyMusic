@@ -17,7 +17,6 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.*
@@ -68,8 +67,6 @@ class FloatingWindowService : Service() {
     private var density = 1.0f
 
     private var cachedSongList: List<Triple<File, List<String>, String>>? = null
-    
-    // 防闪退核心：任务版本号
     private var refreshSessionId = 0
 
     override fun onCreate() {
@@ -322,7 +319,6 @@ class FloatingWindowService : Service() {
             }
             listContainer.addView(loadingTv)
 
-            // 开启新的扫描任务版本
             refreshSessionId++
             val currentSession = refreshSessionId
 
@@ -339,11 +335,9 @@ class FloatingWindowService : Service() {
                         Triple(file, info, "")
                     }
                     
-                    // 更新缓存
                     cachedSongList = songInfoList
 
                     handler.post {
-                        // 防闪退保护：如果版本号变了，说明中途刷新或切页了，直接抛弃本次数据
                         if (refreshSessionId == currentSession && this::listContainer.isInitialized && !isMiniMode && !isPlayerMode) {
                             listContainer.removeAllViews()
                             renderLocalList(songInfoList)
@@ -405,13 +399,19 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
-        val flowLayout = try { FlowLayout(this) } catch (e: Exception) { LinearLayout(this) }
-        flowLayout.setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
+        val subContainer = LinearLayout(this).apply { 
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
+        }
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val items = listOf(
             "作者: $author", "音符: $notes", "BPM: $bpm", "时长: $duration", "调性: $tune", "倍速: $speedStr"
         )
+
+        var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        var currentLineWidth = 0f
+        val maxWidth = resources.displayMetrics.widthPixels * 0.70f - (100 * density)
 
         for (item in items) {
             val tv = TextView(this).apply {
@@ -419,10 +419,22 @@ class FloatingWindowService : Service() {
                 setTextColor(Color.parseColor("#9CA3AF"))
                 textSize = subSize
             }
-            flowLayout.addView(tv)
+            
+            val paint = tv.paint
+            val width = paint.measureText(tv.text.toString())
+            
+            if (currentLineWidth + width > maxWidth && currentLine.childCount > 0) {
+                subContainer.addView(currentLine)
+                currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                currentLineWidth = 0f
+            }
+            
+            currentLine.addView(tv)
+            currentLineWidth += width
         }
+        if (currentLine.childCount > 0) subContainer.addView(currentLine)
 
-        textLayout.addView(flowLayout)
+        textLayout.addView(subContainer)
         card.addView(textLayout)
 
         val btnLayout = LinearLayout(this).apply {
@@ -789,93 +801,4 @@ class FloatingWindowService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-}
-
-// ==========================================
-// 流式布局：完美实现按项自动换行，不再死板截断
-// ==========================================
-class FlowLayout @JvmOverloads constructor(
-    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
-) : ViewGroup(context, attrs, defStyleAttr) {
-
-    private val mLineHeight = mutableListOf<Int>()
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        val width = MeasureSpec.getSize(widthMeasureSpec)
-        val widthMode = MeasureSpec.getMode(widthMeasureSpec)
-        val height = MeasureSpec.getSize(heightMeasureSpec)
-        val heightMode = MeasureSpec.getMode(heightMeasureSpec)
-
-        val childCount = childCount
-        var lineWidth = 0
-        var totalHeight = 0
-        var maxWidth = 0
-        var i = 0
-        mLineHeight.clear()
-
-        while (i < childCount) {
-            val child = getChildAt(i)
-            measureChild(child, widthMeasureSpec, heightMeasureSpec)
-            val lp = child.layoutParams as MarginLayoutParams
-            val childWidth = child.measuredWidth + lp.leftMargin + lp.rightMargin
-            val childHeight = child.measuredHeight + lp.topMargin + lp.bottomMargin
-
-            if (lineWidth + childWidth > width - paddingLeft - paddingRight) {
-                maxWidth = Math.max(maxWidth, lineWidth)
-                mLineHeight.add(totalHeight)
-                totalHeight += childHeight
-                lineWidth = childWidth
-            } else {
-                lineWidth += childWidth
-                totalHeight = Math.max(totalHeight, childHeight)
-            }
-            i++
-        }
-        maxWidth = Math.max(maxWidth, lineWidth)
-        mLineHeight.add(totalHeight)
-        
-        totalHeight = 0
-        for (h in mLineHeight) {
-            totalHeight += h
-        }
-        
-        setMeasuredDimension(
-            if (widthMode == MeasureSpec.EXACTLY) width else maxWidth + paddingLeft + paddingRight,
-            if (heightMode == MeasureSpec.EXACTLY) height else totalHeight + paddingTop + paddingBottom
-        )
-    }
-
-    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        val width = r - l - paddingLeft - paddingRight
-        var lineWidth = 0
-        var lineTop = paddingTop
-        var lineIndex = 0
-        var maxHeight = 0
-
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            val lp = child.layoutParams as MarginLayoutParams
-            val childWidth = child.measuredWidth
-            val childHeight = child.measuredHeight
-
-            if (lineWidth + childWidth + lp.leftMargin + lp.rightMargin > width) {
-                lineTop += mLineHeight[lineIndex]
-                lineWidth = 0
-                lineIndex++
-            }
-            val left = paddingLeft + lineWidth + lp.leftMargin
-            val top = lineTop + lp.topMargin
-            val right = left + childWidth
-            val bottom = top + childHeight
-            child.layout(left, top, right, bottom)
-
-            lineWidth += childWidth + lp.leftMargin + lp.rightMargin
-            maxHeight = Math.max(maxHeight, childHeight)
-        }
-    }
-
-    override fun generateLayoutParams(attrs: AttributeSet?): LayoutParams {
-        return MarginLayoutParams(context, attrs)
-    }
 }
