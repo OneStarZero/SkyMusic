@@ -15,12 +15,24 @@ android {
         versionName = "0.0.1"
     }
 
+    // 👇 【核心修复：必须放在 buildTypes 之前，这样下面才能调用它】 👇
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "../mykey.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 现在这里可以正常找到 "release" 了
             signingConfig = signingConfigs.getByName("release")
         }
     }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -28,17 +40,10 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    androidResources {
-        noCompress("html")
-    }
     
-    signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "mykey.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
-        }
+    androidResources {
+        // 修复废弃警告
+        noCompress.add("html") 
     }
 }
 
