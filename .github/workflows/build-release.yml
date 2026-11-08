@@ -26,6 +26,7 @@ jobs:
       uses: gradle/gradle-build-action@v3
       with:
         gradle-version: 8.2
+        cache-disabled: true
 
     # 4. 将 GitHub Secrets 中的 Base64 还原为真实的 .jks 文件
     # 【注意】这里直接生成在项目根目录下
