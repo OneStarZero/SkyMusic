@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View // <-- 补上了这个关键的导入
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -23,19 +24,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSelectFolder: Button
     private lateinit var tvStatus: TextView
     
-    // 保存用户授权的文件夹 URI (系统会永久记住)
+    // 保存用户授权的文件夹 URI
     private var currentFolderUri: Uri? = null
     private val PREFS_NAME = "SkyMusicPrefs"
     private val KEY_FOLDER_URI = "sky_sheet_folder_uri"
 
-    // 安卓原生文件夹选择器
     private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
         uri?.let {
-            // 永久保存读取权限（非常重要，否则重启 App 就失效了）
             contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             currentFolderUri = it
-            
-            // 保存到本地
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_FOLDER_URI, it.toString()).apply()
             updateStatusText()
             loadLocalScores()
@@ -47,7 +44,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 动态申请存储权限 (针对老版本)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
@@ -70,7 +66,6 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(title)
 
-        // 状态提示
         tvStatus = TextView(this).apply {
             textSize = 12f
             setTextColor(android.graphics.Color.parseColor("#94A3B8"))
@@ -78,7 +73,6 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(tvStatus)
 
-        // 按钮：悬浮窗权限
         val btnOverlay = Button(this).apply {
             text = "1. 开启悬浮窗权限"
             setOnClickListener {
@@ -93,14 +87,12 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(btnOverlay)
 
-        // 按钮：无障碍服务
         val btnAccessibility = Button(this).apply {
             text = "2. 开启无障碍服务"
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
         root.addView(btnAccessibility)
 
-        // 按钮：校准
         val btnCalibrate = Button(this).apply {
             text = "🎯 校准 15 键位坐标"
             setOnClickListener {
@@ -118,18 +110,15 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(divider)
 
-        // 按钮：授权曲库文件夹
         btnSelectFolder = Button(this).apply {
             text = "📁 授权天遇曲库目录"
-            setBackgroundColor(android.graphics.Color.parseColor("#6366f1")) // 紫色高亮
+            setBackgroundColor(android.graphics.Color.parseColor("#6366f1"))
             setOnClickListener {
-                // 引导用户直接选择天遇的目录
                 folderPickerLauncher.launch(null)
             }
         }
         root.addView(btnSelectFolder)
 
-        // 按钮：刷新
         btnRefresh = Button(this).apply {
             text = "🔄 刷新本地曲库"
             setOnClickListener { loadLocalScores() }
@@ -144,7 +133,6 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(scrollView)
 
-        // 读取上次保存的授权
         val savedUri = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(KEY_FOLDER_URI, null)
         if (savedUri != null) {
             currentFolderUri = Uri.parse(savedUri)
@@ -156,7 +144,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateStatusText() {
         if (currentFolderUri == null) {
-            tvStatus.text = "状态：未授权曲库目录，请点击下方紫色按钮进行授权。\n(注：请在弹出的界面中选择 天遇的 Sheet 文件夹)"
+            tvStatus.text = "状态：未授权曲库目录，请点击下方紫色按钮进行授权。"
         } else {
             tvStatus.text = "状态：已授权曲库目录"
             btnSelectFolder.text = "📁 重新授权曲库目录"
@@ -164,7 +152,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 扫描并加载本地曲目
     private fun loadLocalScores() {
         sheetListLayout.removeAllViews()
         
@@ -178,7 +165,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         try {
-            // 使用 DocumentFile 或 ContentResolver 查询文件
             val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
                 currentFolderUri, 
                 android.provider.DocumentsContract.getTreeDocumentId(currentFolderUri)
@@ -192,7 +178,6 @@ class MainActivity : AppCompatActivity() {
                     val displayName = it.getString(it.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME))
                     val docUriStr = it.getString(it.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID))
                     
-                    // 筛选 .txt 或 .json 文件
                     if (displayName.endsWith(".txt", true) || displayName.endsWith(".json", true)) {
                         hasFiles = true
                         val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(currentFolderUri, docUriStr)
@@ -226,7 +211,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 读取选中的文件并播放 (使用 URI 流读取)
     private fun parseAndPlayUri(fileUri: Uri, fileName: String) {
         try {
             val inputStream = contentResolver.openInputStream(fileUri)
@@ -261,7 +245,6 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            // 发送数据给悬浮窗服务
             val intent = Intent(this, FloatingWindowService::class.java)
             intent.putExtra("song_data", ArrayList(notesList))
             startService(intent)
