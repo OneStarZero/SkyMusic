@@ -6,27 +6,44 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.webkit.JavascriptInterface
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    
+    // 用于接收网页发起的文件选择请求
+    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (filePathCallback == null) return@registerForActivityResult
+        var results: Array<Uri>? = null
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val dataString = result.data?.dataString
+            if (dataString != null) {
+                results = arrayOf(Uri.parse(dataString))
+            }
+        }
+        filePathCallback?.onReceiveValue(results)
+        filePathCallback = null
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.parseColor("#0f172a")) // 修复白屏，底色调黑
         }
 
         val controlBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(10, 10, 10, 10)
+            setBackgroundColor(android.graphics.Color.parseColor("#1e293b"))
         }
 
         val btnOverlay = Button(this).apply {
@@ -58,7 +75,31 @@ class MainActivity : AppCompatActivity() {
         val webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.allowFileAccess = true
+            settings.allowContentAccess = true
             webViewClient = WebViewClient()
+            
+            // 核心修复：接管网页的文件上传请求
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    filePathCallback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?
+                ): Boolean {
+                    this@MainActivity.filePathCallback?.onReceiveValue(null)
+                    this@MainActivity.filePathCallback = filePathCallback
+                    
+                    val intent = fileChooserParams?.createIntent()
+                    try {
+                        fileChooserLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        this@MainActivity.filePathCallback = null
+                        return false
+                    }
+                    return true
+                }
+            }
+            
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
         }
