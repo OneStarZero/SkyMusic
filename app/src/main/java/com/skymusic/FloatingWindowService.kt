@@ -63,7 +63,6 @@ class FloatingWindowService : Service() {
     private var currentPage = 0 
     private var density = 1.0f
 
-    // 【缓存机制】
     private var cachedSongList: List<Triple<File, List<String>, String>>? = null
     private var isRefreshing = false
 
@@ -229,7 +228,6 @@ class FloatingWindowService : Service() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
         
-        // 手动刷新按钮
         val btnRefresh = TextView(this).apply {
             text = "↻ 刷新"; setTextColor(Color.parseColor("#38BDF8")); textSize = 14f; setPadding(15, 0, 15, 0)
             setOnClickListener { 
@@ -237,7 +235,7 @@ class FloatingWindowService : Service() {
                     if (isRefreshing) {
                         Toast.makeText(this@FloatingWindowService, "正在刷新中，请稍候...", Toast.LENGTH_SHORT).show()
                     } else {
-                        cachedSongList = null // 清除缓存，强制重读
+                        cachedSongList = null
                         Toast.makeText(this@FloatingWindowService, "正在重新扫描本地铺面...", Toast.LENGTH_SHORT).show()
                         showFullPanel(0)
                     }
@@ -299,13 +297,11 @@ class FloatingWindowService : Service() {
         listContainer.removeAllViews()
 
         if (page == 0) {
-            // 如果已有缓存，直接读取缓存，不再卡顿
             if (cachedSongList != null) {
                 renderLocalList(cachedSongList!!)
                 return
             }
 
-            // 首次加载或点击了刷新，显示加载中
             isRefreshing = true
             val loadingTv = TextView(this).apply {
                 text = "正在扫描并解析本地曲库..." 
@@ -313,7 +309,6 @@ class FloatingWindowService : Service() {
             }
             listContainer.addView(loadingTv)
 
-            // 子线程读取
             thread {
                 val filesList = mutableListOf<File>()
                 val localFolder = File(localSheetsPath)
@@ -326,7 +321,7 @@ class FloatingWindowService : Service() {
                     Triple(file, info, "")
                 }
                 
-                cachedSongList = songInfoList // 写入缓存
+                cachedSongList = songInfoList
 
                 handler.post {
                     isRefreshing = false
@@ -356,9 +351,6 @@ class FloatingWindowService : Service() {
         }
     }
 
-    // ==========================================
-    // 核心：副标题按项自动换行排版
-    // ==========================================
     private fun addSongToList(songName: String, author: String, duration: String, notes: Int, tune: String, bpm: String, onClick: () -> Unit) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -373,35 +365,26 @@ class FloatingWindowService : Service() {
             setOnClickListener { onClick() }
         }
         
-        // 主标题
         textLayout.addView(TextView(this).apply { 
             text = songName
             setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); 
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
-        // 副标题（FlowLayout 手动实现按项换行）
         val subContainer = LinearLayout(this).apply { 
             orientation = LinearLayout.VERTICAL
             setPadding(0, 4, 0, 0)
         }
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        
-        // 使用词条列表，便于后续扩展和换行
         val items = listOf(
-            "作者: $author",
-            "音符: $notes",
-            "BPM: $bpm",
-            "时长: $duration",
-            "调性: $tune",
-            "倍速: $speedStr"
+            "作者: $author", "音符: $notes", "BPM: $bpm", "时长: $duration", "调性: $tune", "倍速: $speedStr"
         )
 
-        // 智能计算每一行的宽度，按项自动换行
         var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         var currentLineWidth = 0f
-        val maxWidth = resources.displayMetrics.widthPixels * 0.45f // 预留右侧按钮的空间
+        
+        val maxWidth = resources.displayMetrics.widthPixels * 0.70f - (100 * density)
 
         for (item in items) {
             val tv = TextView(this).apply {
@@ -410,13 +393,12 @@ class FloatingWindowService : Service() {
                 textSize = 11f
             }
             
-            // 测量文字宽度
             val paint = tv.paint
             val width = paint.measureText(tv.text.toString())
             
             if (currentLineWidth + width > maxWidth && currentLine.childCount > 0) {
-                subContainer.addView(currentLine) // 将当前行加入容器
-                currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL } // 开启新行
+                subContainer.addView(currentLine)
+                currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 currentLineWidth = 0f
             }
             
@@ -428,20 +410,26 @@ class FloatingWindowService : Service() {
         textLayout.addView(subContainer)
         card.addView(textLayout)
 
-        val btnDelete = TextView(this).apply { text = "🗑️"; textSize = 18f; setPadding(15, 0, 15, 0); setOnClickListener { Toast.makeText(this@FloatingWindowService, "请在文件管理器中删除", Toast.LENGTH_SHORT).show() } }
-        card.addView(btnDelete)
+        val btnLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, -1)
+        }
+        
+        val btnDelete = TextView(this).apply { text = "🗑️"; textSize = 18f; setPadding(10, 0, 10, 0); setOnClickListener { Toast.makeText(this@FloatingWindowService, "请在文件管理器中删除", Toast.LENGTH_SHORT).show() } }
+        btnLayout.addView(btnDelete)
         
         val btnPlay = TextView(this).apply { 
-            text = "▶"; textSize = 20f; setTextColor(Color.parseColor("#10B981")); setPadding(15, 0, 15, 0)
+            text = "▶"; textSize = 20f; setTextColor(Color.parseColor("#10B981")); setPadding(10, 0, 5, 0)
             setOnClickListener { onClick() } 
         }
-        card.addView(btnPlay)
-
+        btnLayout.addView(btnPlay)
+        
+        card.addView(btnLayout)
         listContainer.addView(card)
     }
 
     private fun showPlayerPanel() {
-        // 此处代码保持原样，不变
         isMiniMode = false; isPlayerMode = true
         floatView.removeAllViews()
 
@@ -586,7 +574,6 @@ class FloatingWindowService : Service() {
         currentSpeed = Math.round(currentSpeed * 10f) / 10f
         tvSpeed.text = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         
-        // 刷新副标题里的速度显示（仅本地列表更新时触发，这里会影响下一次刷新）
         cachedSongList?.let {
             if (!isMiniMode && !isPlayerMode && currentPage == 0) {
                 listContainer.removeAllViews()
@@ -719,7 +706,6 @@ class FloatingWindowService : Service() {
     }
 
     private fun startCalibration() {
-        // 保持原样
         val dm = resources.displayMetrics
         val dotSize = (60 * density).toInt()
         val halfSize = dotSize / 2
