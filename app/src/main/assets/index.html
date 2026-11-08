@@ -381,16 +381,28 @@ convertBtn.addEventListener('click', () => {
             downloadArea.style.display = 'block';
             showToast('极客全量还原完成！', 'success');
 
-            downloadBtn.onclick = () => {
-                const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`; 
-                a.click();
-                URL.revokeObjectURL(url);
-                showToast('文件已开始下载', 'info');
-            };
+            // 替换原来下载 txt 的按钮逻辑
+downloadBtn.textContent = "🚀 发送到 App 自动演奏";
+downloadBtn.onclick = () => {
+    if (window.AndroidBridge) {
+        const rawNotes = skyStudioData[0].songNotes;
+        const jsonStr = JSON.stringify(rawNotes);
+        
+        // 呼叫安卓！
+        window.AndroidBridge.startPlay(jsonStr);
+        showToast('已成功发送到安卓底层！请切回光遇校准', 'success');
+    } else {
+        // 浏览器测试环境的保底下载
+        const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`; 
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('浏览器环境：已下载文件', 'info');
+    }
+};
 
         } catch (err) {
             setStatus('❌ 转换出错');
