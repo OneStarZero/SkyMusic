@@ -25,7 +25,6 @@ class FloatingWindowService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatView: FrameLayout
     
-    // 核心数据
     private var isPlaying = false
     private var currentIndex = 0
     private var songData = listOf<Pair<Long, Int>>()
@@ -37,11 +36,9 @@ class FloatingWindowService : Service() {
     private var currentDuration = "0:00"
     private var currentNotesCount = 0
 
-    // 状态管理
     private var isMiniMode = true 
     private var isPlayerMode = false 
     
-    // UI 组件
     private lateinit var listContainer: LinearLayout
     private lateinit var titleText: TextView
     private lateinit var tvStatus: TextView
@@ -66,7 +63,6 @@ class FloatingWindowService : Service() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         loadKeyPositions()
-        // 快速检查并创建目录
         File(appSheetsPath).let { if (!it.exists()) it.mkdirs() }
         File(localSheetsPath).let { if (!it.exists()) it.mkdirs() }
     }
@@ -75,7 +71,7 @@ class FloatingWindowService : Service() {
         val isNewData = intent?.getBooleanExtra("is_new_data", false) ?: false
         if (isNewData) {
             intent?.getSerializableExtra("song_data")?.let {
-                @Suppress("UNCHECKED_CAST")
+                @Suppress("UNCHECKED_CAST"
                 songData = it as ArrayList<Pair<Long, Int>>
                 stopPlayback()
                 currentIndex = 0
@@ -497,10 +493,18 @@ class FloatingWindowService : Service() {
             
             val timeRegex = Regex("\"time\"\\s*:\\s*(\\d+)")
             val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
+            val transcriberRegex = Regex("\"transcribedBy\"\\s*:\\s*\"([^\"]+)\"")
             
             val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
-            var authorMatch = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知作者"
-            if (authorMatch == "Unknown") authorMatch = "未知作者"
+            var displayAuthor = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知作者"
+            
+            // 如果存在改编者，展示 原作者-改编者 格式
+            val transcriber = transcriberRegex.find(content)?.groupValues?.getOrNull(1)
+            if (!transcriber.isNullOrEmpty() && transcriber != "SkyMusic") {
+                displayAuthor = "$displayAuthor / $transcriber"
+            }
+            
+            if (displayAuthor == "Unknown") displayAuthor = "未知作者"
 
             val notesCount = timeMatches.size
             val duration = if (notesCount > 0) {
@@ -508,7 +512,7 @@ class FloatingWindowService : Service() {
                 String.format(Locale.getDefault(), "%d:%02d", totalSec / 60, totalSec % 60)
             } else "0:00"
 
-            return Triple(authorMatch, duration, notesCount)
+            return Triple(displayAuthor, duration, notesCount)
         } catch (e: Exception) {
             return Triple("未知作者", "0:00", 0)
         }
@@ -528,10 +532,12 @@ class FloatingWindowService : Service() {
             val timeRegex = Regex("\"time\"\\s*:\\s*(\\d+)")
             val keyRegex = Regex("\"key\"\\s*:\\s*\"1Key(\\d+)\"")
             val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
+            val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"")
             
             val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
             val keyMatches = keyRegex.findAll(content).map { it.groupValues[1].toInt() }.toList()
             var authorMatch = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知作者"
+            var nameMatch = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension
             if (authorMatch == "Unknown") authorMatch = "未知作者"
 
             if (timeMatches.isEmpty() || keyMatches.isEmpty()) return
@@ -541,7 +547,7 @@ class FloatingWindowService : Service() {
             
             songData = notes.sortedBy { it.first }
             currentIndex = 0
-            currentSongName = file.nameWithoutExtension
+            currentSongName = nameMatch
             currentAuthor = authorMatch
             currentNotesCount = songData.size
             currentDuration = calculateDuration(songData)
