@@ -90,7 +90,7 @@ class FloatingWindowService : Service() {
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
         val dm = resources.displayMetrics
 
-        // 1. 控制台窗口参数（带缩放边界限制）
+        // 1. 控制台窗口参数
         panelParams = WindowManager.LayoutParams(
             (dm.widthPixels * 0.8).toInt(), (dm.heightPixels * 0.6).toInt(), 
             layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
@@ -121,12 +121,12 @@ class FloatingWindowService : Service() {
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = radius
-            setColor(Color.argb(alpha, 15, 23, 42))
-            setStroke(2, Color.argb(60, 255, 255, 255))
+            setColor(Color.argb(alpha, 15, 23, 42)) // 深空蓝，半透明
+            setStroke(2, Color.argb(60, 255, 255, 255)) // 极细的白色高光边框
         }
     }
 
-    // ================= 模式 1：悬浮球 =================
+    // ================= 模式 1：小星星悬浮球 =================
     private fun showMiniBall() {
         isMiniMode = true; isPlayerMode = false
         floatView.removeAllViews()
@@ -145,8 +145,6 @@ class FloatingWindowService : Service() {
         }
         ballWrapper.addView(ball)
         floatView.addView(ballWrapper)
-        
-        // 球可拖动
         setupDrag(ballWrapper, ballParams)
         ballWrapper.setOnClickListener { showFullPanel(0) }
         windowManager.updateViewLayout(floatView, ballParams)
@@ -171,7 +169,6 @@ class FloatingWindowService : Service() {
             text = "➖"; setTextColor(Color.parseColor("#38BDF8")); textSize = 22f; setPadding(20, 0, 0, 0)
             setOnClickListener { showMiniBall() }
         }
-        // 右上角缩放角标
         val resizeHandle = TextView(this).apply {
             text = "◢"; setTextColor(Color.parseColor("#38BDF8")); textSize = 20f; setPadding(20, 0, 0, 0)
         }
@@ -197,7 +194,6 @@ class FloatingWindowService : Service() {
         floatView.addView(panel)
         windowManager.updateViewLayout(floatView, panelParams)
 
-        // 设置拖拽和缩放
         setupDrag(titleBar, panelParams)
         setupResize(resizeHandle, panelParams)
 
@@ -266,7 +262,6 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END
         }
         
-        // 给播放器也加个右上角缩放角标
         val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val resizeHandle = TextView(this).apply {
             text = "◢"; setTextColor(Color.parseColor("#38BDF8")); textSize = 18f; setPadding(20, 0, 0, 0)
@@ -279,7 +274,6 @@ class FloatingWindowService : Service() {
         playerLayout.addView(titleRow)
         playerLayout.addView(tvStatus)
 
-        // 进度条永远可见
         seekBar = SeekBar(this).apply {
             max = 100
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -337,7 +331,6 @@ class FloatingWindowService : Service() {
         
         windowManager.updateViewLayout(floatView, playerParams)
         
-        // 拖动标题区域，调节大小角标
         setupDrag(titleRow, playerParams)
         setupResize(resizeHandle, playerParams)
 
@@ -372,15 +365,21 @@ class FloatingWindowService : Service() {
         return true
     }
 
+    // 【核心改动】：选中后只展示播放器界面，不自动播放！
     private fun preparePlay() {
         if (!checkAccessibility()) return
         if (keyPositions.isEmpty() || keyPositions[0].first == -1f) {
             Toast.makeText(this, "请先校准键位！", Toast.LENGTH_SHORT).show()
             return
         }
+        
+        // 停止之前的播放状态
+        stopPlayback()
+        currentIndex = 0 
+        
         handler.postDelayed({
-            showPlayerPanel()
-            if (!isPlaying) togglePlayback() 
+            showPlayerPanel() // 弹出小窗
+            updatePlayerUI()  // 更新为“已暂停”状态
         }, 50)
     }
 
@@ -427,7 +426,7 @@ class FloatingWindowService : Service() {
         if (playRunnable != null) { handler.removeCallbacks(playRunnable!!); playRunnable = null }
     }
 
-    // ================= 通用拖拽逻辑 =================
+    // ================= 拖拽与缩放 =================
     private fun setupDrag(view: View, params: WindowManager.LayoutParams) {
         view.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0; private var initialY = 0
@@ -439,7 +438,6 @@ class FloatingWindowService : Service() {
                         initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; isDragging = false; return false
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        // 移动超过 15 像素才算拖动，防止误触
                         if (abs(event.rawX - initialTouchX) > 15 || abs(event.rawY - initialTouchY) > 15) isDragging = true
                         if (isDragging) {
                             params.x = initialX + (event.rawX - initialTouchX).toInt()
@@ -455,7 +453,6 @@ class FloatingWindowService : Service() {
         })
     }
 
-    // ================= 窗口缩放逻辑 =================
     private fun setupResize(view: View, params: WindowManager.LayoutParams) {
         view.setOnTouchListener(object : View.OnTouchListener {
             private var initialWidth = 0; private var initialHeight = 0
@@ -471,7 +468,7 @@ class FloatingWindowService : Service() {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         
-                        // 限制最小 400x400，最大屏幕宽度，高度不限制（防止内容不够放）
+                        // 限制最小 400x300，防止拉得太小
                         params.width = maxOf(400, initialWidth + deltaX)
                         params.height = maxOf(300, initialHeight + deltaY)
                         
