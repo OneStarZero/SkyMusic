@@ -22,6 +22,7 @@ class FloatingWindowService : Service() {
     private lateinit var floatView: LinearLayout
     private var isPlaying = false
     private var songData = listOf<Pair<Long, Int>>()
+    
     private val keyPositions = mutableListOf<Pair<Float, Float>>()
 
     override fun onCreate() {
@@ -32,7 +33,7 @@ class FloatingWindowService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.getSerializableExtra("song_data")?.let {
-            @Suppress("UNCHECKED_CAST"
+            @Suppress("UNCHECKED_CAST")
             songData = it as ArrayList<Pair<Long, Int>>
             isPlaying = false
         }
@@ -47,7 +48,9 @@ class FloatingWindowService : Service() {
         keyPositions.clear()
         val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
         for (i in 0 until 15) {
-            keyPositions.add(Pair(prefs.getFloat("key_${i}_x", -1f), prefs.getFloat("key_${i}_y", -1f)))
+            val x = prefs.getFloat("key_${i}_x", -1f)
+            val y = prefs.getFloat("key_${i}_y", -1f)
+            keyPositions.add(Pair(x, y))
         }
     }
 
@@ -69,7 +72,7 @@ class FloatingWindowService : Service() {
         }
 
         val titleText = TextView(this).apply {
-            text = "☰ 按住拖动"
+            text = "☰ 拖动面板"
             setTextColor(Color.WHITE)
             setPadding(0, 0, 0, 20)
         }
@@ -83,10 +86,13 @@ class FloatingWindowService : Service() {
             text = "🎵 开始演奏"
             setOnClickListener {
                 if (songData.isNotEmpty()) {
-                    if (keyPositions[0].first == -1f) Toast.makeText(this@FloatingWindowService, "请先校准！", Toast.LENGTH_SHORT).show()
-                    else startPlayback()
+                    if (keyPositions[0].first == -1f) {
+                        Toast.makeText(this@FloatingWindowService, "请先校准键位！", Toast.LENGTH_SHORT).show()
+                    } else {
+                        startPlayback()
+                    }
                 } else {
-                    Toast.makeText(this@FloatingWindowService, "请先在网页生成谱面", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@FloatingWindowService, "请先在网页生成谱面并发送", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -107,7 +113,6 @@ class FloatingWindowService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        // 强制居中，绝不跑到屏幕外
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -122,6 +127,7 @@ class FloatingWindowService : Service() {
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
+
             override fun onTouch(v: View?, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
@@ -235,18 +241,28 @@ class FloatingWindowService : Service() {
     private fun startPlayback() {
         if (isPlaying) return
         isPlaying = true
+        Toast.makeText(this, "开始演奏！", Toast.LENGTH_SHORT).show()
+        
         val handler = Handler(Looper.getMainLooper())
         var index = 0
 
         val runnable = object : Runnable {
             override fun run() {
-                if (!isPlaying || index >= songData.size) { isPlaying = false; return }
+                if (!isPlaying || index >= songData.size) {
+                    isPlaying = false; return
+                }
+                
                 val (timeMs, keyIndex) = songData[index]
                 val point = keyPositions.getOrNull(keyIndex) ?: Pair(0f, 0f)
-                if (point.first != -1f) SkyAccessibilityService.instance?.clickPoints(listOf(point))
+                
+                if (point.first != -1f) {
+                    SkyAccessibilityService.instance?.clickPoints(listOf(point))
+                }
+                
                 index++
                 if (index < songData.size) {
-                    handler.postDelayed(this, maxOf(songData[index].first - timeMs, 1))
+                    val nextDelay = songData[index].first - timeMs
+                    handler.postDelayed(this, maxOf(nextDelay, 1))
                 }
             }
         }
@@ -260,4 +276,4 @@ class FloatingWindowService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-                      }
+}
