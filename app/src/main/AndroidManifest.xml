@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -7,10 +8,11 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/app_icon"
+        android:icon="@mipmap/ic_launcher" 
         android:label="SkyMusic"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true" <!-- 核心修复：允许读取本地文件 -->
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
         <activity android:name=".MainActivity" android:exported="true">
@@ -21,11 +23,17 @@
         </activity>
         
         <service android:name=".FloatingWindowService" />
-        <service android:name=".SkyAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+
+        <service
+            android:name=".SkyAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
-            <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config" />
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
         </service>
     </application>
 </manifest>
