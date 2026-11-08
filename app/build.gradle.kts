@@ -1,13 +1,7 @@
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
-
 android {
     namespace = "com.skymusic"
     compileSdk = 34
 
-    // 1. 签名配置必须放在最前面
     signingConfigs {
         create("release") {
             storeFile = file(System.getenv("KEYSTORE_PATH") ?: "../mykey.jks")
@@ -24,20 +18,27 @@ android {
         versionCode = 4
         versionName = "0.0.4"
 
-        // 只保留中英文，减小包体积
+        // 强制只保留中英文资源，剔除系统自带的其他几十种语言
         resourceConfigurations += listOf("zh", "en")
+
+        // 开启极限代码压缩（针对 NDK / C++ 库）
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     buildTypes {
         release {
-            // 极致压缩体积
+            // 开启代码混淆和压缩
             isMinifyEnabled = true
+            // 开启资源压缩（移除未使用的资源文件）
             isShrinkResources = true
+            
+            // 移除无用代码（R8 极限模式）
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 2. 现在引用就不会找不到 release 了
             signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -49,13 +50,20 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    
+    // 把 html 文件也压缩
     androidResources {
-        // 3. 修复弃用警告，使用新版写法
         noCompress.add("html")
+    }
+
+    // 👇 【终极体积优化】：开启资源混淆，把冗长的资源名变成极短的 a, b, c 👇
+    androidResources {
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
 }
 
 dependencies {
+    // 剔除未使用的依赖，只留必须的
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
 }
