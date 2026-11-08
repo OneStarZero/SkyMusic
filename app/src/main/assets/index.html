@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>光遇 MIDI 智能转谱 Pro Max (数据全开版)</title>
+    <title>光遇 MIDI 智能转谱</title>
     <style>
         :root { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.7); --primary: #38bdf8; --text-main: #f8fafc; --text-muted: #94a3b8; --border: #334155; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -116,16 +116,16 @@
             <tr><td>最高频按键映射</td><td id="outHotKey">-</td></tr>
         </table>
     </div>
-    <button id="downloadBtn" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);">⬇️ 下载谱面文件 (.txt)</button>
+    <button id="downloadBtn" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);">⬇️ 生成谱面</button>
 </div>
 
+<!-- 换回最稳定的 CDN 加载方式 -->
 <script type="importmap">
 {
   "imports": {
-    "@tonejs/midi": "./tone-midi.js"
+    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm"
   }
 }
-</script>
 </script>
 
 <script type="module">
@@ -205,8 +205,10 @@ function mapPitchToSky(midiPitch, shift = 0) {
     return KEY_MAP[best];
 }
 
-midiInput.addEventListener('change', function(e) {
-    const file = e.target.files[0];
+midiInput.addEventListener('change', handleFileSelect);
+
+function handleFileSelect() {
+    const file = midiInput.files[0];
     if (!file) return;
     if (!file.name.match(/\.(mid|midi)$/i)) { showToast('请选择 MIDI 文件', 'error'); return; }
 
@@ -298,70 +300,6 @@ midiInput.addEventListener('change', function(e) {
         showToast('无权限读取该文件', 'error');
     };
     reader.readAsArrayBuffer(file);
-});
-
-    songNameInput.value = songTitle;
-    authorInput.value = originalAuthor; 
-    
-    setStatus('正在解析 MIDI...');
-    rawInfoPanel.style.display = 'none'; configPanel.style.display = 'none'; downloadArea.style.display = 'none'; logDiv.style.display = 'none';
-    logDiv.textContent = '';
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            currentMidiData = new Midi(e.target.result);
-            trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并 (全量还原)</option>';
-
-            let hasValidTrack = false;
-            let instrumentsSet = new Set();
-            let totalNotes = 0;
-            let minMidi = 127, maxMidi = 0;
-            let maxTime = 0;
-
-            currentMidiData.tracks.forEach((track, index) => {
-                if (track.notes.length > 0) {
-                    hasValidTrack = true;
-                    totalNotes += track.notes.length;
-                    
-                    const instName = track.instrument.name || '未知乐器';
-                    instrumentsSet.add(instName);
-
-                    track.notes.forEach(n => {
-                        if (n.midi < minMidi) minMidi = n.midi;
-                        if (n.midi > maxMidi) maxMidi = n.midi;
-                        if (n.time > maxTime) maxTime = n.time;
-                    });
-
-                    const option = document.createElement('option');
-                    option.value = index;
-                    option.text = `轨道 ${index + 1} (${track.notes.length}音符) - ${instName}`;
-                    trackSelect.appendChild(option);
-                }
-            });
-
-            if (!hasValidTrack) throw new Error('该 MIDI 无音符');
-
-            const totalSeconds = Math.floor(maxTime);
-            const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
-
-            infoTotalTracks.textContent = currentMidiData.tracks.length + ' 轨';
-            infoValidTracks.textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
-            infoInstruments.textContent = Array.from(instrumentsSet).join(', ') || '无';
-            infoBpm.textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
-            infoDuration.textContent = `${mins} 分 ${secs} 秒`;
-            infoPitchRange.textContent = `MIDI ${minMidi} ~ ${maxMidi}`;
-            infoTotalNotes.textContent = totalNotes + ' 个';
-
-            rawInfoPanel.style.display = 'block'; configPanel.style.display = 'block';
-            convertBtn.disabled = false; setStatus('请选择音轨，然后点击转换');
-            showToast('解析成功', 'success');
-        } catch (err) {
-            setStatus('❌ 解析失败'); showToast(err.message, 'error'); convertBtn.disabled = true;
-            dropZone.classList.remove('has-file'); dropText.textContent = "点击选择或拖拽 MIDI 文件";
-        }
-    };
-    reader.readAsArrayBuffer(file);
 }
 
 convertBtn.addEventListener('click', () => {
@@ -384,7 +322,7 @@ convertBtn.addEventListener('click', () => {
                 track.notes.forEach(note => {
                     extractedCount++;
                     const durationMs = note.duration * 1000;
-                    if (durationMs < 30) return; // 极短碎音
+                    if (durationMs < 30) return; 
                     rawNotes.push({ midi: note.midi, time: note.time });
                 });
             });
@@ -438,7 +376,6 @@ convertBtn.addEventListener('click', () => {
 
             pendingTxtContent = JSON.stringify(skyStudioData);
 
-            // 计算最终输出时长与大小
             const firstNoteTime = allNotes[0].time;
             const lastNoteTime = allNotes[allNotes.length - 1].time;
             const totalDurationSec = ((lastNoteTime - firstNoteTime) / 1000).toFixed(1);
@@ -457,28 +394,23 @@ convertBtn.addEventListener('click', () => {
             downloadArea.style.display = 'block';
             showToast('极客全量还原完成！', 'success');
 
-            // 替换原来下载 txt 的按钮逻辑
-downloadBtn.textContent = "🚀 发送到 App 自动演奏";
-downloadBtn.onclick = () => {
-    if (window.AndroidBridge) {
-        const rawNotes = skyStudioData[0].songNotes;
-        const jsonStr = JSON.stringify(rawNotes);
-        
-        // 呼叫安卓！
-        window.AndroidBridge.startPlay(jsonStr);
-        showToast('已成功发送到安卓底层！请切回光遇校准', 'success');
-    } else {
-        // 浏览器测试环境的保底下载
-        const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`; 
-        a.click();
-        URL.revokeObjectURL(url);
-        showToast('浏览器环境：已下载文件', 'info');
-    }
-};
+            downloadBtn.textContent = window.AndroidBridge ? "🚀 发送到 App 自动演奏" : "⬇️ 下载谱面文件 (.txt)";
+            downloadBtn.onclick = () => {
+                if (window.AndroidBridge) {
+                    const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
+                    window.AndroidBridge.startPlay(JSON.stringify(rawNotesOnly));
+                    showToast('已发送到 App 底层，请切回游戏', 'success');
+                } else {
+                    const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`; 
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showToast('文件已开始下载', 'info');
+                }
+            };
 
         } catch (err) {
             setStatus('❌ 转换出错');
