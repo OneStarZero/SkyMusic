@@ -25,6 +25,7 @@ class FloatingWindowService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatView: FrameLayout
     
+    // 核心数据
     private var isPlaying = false
     private var currentIndex = 0
     private var songData = listOf<Pair<Long, Int>>()
@@ -36,9 +37,11 @@ class FloatingWindowService : Service() {
     private var currentDuration = "0:00"
     private var currentNotesCount = 0
 
+    // 状态管理
     private var isMiniMode = true 
     private var isPlayerMode = false 
     
+    // UI 组件
     private lateinit var listContainer: LinearLayout
     private lateinit var titleText: TextView
     private lateinit var tvStatus: TextView
@@ -63,8 +66,9 @@ class FloatingWindowService : Service() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         loadKeyPositions()
-        File(appSheetsPath).mkdirs()
-        File(localSheetsPath).mkdirs()
+        // 快速检查并创建目录
+        File(appSheetsPath).let { if (!it.exists()) it.mkdirs() }
+        File(localSheetsPath).let { if (!it.exists()) it.mkdirs() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -197,14 +201,14 @@ class FloatingWindowService : Service() {
             setOnClickListener { currentPage = 0; showFullPanel(0) }
         }
         btnNavLocal.addView(TextView(this).apply { text = "📂"; textSize = 20f; gravity = Gravity.CENTER })
-        btnNavLocal.addView(TextView(this).apply { text = "本地曲库"; textColor = Color.WHITE; textSize = 12f; gravity = Gravity.CENTER })
+        btnNavLocal.addView(TextView(this).apply { text = "本地曲库"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER })
 
         val btnNavApp = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
             setOnClickListener { currentPage = 1; showFullPanel(1) }
         }
         btnNavApp.addView(TextView(this).apply { text = "☁️"; textSize = 20f; gravity = Gravity.CENTER })
-        btnNavApp.addView(TextView(this).apply { text = "App 发送"; textColor = Color.WHITE; textSize = 12f; gravity = Gravity.CENTER })
+        btnNavApp.addView(TextView(this).apply { text = "App 发送"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER })
 
         val btnNavSet = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
@@ -213,7 +217,7 @@ class FloatingWindowService : Service() {
             }
         }
         btnNavSet.addView(TextView(this).apply { text = "🎯"; textSize = 20f; gravity = Gravity.CENTER })
-        btnNavSet.addView(TextView(this).apply { text = "校准键位"; textColor = Color.WHITE; textSize = 12f; gravity = Gravity.CENTER })
+        btnNavSet.addView(TextView(this).apply { text = "校准键位"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER })
 
         bottomBar.addView(btnNavLocal, LinearLayout.LayoutParams(0, -2, 1f))
         bottomBar.addView(btnNavApp, LinearLayout.LayoutParams(0, -2, 1f))
