@@ -1,0 +1,2 @@
+# SkyMusic
+一个可以将midi文件转换为Sky Studio可读的txt文件并且可以自动软件的程序
