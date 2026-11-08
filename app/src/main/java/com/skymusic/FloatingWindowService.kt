@@ -4,7 +4,6 @@ import android.app.Service
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -14,6 +13,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -23,14 +23,19 @@ import java.io.File
 
 class FloatingWindowService : Service() {
     private lateinit var windowManager: WindowManager
-    private lateinit var floatView: LinearLayout
-    private lateinit var panelContainer: LinearLayout
+    private lateinit var floatView: FrameLayout
+    
     private var isPlaying = false
     private var songData = listOf<Pair<Long, Int>>()
     private val keyPositions = mutableListOf<Pair<Float, Float>>()
 
-    // 天遇谱面路径
     private val skyStudioPath = "/storage/emulated/0/Android/data/com.Maple.SkyStudio/files/Sheet/"
+    
+    // 记录面板和悬浮球的 WindowManager 参数，用于切换
+    private lateinit var panelParams: WindowManager.LayoutParams
+    private lateinit var ballParams: WindowManager.LayoutParams
+    
+    private var isMiniMode = false
 
     override fun onCreate() {
         super.onCreate()
@@ -48,7 +53,8 @@ class FloatingWindowService : Service() {
             @Suppress("UNCHECKED_CAST")
             songData = it as ArrayList<Pair<Long, Int>>
             isPlaying = false
-            updatePlayButtonText("🎵 开始演奏", true)
+            if (!this::floatView.isInitialized) createFloatingWindow()
+            refreshPanelContent()
         }
 
         if (!this::floatView.isInitialized) {
@@ -58,13 +64,49 @@ class FloatingWindowService : Service() {
     }
 
     private fun createFloatingWindow() {
-        floatView = LinearLayout(this).apply {
+        // 根布局，用于容纳完整面板和悬浮球
+        floatView = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+        
+        panelParams = WindowManager.LayoutParams(
+            800, 1000, layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 100; y = 200
+        }
+
+        ballParams = WindowManager.LayoutParams(
+            120, 120, layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 100; y = 200
+        }
+
+        try {
+            windowManager.addView(floatView, panelParams)
+            showFullPanel()
+        } catch (e: Exception) {
+            Toast.makeText(this, "悬浮窗启动失败，请检查权限", Toast.LENGTH_SHORT).show()
+            stopSelf()
+        }
+    }
+
+    // 渲染完整面板
+    private fun showFullPanel() {
+        isMiniMode = false
+        floatView.removeAllViews()
+
+        val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#EE1A1A2E"))
             setPadding(30, 30, 30, 30)
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
         }
 
-        // 标题栏（可拖动）
+        // 1. 标题栏（含最小化按钮）
         val titleBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -75,43 +117,82 @@ class FloatingWindowService : Service() {
             textSize = 16f
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
-        val btnClose = TextView(this).apply {
+        val btnMinimize = TextView(this).apply {
             text = "✖"
             setTextColor(Color.RED)
-            textSize = 18f
+            textSize = 20f
             setPadding(20, 0, 0, 0)
-            setOnClickListener { stopSelf() }
+            setOnClickListener { showMiniBall() }
         }
         titleBar.addView(titleText)
-        titleBar.addView(btnClose)
-        floatView.addView(titleBar)
+        titleBar.addView(btnMinimize)
+        panel.addView(titleBar)
 
-        // 分割线
-        floatView.addView(View(this).apply {
+        // 2. 分割线
+        panel.addView(View(this).apply {
             setBackgroundColor(Color.parseColor("#334155"))
             layoutParams = LinearLayout.LayoutParams(-1, 2).apply { setMargins(0, 20, 0, 20) }
         })
 
-        // 滚动列表容器
+        // 3. 滚动内容区
         val scrollView = ScrollView(this)
-        panelContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scrollView.addView(panelContainer)
-        floatView.addView(scrollView, LinearLayout.LayoutParams(600, 800)) // 固定宽高
+        val contentLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        scrollView.addView(contentLayout)
+        panel.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1f)) // 占据剩余空间
 
-        // 初始显示主菜单
-        showMainMenu()
+        // 4. 底部缩放角标
+        val resizeHandle = TextView(this).apply {
+            text = "◢"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 24f
+            gravity = Gravity.BOTTOM or Gravity.END
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { gravity = Gravity.END }
+        }
+        panel.addView(resizeHandle)
 
-        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-            layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = 100
-        params.y = 200
+        floatView.addView(panel)
 
-        // 拖动逻辑
-        titleBar.setOnTouchListener(object : View.OnTouchListener {
+        // 绑定拖拽和缩放事件
+        setupDrag(titleBar, panelParams)
+        setupResize(resizeHandle, panelParams)
+
+        // 加载内容
+        showMainMenu(contentLayout)
+
+        // 更新窗口尺寸
+        windowManager.updateViewLayout(floatView, panelParams)
+    }
+
+    // 渲染悬浮球
+    private fun showMiniBall() {
+        isMiniMode = true
+        floatView.removeAllViews()
+
+        val ball = TextView(this).apply {
+            text = "🎵"
+            textSize = 28f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#38BDF8"))
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            
+            // 为了美观加个圆角背景（简易版）
+            setTextColor(Color.WHITE)
+        }
+
+        floatView.addView(ball)
+        setupDrag(ball, ballParams)
+        
+        ball.setOnClickListener {
+            if (isMiniMode) showFullPanel()
+        }
+
+        // 更新窗口尺寸
+        windowManager.updateViewLayout(floatView, ballParams)
+    }
+
+    // 面板拖动逻辑
+    private fun setupDrag(view: View, params: WindowManager.LayoutParams) {
+        view.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0; private var initialY = 0
             private var initialTouchX = 0f; private var initialTouchY = 0f
             override fun onTouch(v: View?, event: MotionEvent): Boolean {
@@ -119,7 +200,7 @@ class FloatingWindowService : Service() {
                     MotionEvent.ACTION_DOWN -> {
                         initialX = params.x; initialY = params.y
                         initialTouchX = event.rawX; initialTouchY = event.rawY
-                        return true
+                        return false // 返回 false 是为了能让点击事件生效
                     }
                     MotionEvent.ACTION_MOVE -> {
                         params.x = initialX + (event.rawX - initialTouchX).toInt()
@@ -131,81 +212,108 @@ class FloatingWindowService : Service() {
                 return false
             }
         })
+    }
 
-        try { windowManager.addView(floatView, params) } catch (e: Exception) {
-            Toast.makeText(this, "悬浮窗启动失败，请检查权限", Toast.LENGTH_SHORT).show()
-            stopSelf()
+    // 角标拖拽缩放逻辑
+    private fun setupResize(view: View, params: WindowManager.LayoutParams) {
+        view.setOnTouchListener(object : View.OnTouchListener {
+            private var initialWidth = 0; private var initialHeight = 0
+            private var initialTouchX = 0f; private var initialTouchY = 0f
+            override fun onTouch(v: View?, event: MotionEvent): Boolean {
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialWidth = params.width
+                        initialHeight = params.height
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val deltaX = (event.rawX - initialTouchX).toInt()
+                        val deltaY = (event.rawY - initialTouchY).toInt()
+                        
+                        // 限制最小和最大尺寸
+                        val newWidth = maxOf(500, minOf(initialWidth + deltaX, 1200))
+                        val newHeight = maxOf(400, minOf(initialHeight + deltaY, 1600))
+                        
+                        params.width = newWidth
+                        params.height = newHeight
+                        windowManager.updateViewLayout(floatView, params)
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+    }
+
+    // 刷新面板（外部调用）
+    private fun refreshPanelContent() {
+        if (!isMiniMode && this::floatView.isInitialized) {
+            showFullPanel()
         }
     }
 
-    // 主页菜单
-    private fun showMainMenu() {
-        panelContainer.removeAllViews()
+    private fun showMainMenu(container: LinearLayout) {
+        container.removeAllViews()
         
         val btnLibrary = Button(this).apply {
             text = "📂 读取天遇本地曲库"
-            setOnClickListener { loadLocalScores() }
+            setOnClickListener { loadLocalScores(container) }
         }
-        panelContainer.addView(btnLibrary)
+        container.addView(btnLibrary)
 
         val btnCalibrate = Button(this).apply {
             text = "🎯 校准 15 键位"
             setOnClickListener { startCalibration() }
         }
-        panelContainer.addView(btnCalibrate)
+        container.addView(btnCalibrate)
 
         if (songData.isNotEmpty()) {
             val btnPlay = Button(this).apply {
-                text = "🎵 开始演奏 (已接收网页谱面)"
+                text = "🎵 开始演奏 (网页发送)"
                 setBackgroundColor(Color.parseColor("#10b981"))
                 setOnClickListener { startPlayback() }
             }
-            panelContainer.addView(btnPlay)
+            container.addView(btnPlay)
         }
     }
 
-    // 直接扫描目录读取
-    private fun loadLocalScores() {
-        panelContainer.removeAllViews()
+    private fun loadLocalScores(container: LinearLayout) {
+        container.removeAllViews()
         
         val btnBack = Button(this).apply {
-            text = "⬅ 返回主菜单"
-            setOnClickListener { showMainMenu() }
+            text = "⬅ 返回"
+            setOnClickListener { showMainMenu(container) }
         }
-        panelContainer.addView(btnBack)
+        container.addView(btnBack)
 
         val folder = File(skyStudioPath)
         if (!folder.exists() || !folder.isDirectory) {
             val tv = TextView(this).apply {
-                text = "未找到天遇目录：\n$skyStudioPath\n\n(部分安卓11+系统可能拒绝访问，请通过网页发送)"
-                setTextColor(Color.RED)
-                textSize = 12f
-                setPadding(0, 20, 0, 20)
+                text = "未找到目录：\n$skyStudioPath\n(部分系统限制访问)"
+                setTextColor(Color.RED); textSize = 12f; setPadding(0, 20, 0, 20)
             }
-            panelContainer.addView(tv)
+            container.addView(tv)
             return
         }
 
         val files = folder.listFiles { f -> f.extension.equals("txt", true) || f.extension.equals("json", true) }
         if (files.isNullOrEmpty()) {
-            val tv = TextView(this).apply { text = "目录内无谱面文件"; setTextColor(Color.GRAY); setPadding(0, 20, 0, 20) }
-            panelContainer.addView(tv)
+            container.addView(TextView(this).apply { text = "无谱面"; setTextColor(Color.GRAY) })
             return
         }
 
         for (file in files) {
             val btn = Button(this).apply {
                 text = "🎵 ${file.nameWithoutExtension}"
-                textSize = 12f
-                setBackgroundColor(Color.parseColor("#1E293B"))
-                setTextColor(Color.parseColor("#38BDF8"))
+                textSize = 12f; setBackgroundColor(Color.parseColor("#1E293B")); setTextColor(Color.parseColor("#38BDF8"))
                 setOnClickListener { directPlaySkyStudioFile(file) }
             }
-            panelContainer.addView(btn)
+            container.addView(btn)
         }
     }
 
-    // 直接解析天遇的 txt（无需 AI，原生转换）
     private fun directPlaySkyStudioFile(file: File) {
         try {
             val content = file.readText()
@@ -222,22 +330,11 @@ class FloatingWindowService : Service() {
                 notes.add(Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
             }
 
-            if (notes.isEmpty()) {
-                Toast.makeText(this, "谱面为空", Toast.LENGTH_SHORT).show()
-                return
-            }
+            if (notes.isEmpty()) { Toast.makeText(this, "谱面为空", Toast.LENGTH_SHORT).show(); return }
             songData = notes
             startPlayback()
-
         } catch (e: Exception) {
             Toast.makeText(this, "解析失败: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private var playBtnRef: Button? = null
-    private fun updatePlayButtonText(text: String, show: Boolean) {
-        if (this::floatView.isInitialized) {
-            showMainMenu() // 重置为主界面来刷新状态
         }
     }
 
@@ -253,11 +350,7 @@ class FloatingWindowService : Service() {
         val calibrateViews = mutableListOf<TextView>()
         for (i in 0 until 15) {
             val dot = TextView(this).apply {
-                text = "${i + 1}"
-                setTextColor(Color.BLACK)
-                setBackgroundColor(Color.parseColor("#80FFFFFF"))
-                gravity = Gravity.CENTER
-                setPadding(20, 20, 20, 20)
+                text = "${i + 1}"; setTextColor(Color.BLACK); setBackgroundColor(Color.parseColor("#80FFFFFF")); gravity = Gravity.CENTER; setPadding(20, 20, 20, 20)
             }
 
             val params = WindowManager.LayoutParams(
@@ -275,13 +368,10 @@ class FloatingWindowService : Service() {
                 override fun onTouch(v: View?, event: MotionEvent): Boolean {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
-                            initialX = params.x; initialY = params.y
-                            initialTouchX = event.rawX; initialTouchY = event.rawY
-                            return true
+                            initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; return true
                         }
                         MotionEvent.ACTION_MOVE -> {
-                            params.x = initialX + (event.rawX - initialTouchX).toInt()
-                            params.y = initialY + (event.rawY - initialTouchY).toInt()
+                            params.x = initialX + (event.rawX - initialTouchX).toInt(); params.y = initialY + (event.rawY - initialTouchY).toInt()
                             windowManager.updateViewLayout(dot, params)
                             keyPositions[i] = Pair((params.x + 60).toFloat(), (params.y + 60).toFloat())
                             return true
@@ -295,8 +385,7 @@ class FloatingWindowService : Service() {
         }
 
         val saveBtn = Button(this).apply {
-            text = "✅ 保存键位"
-            setBackgroundColor(Color.GREEN)
+            text = "✅ 保存键位"; setBackgroundColor(Color.GREEN)
             setOnClickListener {
                 saveKeyPositions()
                 calibrateViews.forEach { windowManager.removeView(it) }
@@ -310,8 +399,7 @@ class FloatingWindowService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
         )
-        btnParams.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-        btnParams.y = 150
+        btnParams.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; btnParams.y = 150
         windowManager.addView(saveBtn, btnParams)
     }
 
@@ -322,7 +410,6 @@ class FloatingWindowService : Service() {
         
         isPlaying = true
         Toast.makeText(this, "开始演奏！", Toast.LENGTH_SHORT).show()
-        moveTaskToBack(true) // 尽可能把悬浮窗留在前台
         
         val handler = Handler(Looper.getMainLooper())
         var index = 0
