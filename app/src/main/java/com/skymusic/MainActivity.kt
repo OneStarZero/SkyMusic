@@ -35,9 +35,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // 申请存储权限
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                )
             }
         }
 
@@ -81,7 +85,6 @@ class MainActivity : AppCompatActivity() {
         rootLayout.addView(btnSettings, settingsParams)
         setContentView(rootLayout)
 
-        // 启动时检查权限，不直接拉悬浮窗
         checkPermissions()
     }
 
@@ -126,14 +129,51 @@ class MainActivity : AppCompatActivity() {
                         val noteObj = jsonArray.getJSONObject(i)
                         notesList.add(Pair(noteObj.getLong("time"), noteObj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
                     }
+
                     val intent = Intent(this@MainActivity, FloatingWindowService::class.java)
+                    intent.putExtra("is_new_data", true)
                     intent.putExtra("song_data", ArrayList(notesList))
+                    intent.putExtra("song_name", "App 发送谱面")
+                    intent.putExtra("song_author", "网页端")
                     startService(intent)
-                    Toast.makeText(this@MainActivity, "数据已发送，请打开悬浮球演奏", Toast.LENGTH_SHORT).show()
+                    
+                    Toast.makeText(this@MainActivity, "已发送至悬浮窗！", Toast.LENGTH_SHORT).show()
+
+                    // 强制弹出保存询问
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("保存谱面")
+                        .setMessage("是否将当前生成的谱面保存到本地曲库？")
+                        .setCancelable(false)
+                        .setPositiveButton("保存") { _, _ ->
+                            val success = saveSongToLocal(jsonString)
+                            if (success) Toast.makeText(this@MainActivity, "已保存至 AppSheets 目录！", Toast.LENGTH_LONG).show()
+                            else Toast.makeText(this@MainActivity, "保存失败", Toast.LENGTH_SHORT).show()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "解析错误", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "解析错误: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+    }
+
+    // 保存到公开的 AppSheets 目录
+    private fun saveSongToLocal(jsonString: String): Boolean {
+        return try {
+            val folder = java.io.File("/storage/emulated/0/SkyMusic-OneStar/AppSheets/")
+            if (!folder.exists()) folder.mkdirs()
+
+            val fileName = "SkyMusic_${System.currentTimeMillis()}.txt"
+            val file = java.io.File(folder, fileName)
+
+            val content = "[{\"name\":\"App生成_${System.currentTimeMillis()}\",\"author\":\"SkyMusic\",\"isComposed\":false,\"bpm\":700,\"bitsPerPage\":16,\"pitchLevel\":0,\"isEncrypted\":false,\"songNotes\":$jsonString}]"
+            file.writeText(content, Charsets.UTF_8)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
 }
