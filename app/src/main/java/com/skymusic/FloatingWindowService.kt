@@ -2,6 +2,7 @@ package com.skymusic
 
 import android.app.Service
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.PixelFormat
@@ -108,8 +109,12 @@ class FloatingWindowService : Service() {
         val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         val dm = resources.displayMetrics
 
+        // 【横屏自适应】横屏时高度占比更大，竖屏时保持原样
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+
         panelParams = WindowManager.LayoutParams(
-            (dm.widthPixels * 0.75).toInt(), (dm.heightPixels * 0.45).toInt(), 
+            (dm.widthPixels * 0.75).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
             layoutType, baseFlags, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.CENTER }
 
@@ -205,6 +210,10 @@ class FloatingWindowService : Service() {
         isMiniMode = false; isPlayerMode = false
         floatView.removeAllViews()
         
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+        panelParams.height = (resources.displayMetrics.heightPixels * panelHeightRatio).toInt()
+
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#E6101418"))
@@ -351,11 +360,22 @@ class FloatingWindowService : Service() {
         }
     }
 
+    // ==========================================
+    // 核心：横竖屏自适应卡片高度
+    // ==========================================
     private fun addSongToList(songName: String, author: String, duration: String, notes: Int, tune: String, bpm: String, onClick: () -> Unit) {
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+        // 横屏时大幅缩小边距、字号，避免留白；竖屏时保留舒适的排版
+        val padTopBottom = if (isLandscape) (6 * density).toInt() else (12 * density).toInt()
+        val titleSize = if (isLandscape) 14f else 16f
+        val subSize = if (isLandscape) 10f else 11f
+        val btnSize = if (isLandscape) 15f else 18f
+
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(12, 12, 12, 12)
+            setPadding((12 * density).toInt(), padTopBottom, (12 * density).toInt(), padTopBottom)
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
 
@@ -367,13 +387,14 @@ class FloatingWindowService : Service() {
         
         textLayout.addView(TextView(this).apply { 
             text = songName
-            setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); 
+            setTextColor(Color.WHITE); textSize = titleSize; setTypeface(null, android.graphics.Typeface.BOLD); 
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
         val subContainer = LinearLayout(this).apply { 
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 4, 0, 0)
+            // 横屏时标题和副标题的间距也缩小
+            setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
         }
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
@@ -390,7 +411,7 @@ class FloatingWindowService : Service() {
             val tv = TextView(this).apply {
                 text = "$item  ·  "
                 setTextColor(Color.parseColor("#9CA3AF"))
-                textSize = 11f
+                textSize = subSize
             }
             
             val paint = tv.paint
@@ -416,11 +437,14 @@ class FloatingWindowService : Service() {
             layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, -1)
         }
         
-        val btnDelete = TextView(this).apply { text = "🗑️"; textSize = 18f; setPadding(10, 0, 10, 0); setOnClickListener { Toast.makeText(this@FloatingWindowService, "请在文件管理器中删除", Toast.LENGTH_SHORT).show() } }
+        val btnDelete = TextView(this).apply { 
+            text = "🗑️"; textSize = btnSize; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
+            setOnClickListener { Toast.makeText(this@FloatingWindowService, "请在文件管理器中删除", Toast.LENGTH_SHORT).show() } 
+        }
         btnLayout.addView(btnDelete)
         
         val btnPlay = TextView(this).apply { 
-            text = "▶"; textSize = 20f; setTextColor(Color.parseColor("#10B981")); setPadding(10, 0, 5, 0)
+            text = "▶"; textSize = (btnSize + 2f); setTextColor(Color.parseColor("#10B981")); setPadding((10 * density).toInt(), 0, (5 * density).toInt(), 0)
             setOnClickListener { onClick() } 
         }
         btnLayout.addView(btnPlay)
