@@ -1,7 +1,9 @@
 package com.skymusic
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,20 +14,22 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     
-    // 用于接收网页发起的文件选择请求
+    private val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (!isGranted) Toast.makeText(this, "未获得存储权限，无法选择文件", Toast.LENGTH_SHORT).show()
+    }
+
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (filePathCallback == null) return@registerForActivityResult
         var results: Array<Uri>? = null
         if (result.resultCode == RESULT_OK && result.data != null) {
             val dataString = result.data?.dataString
-            if (dataString != null) {
-                results = arrayOf(Uri.parse(dataString))
-            }
+            if (dataString != null) results = arrayOf(Uri.parse(dataString))
         }
         filePathCallback?.onReceiveValue(results)
         filePathCallback = null
@@ -35,9 +39,15 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
+
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(android.graphics.Color.parseColor("#0f172a")) // 修复白屏，底色调黑
+            setBackgroundColor(android.graphics.Color.parseColor("#0f172a"))
         }
 
         val controlBar = LinearLayout(this).apply {
@@ -63,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         val btnAccessibility = Button(this).apply {
             text = "2. 无障碍服务"
             setOnClickListener {
-                Toast.makeText(this@MainActivity, "请开启 SkyMusic 服务", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "请开启 SkyMusic", Toast.LENGTH_LONG).show()
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
         }
@@ -77,9 +87,10 @@ class MainActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
-            webViewClient = WebViewClient()
+            settings.allowFileAccessFromFileURLs = true 
+            settings.allowUniversalAccessFromFileURLs = true 
             
-            // 核心修复：接管网页的文件上传请求
+            webViewClient = WebViewClient()
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(
                     webView: WebView?,
@@ -88,7 +99,6 @@ class MainActivity : AppCompatActivity() {
                 ): Boolean {
                     this@MainActivity.filePathCallback?.onReceiveValue(null)
                     this@MainActivity.filePathCallback = filePathCallback
-                    
                     val intent = fileChooserParams?.createIntent()
                     try {
                         fileChooserLauncher.launch(intent)
@@ -124,22 +134,17 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val jsonArray = JSONArray(jsonString)
                     val notesList = mutableListOf<Pair<Long, Int>>()
-                    
                     for (i in 0 until jsonArray.length()) {
                         val noteObj = jsonArray.getJSONObject(i)
-                        val time = noteObj.getLong("time")
-                        val keyStr = noteObj.getString("key")
-                        val keyIndex = keyStr.replace("1Key", "").toIntOrNull() ?: 0
-                        notesList.add(Pair(time, keyIndex))
+                        notesList.add(Pair(noteObj.getLong("time"), noteObj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
                     }
 
                     val intent = Intent(this@MainActivity, FloatingWindowService::class.java)
                     intent.putExtra("song_data", ArrayList(notesList))
                     startService(intent)
-                    
-                    Toast.makeText(this@MainActivity, "数据已发送！请去光遇里校准并播放", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "发送成功！请切回游戏", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "解析失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "解析失败", Toast.LENGTH_SHORT).show()
                 }
             }
         }
