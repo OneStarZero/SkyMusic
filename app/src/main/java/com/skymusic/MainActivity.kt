@@ -10,21 +10,16 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.TextView
-import android.widget.Toast
+import android.webkit.*
+import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
-    private var filePathCallback: android.webkit.ValueCallback<Array<Uri>>? = null
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (filePathCallback == null) return@registerForActivityResult
@@ -40,17 +35,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 申请存储权限
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
         }
 
-        // 根布局使用 FrameLayout，方便悬浮右上角设置按钮
-        val rootLayout = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#0f172a"))
-        }
+        val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
 
         val webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -59,10 +50,9 @@ class MainActivity : AppCompatActivity() {
             settings.allowContentAccess = true
             settings.allowFileAccessFromFileURLs = true
             settings.allowUniversalAccessFromFileURLs = true
-
             webViewClient = WebViewClient()
             webChromeClient = object : WebChromeClient() {
-                override fun onShowFileChooser(webView: WebView?, cb: android.webkit.ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                     this@MainActivity.filePathCallback?.onReceiveValue(null)
                     this@MainActivity.filePathCallback = cb
                     try { fileChooserLauncher.launch(params?.createIntent()) } catch (e: Exception) { this@MainActivity.filePathCallback = null; return false }
@@ -74,50 +64,49 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
 
-        // 右上角设置悬浮按钮
+        // 右上角原生设置按钮
         val btnSettings = TextView(this).apply {
-            text = "⚙️"
-            textSize = 28f
+            text = "⚙️ 设置"
+            textSize = 14f
             setTextColor(Color.WHITE)
-            setPadding(30, 30, 30, 30)
-            setBackgroundColor(Color.parseColor("#88000000"))
+            setPadding(30, 20, 30, 20)
+            setBackgroundColor(Color.parseColor("#CC000000"))
             setOnClickListener { showSettingsDialog() }
         }
-        val settingsParams = FrameLayout.LayoutParams(150, 150).apply {
+        val settingsParams = FrameLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP or Gravity.END
-            topMargin = 80
-            rightMargin = 30
+            topMargin = 60
+            rightMargin = 20
         }
         rootLayout.addView(btnSettings, settingsParams)
         setContentView(rootLayout)
 
-        // 自动请求权限并启动悬浮窗
-        checkAndStartService()
+        // 启动时检查权限，不直接拉悬浮窗
+        checkPermissions()
     }
 
-    private fun checkAndStartService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "请允许悬浮窗权限以使用自动演奏", Toast.LENGTH_LONG).show()
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            } else {
-                // 启动悬浮窗服务
-                startService(Intent(this, FloatingWindowService::class.java))
-            }
-        } else {
-            startService(Intent(this, FloatingWindowService::class.java))
+    private fun checkPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "请点击右上角设置，授予悬浮窗权限", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun showSettingsDialog() {
-        val options = arrayOf("1. 开启悬浮窗权限", "2. 开启无障碍服务", "3. 手动启动悬浮窗")
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("设置")
+        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球")
+        AlertDialog.Builder(this)
+            .setTitle("SkyMusic 设置")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                     1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    2 -> checkAndStartService()
+                    2 -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                            Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
+                        } else {
+                            startService(Intent(this, FloatingWindowService::class.java))
+                            Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             }.show()
     }
@@ -127,7 +116,7 @@ class MainActivity : AppCompatActivity() {
         fun startPlay(jsonString: String) {
             runOnUiThread {
                 if (SkyAccessibilityService.instance == null) {
-                    Toast.makeText(this@MainActivity, "请先在设置中开启无障碍服务！", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "请先在设置中开启无障碍！", Toast.LENGTH_LONG).show()
                     return@runOnUiThread
                 }
                 try {
@@ -140,7 +129,7 @@ class MainActivity : AppCompatActivity() {
                     val intent = Intent(this@MainActivity, FloatingWindowService::class.java)
                     intent.putExtra("song_data", ArrayList(notesList))
                     startService(intent)
-                    Toast.makeText(this@MainActivity, "已发送！请切回游戏演奏", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "数据已发送，请打开悬浮球演奏", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(this@MainActivity, "解析错误", Toast.LENGTH_SHORT).show()
                 }
