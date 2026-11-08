@@ -205,16 +205,14 @@ function mapPitchToSky(midiPitch, shift = 0) {
     return KEY_MAP[best];
 }
 
-midiInput.addEventListener('change', handleFileSelect);
-
-function handleFileSelect() {
-    const file = midiInput.files[0];
+midiInput.addEventListener('change', function(e) {
+    const file = e.target.files[0];
     if (!file) return;
     if (!file.name.match(/\.(mid|midi)$/i)) { showToast('请选择 MIDI 文件', 'error'); return; }
 
     dropZone.classList.add('has-file');
     dropText.innerHTML = `✅ 已选择：<br><span class="filename">${file.name}</span>`;
-
+    
     let rawName = file.name.replace(/\.[^.]+$/, '');
     let songTitle = rawName, originalAuthor = '';
     const separators = [' - ', ' -', '- ', '-', '_', '—'];
@@ -224,6 +222,83 @@ function handleFileSelect() {
             if (parts.length >= 2) { songTitle = parts[0].trim(); originalAuthor = parts.slice(1).join(' ').trim(); break; }
         }
     }
+    songNameInput.value = songTitle;
+    authorInput.value = originalAuthor; 
+
+    setStatus('正在读取 MIDI 文件...');
+    showToast('文件读取中，请稍候...', 'info');
+    rawInfoPanel.style.display = 'none'; configPanel.style.display = 'none'; downloadArea.style.display = 'none'; logDiv.style.display = 'none';
+    logDiv.textContent = '';
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        try {
+            const arrayBuffer = event.target.result;
+            if (arrayBuffer.byteLength === 0) throw new Error('读取到的文件为空，请检查存储权限');
+
+            currentMidiData = new Midi(arrayBuffer);
+            
+            trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并 (全量还原)</option>';
+            let hasValidTrack = false;
+            let instrumentsSet = new Set();
+            let totalNotes = 0;
+            let minMidi = 127, maxMidi = 0;
+            let maxTime = 0;
+
+            currentMidiData.tracks.forEach((track, index) => {
+                if (track.notes.length > 0) {
+                    hasValidTrack = true;
+                    totalNotes += track.notes.length;
+                    const instName = track.instrument.name || '未知乐器';
+                    instrumentsSet.add(instName);
+
+                    track.notes.forEach(n => {
+                        if (n.midi < minMidi) minMidi = n.midi;
+                        if (n.midi > maxMidi) maxMidi = n.midi;
+                        if (n.time > maxTime) maxTime = n.time;
+                    });
+
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.text = `轨道 ${index + 1} (${track.notes.length}音符) - ${instName}`;
+                    trackSelect.appendChild(option);
+                }
+            });
+
+            if (!hasValidTrack) throw new Error('该 MIDI 内没有任何音符数据');
+
+            const totalSeconds = Math.floor(maxTime);
+            const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
+
+            infoTotalTracks.textContent = currentMidiData.tracks.length + ' 轨';
+            infoValidTracks.textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
+            infoInstruments.textContent = Array.from(instrumentsSet).join(', ') || '无';
+            infoBpm.textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
+            infoDuration.textContent = `${mins} 分 ${secs} 秒`;
+            infoPitchRange.textContent = `MIDI ${minMidi} ~ ${maxMidi}`;
+            infoTotalNotes.textContent = totalNotes + ' 个';
+
+            rawInfoPanel.style.display = 'block'; 
+            configPanel.style.display = 'block';
+            convertBtn.disabled = false; 
+            setStatus('请选择音轨，然后点击转换');
+            showToast('MIDI 解析成功', 'success');
+            
+        } catch (err) {
+            console.error(err);
+            setStatus('❌ 解析失败');
+            showToast('解析失败: ' + err.message, 'error');
+            convertBtn.disabled = true;
+            dropZone.classList.remove('has-file'); 
+            dropText.textContent = "点击选择或拖拽 MIDI 文件";
+        }
+    };
+    reader.onerror = function() {
+        setStatus('❌ 文件读取失败');
+        showToast('无权限读取该文件', 'error');
+    };
+    reader.readAsArrayBuffer(file);
+});
 
     songNameInput.value = songTitle;
     authorInput.value = originalAuthor; 
