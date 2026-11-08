@@ -21,7 +21,7 @@ class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     
     private val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        if (!isGranted) Toast.makeText(this, "未获得存储权限，无法选择文件", Toast.LENGTH_SHORT).show()
+        if (!isGranted) Toast.makeText(this, "未获得存储权限，可能无法选择文件", Toast.LENGTH_SHORT).show()
     }
 
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
