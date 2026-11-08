@@ -83,21 +83,25 @@ class FloatingWindowService : Service() {
         val isNewData = intent?.getBooleanExtra("is_new_data", false) ?: false
         if (isNewData) {
             intent?.getSerializableExtra("song_data")?.let {
-                @Suppress("UNCHECKED_CAST")
-                songData = it as ArrayList<Pair<Long, Int>>
-                stopPlayback()
-                currentIndex = 0
-                currentSongName = intent.getStringExtra("song_name") ?: "App 发送谱面"
-                currentAuthor = intent.getStringExtra("song_author") ?: "未知作者"
-                currentNotesCount = songData.size
-                currentDuration = calculateDuration(songData)
-                currentTune = intent.getStringExtra("song_tune") ?: "未知调"
-                currentBpm = intent.getStringExtra("song_bpm") ?: "0"
-                
-                if (!this::floatView.isInitialized) createFloatingWindow()
-                if (!isMiniMode && !isPlayerMode) {
-                    currentPage = 1
-                    showFullPanel(1) 
+                try {
+                    @Suppress("UNCHECKED_CAST")
+                    songData = it as ArrayList<Pair<Long, Int>>
+                    stopPlayback()
+                    currentIndex = 0
+                    currentSongName = intent.getStringExtra("song_name") ?: "App 发送谱面"
+                    currentAuthor = intent.getStringExtra("song_author") ?: "未知作者"
+                    currentNotesCount = songData.size
+                    currentDuration = calculateDuration(songData)
+                    currentTune = intent.getStringExtra("song_tune") ?: "未知调"
+                    currentBpm = intent.getStringExtra("song_bpm") ?: "0"
+                    
+                    if (!this::floatView.isInitialized) createFloatingWindow()
+                    if (!isMiniMode && !isPlayerMode) {
+                        currentPage = 1
+                        showFullPanel(1) 
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
         }
@@ -106,34 +110,34 @@ class FloatingWindowService : Service() {
     }
 
     private fun createFloatingWindow() {
-        floatView = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }
-
-        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
-        val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-        val dm = resources.displayMetrics
-
-        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
-
-        panelParams = WindowManager.LayoutParams(
-            (dm.widthPixels * 0.75).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
-            layoutType, baseFlags, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.CENTER }
-
-        ballParams = WindowManager.LayoutParams(
-            60, 60, layoutType, baseFlags, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
-
-        playerParams = WindowManager.LayoutParams(
-            (dm.widthPixels * 0.75).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, 
-            layoutType, baseFlags, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.BOTTOM or Gravity.START; x = 50; y = 100 }
-
         try {
+            floatView = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }
+
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+            val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+            val dm = resources.displayMetrics
+
+            val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+
+            panelParams = WindowManager.LayoutParams(
+                (dm.widthPixels * 0.75).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
+                layoutType, baseFlags, PixelFormat.TRANSLUCENT
+            ).apply { gravity = Gravity.CENTER }
+
+            ballParams = WindowManager.LayoutParams(
+                60, 60, layoutType, baseFlags, PixelFormat.TRANSLUCENT
+            ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
+
+            playerParams = WindowManager.LayoutParams(
+                (dm.widthPixels * 0.75).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, 
+                layoutType, baseFlags, PixelFormat.TRANSLUCENT
+            ).apply { gravity = Gravity.BOTTOM or Gravity.START; x = 50; y = 100 }
+
             windowManager.addView(floatView, ballParams)
             showMiniBall()
         } catch (e: Exception) {
-            Toast.makeText(this, "悬浮窗启动失败", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "悬浮窗启动失败，请检查悬浮窗权限", Toast.LENGTH_SHORT).show()
             stopSelf()
         }
     }
@@ -184,6 +188,7 @@ class FloatingWindowService : Service() {
     }
 
     private fun showMiniBall() {
+        if (!this::floatView.isInitialized) return
         isMiniMode = true; isPlayerMode = false
         floatView.removeAllViews()
         
@@ -209,6 +214,7 @@ class FloatingWindowService : Service() {
     }
 
     private fun showFullPanel(initialPage: Int = 0) {
+        if (!this::floatView.isInitialized) return
         isMiniMode = false; isPlayerMode = false
         floatView.removeAllViews()
         
@@ -244,10 +250,9 @@ class FloatingWindowService : Service() {
             setOnClickListener { 
                 if (currentPage == 0) {
                     if (isRefreshing) {
-                        Toast.makeText(this@FloatingWindowService, "正在刷新中，请稍候...", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@FloatingWindowService, "正在刷新中...", Toast.LENGTH_SHORT).show()
                     } else {
                         cachedSongList = null
-                        Toast.makeText(this@FloatingWindowService, "正在重新扫描本地铺面...", Toast.LENGTH_SHORT).show()
                         showFullPanel(0)
                     }
                 } else {
@@ -336,8 +341,10 @@ class FloatingWindowService : Service() {
 
                 handler.post {
                     isRefreshing = false
-                    listContainer.removeView(loadingTv)
-                    renderLocalList(songInfoList)
+                    if (this::listContainer.isInitialized) {
+                        listContainer.removeAllViews()
+                        renderLocalList(songInfoList)
+                    }
                 }
             }
         } else {
@@ -350,6 +357,7 @@ class FloatingWindowService : Service() {
     }
 
     private fun renderLocalList(songInfoList: List<Triple<File, List<String>, String>>) {
+        if (!this::listContainer.isInitialized) return
         if (songInfoList.isEmpty()) {
             listContainer.addView(TextView(this).apply { 
                 text = "未找到乐谱。\n请将 txt 文件放入：\nSkyMusic-OneStar/LocalSheets/"
@@ -362,10 +370,9 @@ class FloatingWindowService : Service() {
         }
     }
 
-    // ==========================================
-    // 核心：横竖屏自适应卡片高度 + 流式自动换行
-    // ==========================================
     private fun addSongToList(songName: String, author: String, duration: String, notes: Int, tune: String, bpm: String, onClick: () -> Unit) {
+        if (!this::listContainer.isInitialized) return
+
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
         val padTopBottom = if (isLandscape) (6 * density).toInt() else (12 * density).toInt()
@@ -392,10 +399,10 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
-        // 使用自定义的流式布局
-        val flowLayout = FlowLayout(this).apply {
-            setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
-        }
+        // 防止空指针崩溃，增加容错
+        val flowLayout = try { FlowLayout(this) } catch (e: Exception) { LinearLayout(this) }
+        flowLayout.setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
+        flowLayout.orientation = LinearLayout.HORIZONTAL
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val items = listOf(
@@ -437,6 +444,7 @@ class FloatingWindowService : Service() {
     }
 
     private fun showPlayerPanel() {
+        if (!this::floatView.isInitialized) return
         isMiniMode = false; isPlayerMode = true
         floatView.removeAllViews()
 
@@ -579,14 +587,19 @@ class FloatingWindowService : Service() {
         currentSpeed += delta
         currentSpeed = currentSpeed.coerceIn(0.5f, 5.0f)
         currentSpeed = Math.round(currentSpeed * 10f) / 10f
-        tvSpeed.text = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        
-        cachedSongList?.let {
-            if (!isMiniMode && !isPlayerMode && currentPage == 0) {
-                listContainer.removeAllViews()
-                renderLocalList(it)
-            }
+        if (this::tvSpeed.isInitialized) {
+            tvSpeed.text = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         }
+        
+        // 防闪退：延迟执行渲染，且不在动画或点击循环中执行
+        handler.postDelayed({
+            cachedSongList?.let {
+                if (!isMiniMode && !isPlayerMode && currentPage == 0 && this::listContainer.isInitialized) {
+                    listContainer.removeAllViews()
+                    renderLocalList(it)
+                }
+            }
+        }, 100)
         
         if (isPlaying) { stopPlayback(); startPlayback() }
     }
@@ -607,10 +620,14 @@ class FloatingWindowService : Service() {
                 } else { isPlaying = false }
                 
                 val progressPercent = if (songData.size <= 1) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
-                seekBar.progress = progressPercent
+                if (this@FloatingWindowService::seekBar.isInitialized) {
+                    seekBar.progress = progressPercent
+                }
                 
                 val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-                tvStatus.text = "播放: ${currentIndex + 1} / ${songData.size}  |  $speedStr"
+                if (this@FloatingWindowService::tvStatus.isInitialized) {
+                    tvStatus.text = "播放: ${currentIndex + 1} / ${songData.size}  |  $speedStr"
+                }
             }
         }
         handler.post(playRunnable!!)
