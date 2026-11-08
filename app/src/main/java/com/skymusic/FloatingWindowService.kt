@@ -185,7 +185,7 @@ class FloatingWindowService : Service() {
                             windowManager.updateViewLayout(floatView, params)
                         }
                     }
-                    true
+                    else->true
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!isDragging && event.pointerCount == 1) {
