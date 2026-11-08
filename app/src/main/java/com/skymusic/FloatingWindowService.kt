@@ -17,6 +17,7 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.*
@@ -120,7 +121,7 @@ class FloatingWindowService : Service() {
             val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
 
             panelParams = WindowManager.LayoutParams(
-                (dm.widthPixels * 0.75).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
+                (dm.widthPixels * 0.85).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { gravity = Gravity.CENTER }
 
@@ -129,7 +130,7 @@ class FloatingWindowService : Service() {
             ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
 
             playerParams = WindowManager.LayoutParams(
-                (dm.widthPixels * 0.75).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, 
+                (dm.widthPixels * 0.85).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { gravity = Gravity.BOTTOM or Gravity.START; x = 50; y = 100 }
 
@@ -411,7 +412,8 @@ class FloatingWindowService : Service() {
 
         var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         var currentLineWidth = 0f
-        val maxWidth = resources.displayMetrics.widthPixels * 0.70f - (100 * density)
+        // 核心修复：动态获取屏幕宽度，减去预设的边距和按钮宽度，完美适配横竖屏
+        val maxWidth = resources.displayMetrics.widthPixels * 0.85f - (100 * density)
 
         for (item in items) {
             val tv = TextView(this).apply {
