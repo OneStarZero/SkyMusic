@@ -1,75 +1,106 @@
 package com.skymusic
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 根布局
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
 
-        // 顶部控制条
         val controlBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(10, 10, 10, 10)
         }
 
         val btnOverlay = Button(this).apply {
-            text = "开启悬浮窗权限"
+            text = "1. 悬浮窗权限"
             setOnClickListener {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     if (!Settings.canDrawOverlays(this@MainActivity)) {
                         val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
                         startActivity(intent)
                     } else {
-                        Toast.makeText(this@MainActivity, "悬浮窗权限已开启", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "已开启", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
         }
 
-        val btnStart = Button(this).apply {
-            text = "启动悬浮窗"
+        val btnAccessibility = Button(this).apply {
+            text = "2. 无障碍服务"
             setOnClickListener {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this@MainActivity)) {
-                    startService(Intent(this@MainActivity, FloatingWindowService::class.java))
-                    Toast.makeText(this@MainActivity, "悬浮窗已启动", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this@MainActivity, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(this@MainActivity, "请开启 SkyMusic 服务", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
         }
 
         controlBar.addView(btnOverlay)
-        controlBar.addView(btnStart)
+        controlBar.addView(btnAccessibility)
         rootLayout.addView(controlBar)
 
-        // WebView 加载本地的 HTML
         val webView = WebView(this).apply {
             settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true // 允许网页使用本地存储
+            settings.domStorageEnabled = true
             webViewClient = WebViewClient()
-            // 加载 assets 文件夹里的 index.html
+            addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
         }
         rootLayout.addView(webView)
 
         setContentView(rootLayout)
+    }
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun startPlay(jsonString: String) {
+            runOnUiThread {
+                if (SkyAccessibilityService.instance == null) {
+                    Toast.makeText(this@MainActivity, "请先开启无障碍服务！", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this@MainActivity)) {
+                    Toast.makeText(this@MainActivity, "请先开启悬浮窗权限！", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+
+                try {
+                    val jsonArray = JSONArray(jsonString)
+                    val notesList = mutableListOf<Pair<Long, Int>>()
+                    
+                    for (i in 0 until jsonArray.length()) {
+                        val noteObj = jsonArray.getJSONObject(i)
+                        val time = noteObj.getLong("time")
+                        val keyStr = noteObj.getString("key")
+                        val keyIndex = keyStr.replace("1Key", "").toIntOrNull() ?: 0
+                        notesList.add(Pair(time, keyIndex))
+                    }
+
+                    val intent = Intent(this@MainActivity, FloatingWindowService::class.java)
+                    intent.putExtra("song_data", ArrayList(notesList))
+                    startService(intent)
+                    
+                    Toast.makeText(this@MainActivity, "数据已发送！请去光遇里校准并播放", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "解析失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 }
