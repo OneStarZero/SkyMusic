@@ -9,6 +9,7 @@
         android:allowBackup="true"
         android:label="SkyMusic"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
         <activity android:name=".MainActivity" android:exported="true">
@@ -18,10 +19,8 @@
             </intent-filter>
         </activity>
         
-        <!-- 声明悬浮窗服务 -->
         <service android:name=".FloatingWindowService" />
 
-        <!-- 声明无障碍服务 -->
         <service
             android:name=".SkyAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
