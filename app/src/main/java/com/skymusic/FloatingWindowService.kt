@@ -68,7 +68,9 @@ class FloatingWindowService : Service() {
     private var density = 1.0f
 
     private var cachedSongList: List<Triple<File, List<String>, String>>? = null
-    private var isRefreshing = false
+    
+    // 防闪退核心：任务版本号
+    private var refreshSessionId = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -249,12 +251,8 @@ class FloatingWindowService : Service() {
             text = "↻ 刷新"; setTextColor(Color.parseColor("#38BDF8")); textSize = 14f; setPadding(15, 0, 15, 0)
             setOnClickListener { 
                 if (currentPage == 0) {
-                    if (isRefreshing) {
-                        Toast.makeText(this@FloatingWindowService, "正在刷新中...", Toast.LENGTH_SHORT).show()
-                    } else {
-                        cachedSongList = null
-                        showFullPanel(0)
-                    }
+                    cachedSongList = null
+                    showFullPanel(0)
                 } else {
                     showFullPanel(1)
                 }
@@ -318,33 +316,41 @@ class FloatingWindowService : Service() {
                 return
             }
 
-            isRefreshing = true
             val loadingTv = TextView(this).apply {
                 text = "正在扫描并解析本地曲库..." 
                 setTextColor(Color.GRAY); textSize = 13f; setPadding(20, 20, 20, 20)
             }
             listContainer.addView(loadingTv)
 
+            // 开启新的扫描任务版本
+            refreshSessionId++
+            val currentSession = refreshSessionId
+
             thread {
-                val filesList = mutableListOf<File>()
-                val localFolder = File(localSheetsPath)
-                if (localFolder.exists()) filesList.addAll(localFolder.listFiles { f -> f.extension.equals("txt", true) }?.toList() ?: emptyList())
-                val appFolder = File(appSheetsPath)
-                if (appFolder.exists()) filesList.addAll(appFolder.listFiles { f -> f.extension.equals("txt", true) }?.toList() ?: emptyList())
+                try {
+                    val filesList = mutableListOf<File>()
+                    val localFolder = File(localSheetsPath)
+                    if (localFolder.exists()) filesList.addAll(localFolder.listFiles { f -> f.extension.equals("txt", true) }?.toList() ?: emptyList())
+                    val appFolder = File(appSheetsPath)
+                    if (appFolder.exists()) filesList.addAll(appFolder.listFiles { f -> f.extension.equals("txt", true) }?.toList() ?: emptyList())
 
-                val songInfoList = filesList.map { file ->
-                    val info = readLocalFileInfo(file)
-                    Triple(file, info, "")
-                }
-                
-                cachedSongList = songInfoList
-
-                handler.post {
-                    isRefreshing = false
-                    if (this::listContainer.isInitialized) {
-                        listContainer.removeAllViews()
-                        renderLocalList(songInfoList)
+                    val songInfoList = filesList.map { file ->
+                        val info = readLocalFileInfo(file)
+                        Triple(file, info, "")
                     }
+                    
+                    // 更新缓存
+                    cachedSongList = songInfoList
+
+                    handler.post {
+                        // 防闪退保护：如果版本号变了，说明中途刷新或切页了，直接抛弃本次数据
+                        if (refreshSessionId == currentSession && this::listContainer.isInitialized && !isMiniMode && !isPlayerMode) {
+                            listContainer.removeAllViews()
+                            renderLocalList(songInfoList)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
             }
         } else {
@@ -399,10 +405,8 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
-        // 防止空指针崩溃，增加容错
         val flowLayout = try { FlowLayout(this) } catch (e: Exception) { LinearLayout(this) }
         flowLayout.setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
-        //flowLayout.orientation = LinearLayout.HORIZONTAL
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val items = listOf(
@@ -591,7 +595,6 @@ class FloatingWindowService : Service() {
             tvSpeed.text = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         }
         
-        // 防闪退：延迟执行渲染，且不在动画或点击循环中执行
         handler.postDelayed({
             cachedSongList?.let {
                 if (!isMiniMode && !isPlayerMode && currentPage == 0 && this::listContainer.isInitialized) {
