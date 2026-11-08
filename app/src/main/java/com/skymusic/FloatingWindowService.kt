@@ -17,6 +17,7 @@ import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.*
 import java.io.File
+import java.util.Locale
 
 class FloatingWindowService : Service() {
     private lateinit var windowManager: WindowManager
@@ -31,6 +32,7 @@ class FloatingWindowService : Service() {
 
     private var currentSongName = ""
     private var currentAuthor = ""
+    private var currentDuration = "0:00"
     private var currentNotesCount = 0
 
     // UI 状态管理
@@ -40,6 +42,7 @@ class FloatingWindowService : Service() {
     private lateinit var seekBar: SeekBar
     private lateinit var btnPlayPause: Button
     private lateinit var btnSpeed: Button
+    private lateinit var contentLayout: LinearLayout
 
     private val handler = Handler(Looper.getMainLooper())
     private var playRunnable: Runnable? = null
@@ -55,23 +58,22 @@ class FloatingWindowService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 接收网页发送的谱面
         intent?.getSerializableExtra("song_data")?.let {
-            @Suppress("UNCHECKED_CAST"
+            @Suppress("UNCHECKED_CAST")
             songData = it as ArrayList<Pair<Long, Int>>
             stopPlayback()
             currentIndex = 0
             
-            currentSongName = "网页发送谱面"
-            currentAuthor = "来自 App 端"
+            currentSongName = "App 发送谱面"
+            currentAuthor = "网页端"
             currentNotesCount = songData.size
+            currentDuration = calculateDuration(songData)
             
             if (!this::floatView.isInitialized) createFloatingWindow()
-            // 如果当前在控制台，刷新面板并切到 App 页
+            // 如果当前在主控制台，自动切到 App 页
             if (!isMiniMode && !isPlayerMode) {
-                showFullPanel(1)
+                switchPage(1) 
             } else {
-                // 如果在小球或播放器，直接弹提示
                 Toast.makeText(this, "已收到 App 发送谱面", Toast.LENGTH_SHORT).show()
             }
         }
@@ -87,9 +89,9 @@ class FloatingWindowService : Service() {
 
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
         
-        // 获取屏幕尺寸自适应，不撑满，最多占 80% 宽，60% 高
+        // 自适应屏幕大小：宽 85%，高 60%
         val dm = resources.displayMetrics
-        val maxW = (dm.widthPixels * 0.8).toInt()
+        val maxW = (dm.widthPixels * 0.85).toInt()
         val maxH = (dm.heightPixels * 0.6).toInt()
 
         panelParams = WindowManager.LayoutParams(
@@ -169,8 +171,8 @@ class FloatingWindowService : Service() {
         panel.addView(titleBar)
 
         val navLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 20, 0, 20) }
-        val btnNavLocal = Button(this).apply { text = "本地谱面"; setOnClickListener { switchPage(panel, 0) } }
-        val btnNavApp = Button(this).apply { text = "App发送"; setOnClickListener { switchPage(panel, 1) } }
+        val btnNavLocal = Button(this).apply { text = "本地谱面"; setOnClickListener { switchPage(0) } }
+        val btnNavApp = Button(this).apply { text = "App发送"; setOnClickListener { switchPage(1) } }
         val btnNavCalibrate = Button(this).apply { 
             text = "🎯 校准15键"
             setBackgroundColor(Color.parseColor("#EF4444")); setTextColor(Color.WHITE)
@@ -184,20 +186,21 @@ class FloatingWindowService : Service() {
         navLayout.addView(btnNavApp, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(navLayout)
 
-        val contentLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        contentLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         panel.addView(contentLayout, LinearLayout.LayoutParams(-1, 0, 1f))
 
         floatView.addView(panel)
         
-        // 重置位置为居中
         panelParams.x = 0; panelParams.y = 0
         windowManager.updateViewLayout(floatView, panelParams)
 
-        if (initialPage == 0) btnNavLocal.performClick() else btnNavApp.performClick()
+        switchPage(initialPage)
     }
 
-    private fun switchPage(panel: LinearLayout, page: Int) {
-        val contentLayout = panel.getChildAt(2) as LinearLayout
+    private fun switchPage(page: Int) {
+        // 防止空指针，确保引用已初始化
+        if (!this::contentLayout.isInitialized) return 
+        
         contentLayout.removeAllViews()
         
         val scrollView = ScrollView(this)
@@ -217,7 +220,7 @@ class FloatingWindowService : Service() {
                 return
             }
             for (file in files) {
-                addSongToList(listLayout, file.nameWithoutExtension, "提取中...", 0) {
+                addSongToList(listLayout, file.nameWithoutExtension, "点击加载", "0:00", 0) {
                     directLoadSkyStudioFile(file)
                 }
             }
@@ -225,14 +228,14 @@ class FloatingWindowService : Service() {
             if (songData.isEmpty()) {
                 listLayout.addView(TextView(this).apply { text = "暂无 App 发送的谱面"; setTextColor(Color.GRAY); setPadding(0,20,0,20) })
             } else {
-                addSongToList(listLayout, currentSongName, currentAuthor, currentNotesCount) {
-                    preparePlay() // 点击后直接播放
+                addSongToList(listLayout, currentSongName, currentAuthor, currentDuration, currentNotesCount) {
+                    preparePlay()
                 }
             }
         }
     }
 
-    private fun addSongToList(container: LinearLayout, title: String, author: String, notes: Int, onClick: () -> Unit) {
+    private fun addSongToList(container: LinearLayout, title: String, author: String, duration: String, notes: Int, onClick: () -> Unit) {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#1E293B"))
@@ -241,14 +244,14 @@ class FloatingWindowService : Service() {
             setOnClickListener { onClick() }
         }
         val titleTv = TextView(this).apply {
-            text = if (notes > 0) "$title - $author" else title
+            text = "$title - $author"
             setTextColor(Color.WHITE); textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD)
         }
         card.addView(titleTv)
         
         if (notes > 0) {
             val infoTv = TextView(this).apply {
-                text = "音符数: $notes"
+                text = "时长: $duration  |  音符数: $notes"
                 setTextColor(Color.parseColor("#94A3B8")); textSize = 12f
                 setPadding(0, 5, 0, 0)
             }
@@ -257,7 +260,7 @@ class FloatingWindowService : Service() {
         container.addView(card)
     }
 
-    // ================= 模式 3：右下角迷你播放器 =================
+    // ================= 模式 3：左下角迷你播放器 =================
     private fun showPlayerPanel() {
         isMiniMode = false; isPlayerMode = true
         floatView.removeAllViews()
@@ -290,7 +293,8 @@ class FloatingWindowService : Service() {
             visibility = View.INVISIBLE // 默认隐藏
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                    if (fromUser && songData.isNotEmpty()) {
+                    // 【安全防护】：防止只有1个音符时除0崩溃
+                    if (fromUser && songData.size > 1) {
                         currentIndex = (progress / 100f * (songData.size - 1)).toInt()
                         updatePlayerUI()
                     }
@@ -331,7 +335,7 @@ class FloatingWindowService : Service() {
 
         floatView.addView(playerLayout)
         
-        // 设置位置到左下角
+        // 放置在左下角
         panelParams.width = (resources.displayMetrics.widthPixels * 0.75).toInt()
         panelParams.height = WindowManager.LayoutParams.WRAP_CONTENT
         panelParams.gravity = Gravity.BOTTOM or Gravity.START
@@ -339,7 +343,6 @@ class FloatingWindowService : Service() {
         panelParams.y = 200
         windowManager.updateViewLayout(floatView, panelParams)
         
-        // 允许拖拽标题
         setupDrag(titleTv, panelParams)
         updatePlayerUI()
     }
@@ -347,7 +350,7 @@ class FloatingWindowService : Service() {
     private fun updatePlayerUI() {
         if (!isPlayerMode || !this::floatView.isInitialized) return
         
-        val progressPercent = if (songData.isEmpty()) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
+        val progressPercent = if (songData.size <= 1) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
         seekBar.progress = progressPercent
         
         if (isPlaying) {
@@ -362,7 +365,7 @@ class FloatingWindowService : Service() {
         btnPlayPause.setBackgroundColor(if (isPlaying) Color.parseColor("#EF4444") else Color.parseColor("#10B981"))
     }
 
-    // ================= 播放核心逻辑 =================
+    // ================= 播放逻辑 =================
     
     private fun checkAccessibility(): Boolean {
         if (SkyAccessibilityService.instance == null) {
@@ -381,8 +384,11 @@ class FloatingWindowService : Service() {
             Toast.makeText(this, "请先校准键位！", Toast.LENGTH_SHORT).show()
             return
         }
-        showPlayerPanel() // 切换到右下角小窗
-        togglePlayback() // 自动开始
+        
+        handler.postDelayed({
+            showPlayerPanel()
+            if (!isPlaying) togglePlayback() 
+        }, 50)
     }
 
     private fun togglePlayback() {
@@ -457,17 +463,28 @@ class FloatingWindowService : Service() {
         view.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0; private var initialY = 0
             private var initialTouchX = 0f; private var initialTouchY = 0f
+            private var isDragging = false
             override fun onTouch(v: View?, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY
-                        return false
+                        isDragging = false
+                        return false // 返回 false 保证按钮的点击事件不被拦截
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - initialTouchX).toInt()
-                        params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        windowManager.updateViewLayout(floatView, params)
-                        return true
+                        val dx = Math.abs(event.rawX - initialTouchX)
+                        val dy = Math.abs(event.rawY - initialTouchY)
+                        if (dx > 10 || dy > 10) isDragging = true // 只有移动超过一定距离才算拖拽
+                        
+                        if (isDragging) {
+                            params.x = initialX + (event.rawX - initialTouchX).toInt()
+                            params.y = initialY + (event.rawY - initialTouchY).toInt()
+                            windowManager.updateViewLayout(floatView, params)
+                            return true
+                        }
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (isDragging) return true // 拖拽结束，拦截点击事件
                     }
                 }
                 return false
@@ -475,7 +492,17 @@ class FloatingWindowService : Service() {
         })
     }
 
-    // 修复：完美提取作者和音符
+    // 【修复】绝对精准的时长计算，防止除0和格式错误
+    private fun calculateDuration(notes: List<Pair<Long, Int>>): String {
+        if (notes.isEmpty()) return "0:00"
+        val totalMs = notes.last().first
+        val totalSec = totalMs / 1000
+        val min = totalSec / 60
+        val sec = totalSec % 60
+        return String.format(Locale.getDefault(), "%d:%02d", min, sec)
+    }
+
+    // 【修复】强力正则提取，不怕乱码
     private fun directLoadSkyStudioFile(file: File) {
         try {
             var content = ""
@@ -488,15 +515,14 @@ class FloatingWindowService : Service() {
 
             val timeRegex = Regex("\"time\"\\s*:\\s*(\\d+)")
             val keyRegex = Regex("\"key\"\\s*:\\s*\"1Key(\\d+)\"")
-            // 强行匹配作者，忽略格式错误
             val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
             
             val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
             val keyMatches = keyRegex.findAll(content).map { it.groupValues[1].toInt() }.toList()
-            val authorMatch = authorRegex.find(content)?.groupValues?.get(1) ?: "未知作者"
+            val authorMatch = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知作者"
 
             if (timeMatches.isEmpty() || keyMatches.isEmpty()) {
-                Toast.makeText(this, "提取失败：无音符", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "读取失败：无有效音符", Toast.LENGTH_SHORT).show()
                 return
             }
 
@@ -510,11 +536,12 @@ class FloatingWindowService : Service() {
             currentSongName = file.nameWithoutExtension
             currentAuthor = authorMatch
             currentNotesCount = songData.size
+            currentDuration = calculateDuration(songData)
 
             preparePlay()
             
         } catch (e: Exception) {
-            Toast.makeText(this, "读取异常: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "读取异常", Toast.LENGTH_SHORT).show()
         }
     }
 
