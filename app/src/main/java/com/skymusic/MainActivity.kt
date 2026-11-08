@@ -4,256 +4,147 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.view.View // <-- 补上了这个关键的导入
-import android.widget.*
+import android.view.Gravity
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 class MainActivity : AppCompatActivity() {
-    
-    private lateinit var sheetListLayout: LinearLayout
-    private lateinit var btnRefresh: Button
-    private lateinit var btnSelectFolder: Button
-    private lateinit var tvStatus: TextView
-    
-    // 保存用户授权的文件夹 URI
-    private var currentFolderUri: Uri? = null
-    private val PREFS_NAME = "SkyMusicPrefs"
-    private val KEY_FOLDER_URI = "sky_sheet_folder_uri"
+    private var filePathCallback: android.webkit.ValueCallback<Array<Uri>>? = null
 
-    private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
-        uri?.let {
-            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            currentFolderUri = it
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(KEY_FOLDER_URI, it.toString()).apply()
-            updateStatusText()
-            loadLocalScores()
-            Toast.makeText(this, "曲库授权成功！", Toast.LENGTH_SHORT).show()
+    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (filePathCallback == null) return@registerForActivityResult
+        var results: Array<Uri>? = null
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            result.data?.dataString?.let { results = arrayOf(Uri.parse(it)) }
         }
+        filePathCallback?.onReceiveValue(results)
+        filePathCallback = null
     }
 
-    @SuppressLint("SetTextI18n")
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // 申请存储权限
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
             }
         }
 
-        val scrollView = ScrollView(this)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(50, 100, 50, 50)
-            setBackgroundColor(android.graphics.Color.parseColor("#0f172a"))
+        // 根布局使用 FrameLayout，方便悬浮右上角设置按钮
+        val rootLayout = FrameLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#0f172a"))
         }
-        scrollView.addView(root)
 
-        val title = TextView(this).apply {
-            text = "SkyMusic 控制台"
-            textSize = 24f
-            setTextColor(android.graphics.Color.WHITE)
-            setPadding(0, 0, 0, 30)
-        }
-        root.addView(title)
+        val webView = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = true
+            settings.allowContentAccess = true
+            settings.allowFileAccessFromFileURLs = true
+            settings.allowUniversalAccessFromFileURLs = true
 
-        tvStatus = TextView(this).apply {
-            textSize = 12f
-            setTextColor(android.graphics.Color.parseColor("#94A3B8"))
-            setPadding(0, 0, 0, 40)
-        }
-        root.addView(tvStatus)
-
-        val btnOverlay = Button(this).apply {
-            text = "1. 开启悬浮窗权限"
-            setOnClickListener {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    if (!Settings.canDrawOverlays(this@MainActivity)) {
-                        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-                    } else {
-                        Toast.makeText(this@MainActivity, "已开启", Toast.LENGTH_SHORT).show()
-                    }
+            webViewClient = WebViewClient()
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(webView: WebView?, cb: android.webkit.ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                    this@MainActivity.filePathCallback?.onReceiveValue(null)
+                    this@MainActivity.filePathCallback = cb
+                    try { fileChooserLauncher.launch(params?.createIntent()) } catch (e: Exception) { this@MainActivity.filePathCallback = null; return false }
+                    return true
                 }
             }
+            addJavascriptInterface(WebAppInterface(), "AndroidBridge")
+            loadUrl("file:///android_asset/index.html")
         }
-        root.addView(btnOverlay)
+        rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
 
-        val btnAccessibility = Button(this).apply {
-            text = "2. 开启无障碍服务"
-            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        // 右上角设置悬浮按钮
+        val btnSettings = TextView(this).apply {
+            text = "⚙️"
+            textSize = 28f
+            setTextColor(Color.WHITE)
+            setPadding(30, 30, 30, 30)
+            setBackgroundColor(Color.parseColor("#88000000"))
+            setOnClickListener { showSettingsDialog() }
         }
-        root.addView(btnAccessibility)
-
-        val btnCalibrate = Button(this).apply {
-            text = "🎯 校准 15 键位坐标"
-            setOnClickListener {
-                startService(Intent(this@MainActivity, FloatingWindowService::class.java).apply { action = "ACTION_CALIBRATE" })
-                Toast.makeText(this@MainActivity, "请切回桌面进行校准", Toast.LENGTH_SHORT).show()
-                moveTaskToBack(true)
-            }
+        val settingsParams = FrameLayout.LayoutParams(150, 150).apply {
+            gravity = Gravity.TOP or Gravity.END
+            topMargin = 80
+            rightMargin = 30
         }
-        root.addView(btnCalibrate)
+        rootLayout.addView(btnSettings, settingsParams)
+        setContentView(rootLayout)
 
-        val divider = View(this).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#334155"))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 2)
-            setPadding(0, 40, 0, 40)
-        }
-        root.addView(divider)
-
-        btnSelectFolder = Button(this).apply {
-            text = "📁 授权天遇曲库目录"
-            setBackgroundColor(android.graphics.Color.parseColor("#6366f1"))
-            setOnClickListener {
-                folderPickerLauncher.launch(null)
-            }
-        }
-        root.addView(btnSelectFolder)
-
-        btnRefresh = Button(this).apply {
-            text = "🔄 刷新本地曲库"
-            setOnClickListener { loadLocalScores() }
-        }
-        root.addView(btnRefresh)
-
-        sheetListLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 30, 0, 50)
-        }
-        root.addView(sheetListLayout)
-
-        setContentView(scrollView)
-
-        val savedUri = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(KEY_FOLDER_URI, null)
-        if (savedUri != null) {
-            currentFolderUri = Uri.parse(savedUri)
-        }
-
-        updateStatusText()
-        loadLocalScores()
+        // 自动请求权限并启动悬浮窗
+        checkAndStartService()
     }
 
-    private fun updateStatusText() {
-        if (currentFolderUri == null) {
-            tvStatus.text = "状态：未授权曲库目录，请点击下方紫色按钮进行授权。"
-        } else {
-            tvStatus.text = "状态：已授权曲库目录"
-            btnSelectFolder.text = "📁 重新授权曲库目录"
-            btnSelectFolder.setBackgroundColor(android.graphics.Color.parseColor("#334155"))
-        }
-    }
-
-    private fun loadLocalScores() {
-        sheetListLayout.removeAllViews()
-        
-        if (currentFolderUri == null) {
-            val tv = TextView(this).apply {
-                text = "请先授权目录！"
-                setTextColor(android.graphics.Color.parseColor("#EF4444"))
-            }
-            sheetListLayout.addView(tv)
-            return
-        }
-
-        try {
-            val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
-                currentFolderUri, 
-                android.provider.DocumentsContract.getTreeDocumentId(currentFolderUri)
-            )
-            
-            val cursor = contentResolver.query(childrenUri, null, null, null, null)
-            var hasFiles = false
-
-            cursor?.use {
-                while (it.moveToNext()) {
-                    val displayName = it.getString(it.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME))
-                    val docUriStr = it.getString(it.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID))
-                    
-                    if (displayName.endsWith(".txt", true) || displayName.endsWith(".json", true)) {
-                        hasFiles = true
-                        val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(currentFolderUri, docUriStr)
-                        
-                        val scoreBtn = Button(this).apply {
-                            text = "🎵 ${displayName.substringBeforeLast(".")}"
-                            textSize = 16f
-                            setBackgroundColor(android.graphics.Color.parseColor("#1E293B"))
-                            setTextColor(android.graphics.Color.parseColor("#38BDF8"))
-                            
-                            val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                            params.setMargins(0, 0, 0, 20)
-                            layoutParams = params
-
-                            setOnClickListener { parseAndPlayUri(fileUri, displayName) }
-                        }
-                        sheetListLayout.addView(scoreBtn)
-                    }
-                }
-            }
-
-            if (!hasFiles) {
-                val tv = TextView(this).apply {
-                    text = "目录内没有找到任何 .txt 或 .json 谱面。"
-                    setTextColor(android.graphics.Color.parseColor("#94A3B8"))
-                }
-                sheetListLayout.addView(tv)
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "读取目录失败: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun parseAndPlayUri(fileUri: Uri, fileName: String) {
-        try {
-            val inputStream = contentResolver.openInputStream(fileUri)
-            val reader = BufferedReader(InputStreamReader(inputStream))
-            val jsonString = reader.readText()
-            reader.close()
-
-            val jsonArray = if (jsonString.trim().startsWith("[")) {
-                val rootArray = JSONArray(jsonString)
-                if (rootArray.getJSONObject(0).has("songNotes")) {
-                    rootArray.getJSONObject(0).getJSONArray("songNotes")
-                } else {
-                    rootArray
-                }
+    private fun checkAndStartService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "请允许悬浮窗权限以使用自动演奏", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             } else {
-                JSONArray(jsonString)
+                // 启动悬浮窗服务
+                startService(Intent(this, FloatingWindowService::class.java))
             }
+        } else {
+            startService(Intent(this, FloatingWindowService::class.java))
+        }
+    }
 
-            val notesList = mutableListOf<Pair<Long, Int>>()
-            for (i in 0 until jsonArray.length()) {
-                val noteObj = jsonArray.getJSONObject(i)
-                if (noteObj.has("time") && noteObj.has("key")) {
-                    val time = noteObj.getLong("time")
-                    val keyStr = noteObj.getString("key")
-                    val keyIndex = keyStr.replace("1Key", "").toIntOrNull() ?: 0
-                    notesList.add(Pair(time, keyIndex))
+    private fun showSettingsDialog() {
+        val options = arrayOf("1. 开启悬浮窗权限", "2. 开启无障碍服务", "3. 手动启动悬浮窗")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("设置")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                    1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    2 -> checkAndStartService()
+                }
+            }.show()
+    }
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun startPlay(jsonString: String) {
+            runOnUiThread {
+                if (SkyAccessibilityService.instance == null) {
+                    Toast.makeText(this@MainActivity, "请先在设置中开启无障碍服务！", Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                try {
+                    val jsonArray = JSONArray(jsonString)
+                    val notesList = mutableListOf<Pair<Long, Int>>()
+                    for (i in 0 until jsonArray.length()) {
+                        val noteObj = jsonArray.getJSONObject(i)
+                        notesList.add(Pair(noteObj.getLong("time"), noteObj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
+                    }
+                    val intent = Intent(this@MainActivity, FloatingWindowService::class.java)
+                    intent.putExtra("song_data", ArrayList(notesList))
+                    startService(intent)
+                    Toast.makeText(this@MainActivity, "已发送！请切回游戏演奏", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "解析错误", Toast.LENGTH_SHORT).show()
                 }
             }
-
-            if (notesList.isEmpty()) {
-                Toast.makeText(this, "谱面无音符数据！", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val intent = Intent(this, FloatingWindowService::class.java)
-            intent.putExtra("song_data", ArrayList(notesList))
-            startService(intent)
-            
-            Toast.makeText(this, "成功加载《${fileName.substringBeforeLast(".")}》，请切回游戏", Toast.LENGTH_LONG).show()
-            moveTaskToBack(true)
-
-        } catch (e: Exception) {
-            Toast.makeText(this, "解析失败: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }
