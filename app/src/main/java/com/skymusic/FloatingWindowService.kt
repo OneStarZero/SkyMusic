@@ -402,7 +402,7 @@ class FloatingWindowService : Service() {
         // 防止空指针崩溃，增加容错
         val flowLayout = try { FlowLayout(this) } catch (e: Exception) { LinearLayout(this) }
         flowLayout.setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
-        flowLayout.orientation = LinearLayout.HORIZONTAL
+        //flowLayout.orientation = LinearLayout.HORIZONTAL
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val items = listOf(
