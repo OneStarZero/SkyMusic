@@ -400,8 +400,9 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
-        val subContainer = LinearLayout(this).apply { 
-            orientation = LinearLayout.VERTICAL
+        // 核心修复：直接使用系统原生的 GridLayout 自动排版，它能自适应横竖屏的宽度
+        val gridLayout = GridLayout(this).apply {
+            columnCount = 3 // 默认排 3 列，自动折行
             setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
         }
         
@@ -410,33 +411,20 @@ class FloatingWindowService : Service() {
             "作者: $author", "音符: $notes", "BPM: $bpm", "时长: $duration", "调性: $tune", "倍速: $speedStr"
         )
 
-        var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        var currentLineWidth = 0f
-        // 核心修复：动态获取屏幕宽度，减去预设的边距和按钮宽度，完美适配横竖屏
-        val maxWidth = resources.displayMetrics.widthPixels * 0.85f - (100 * density)
-
         for (item in items) {
             val tv = TextView(this).apply {
-                text = "$item  ·  "
+                text = "$item  "
                 setTextColor(Color.parseColor("#9CA3AF"))
                 textSize = subSize
+                layoutParams = GridLayout.LayoutParams().apply {
+                    width = GridLayout.LayoutParams.WRAP_CONTENT
+                    height = GridLayout.LayoutParams.WRAP_CONTENT
+                }
             }
-            
-            val paint = tv.paint
-            val width = paint.measureText(tv.text.toString())
-            
-            if (currentLineWidth + width > maxWidth && currentLine.childCount > 0) {
-                subContainer.addView(currentLine)
-                currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                currentLineWidth = 0f
-            }
-            
-            currentLine.addView(tv)
-            currentLineWidth += width
+            gridLayout.addView(tv)
         }
-        if (currentLine.childCount > 0) subContainer.addView(currentLine)
 
-        textLayout.addView(subContainer)
+        textLayout.addView(gridLayout)
         card.addView(textLayout)
 
         val btnLayout = LinearLayout(this).apply {
