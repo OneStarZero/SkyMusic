@@ -1,6 +1,7 @@
 package com.skymusic
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
@@ -12,9 +13,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.util.AttributeSet
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.*
@@ -109,7 +112,6 @@ class FloatingWindowService : Service() {
         val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         val dm = resources.displayMetrics
 
-        // 【横屏自适应】横屏时高度占比更大，竖屏时保持原样
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
 
@@ -361,12 +363,11 @@ class FloatingWindowService : Service() {
     }
 
     // ==========================================
-    // 核心：横竖屏自适应卡片高度
+    // 核心：横竖屏自适应卡片高度 + 流式自动换行
     // ==========================================
     private fun addSongToList(songName: String, author: String, duration: String, notes: Int, tune: String, bpm: String, onClick: () -> Unit) {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-        // 横屏时大幅缩小边距、字号，避免留白；竖屏时保留舒适的排版
         val padTopBottom = if (isLandscape) (6 * density).toInt() else (12 * density).toInt()
         val titleSize = if (isLandscape) 14f else 16f
         val subSize = if (isLandscape) 10f else 11f
@@ -391,9 +392,8 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END 
         })
         
-        val subContainer = LinearLayout(this).apply { 
-            orientation = LinearLayout.VERTICAL
-            // 横屏时标题和副标题的间距也缩小
+        // 使用自定义的流式布局
+        val flowLayout = FlowLayout(this).apply {
             setPadding(0, if (isLandscape) (2 * density).toInt() else (4 * density).toInt(), 0, 0)
         }
         
@@ -402,33 +402,16 @@ class FloatingWindowService : Service() {
             "作者: $author", "音符: $notes", "BPM: $bpm", "时长: $duration", "调性: $tune", "倍速: $speedStr"
         )
 
-        var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        var currentLineWidth = 0f
-        
-        val maxWidth = resources.displayMetrics.widthPixels * 0.70f - (100 * density)
-
         for (item in items) {
             val tv = TextView(this).apply {
                 text = "$item  ·  "
                 setTextColor(Color.parseColor("#9CA3AF"))
                 textSize = subSize
             }
-            
-            val paint = tv.paint
-            val width = paint.measureText(tv.text.toString())
-            
-            if (currentLineWidth + width > maxWidth && currentLine.childCount > 0) {
-                subContainer.addView(currentLine)
-                currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                currentLineWidth = 0f
-            }
-            
-            currentLine.addView(tv)
-            currentLineWidth += width
+            flowLayout.addView(tv)
         }
-        if (currentLine.childCount > 0) subContainer.addView(currentLine)
 
-        textLayout.addView(subContainer)
+        textLayout.addView(flowLayout)
         card.addView(textLayout)
 
         val btnLayout = LinearLayout(this).apply {
@@ -786,4 +769,93 @@ class FloatingWindowService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+}
+
+// ==========================================
+// 流式布局：完美实现按项自动换行，不再死板截断
+// ==========================================
+class FlowLayout @JvmOverloads constructor(
+    context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
+) : ViewGroup(context, attrs, defStyleAttr) {
+
+    private val mLineHeight = mutableListOf<Int>()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val widthMode = MeasureSpec.getMode(widthMeasureSpec)
+        val height = MeasureSpec.getSize(heightMeasureSpec)
+        val heightMode = MeasureSpec.getMode(heightMeasureSpec)
+
+        val childCount = childCount
+        var lineWidth = 0
+        var totalHeight = 0
+        var maxWidth = 0
+        var i = 0
+        mLineHeight.clear()
+
+        while (i < childCount) {
+            val child = getChildAt(i)
+            measureChild(child, widthMeasureSpec, heightMeasureSpec)
+            val lp = child.layoutParams as MarginLayoutParams
+            val childWidth = child.measuredWidth + lp.leftMargin + lp.rightMargin
+            val childHeight = child.measuredHeight + lp.topMargin + lp.bottomMargin
+
+            if (lineWidth + childWidth > width - paddingLeft - paddingRight) {
+                maxWidth = Math.max(maxWidth, lineWidth)
+                mLineHeight.add(totalHeight)
+                totalHeight += childHeight
+                lineWidth = childWidth
+            } else {
+                lineWidth += childWidth
+                totalHeight = Math.max(totalHeight, childHeight)
+            }
+            i++
+        }
+        maxWidth = Math.max(maxWidth, lineWidth)
+        mLineHeight.add(totalHeight)
+        
+        totalHeight = 0
+        for (h in mLineHeight) {
+            totalHeight += h
+        }
+        
+        setMeasuredDimension(
+            if (widthMode == MeasureSpec.EXACTLY) width else maxWidth + paddingLeft + paddingRight,
+            if (heightMode == MeasureSpec.EXACTLY) height else totalHeight + paddingTop + paddingBottom
+        )
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val width = r - l - paddingLeft - paddingRight
+        var lineWidth = 0
+        var lineTop = paddingTop
+        var lineIndex = 0
+        var maxHeight = 0
+
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            val lp = child.layoutParams as MarginLayoutParams
+            val childWidth = child.measuredWidth
+            val childHeight = child.measuredHeight
+
+            if (lineWidth + childWidth + lp.leftMargin + lp.rightMargin > width) {
+                lineTop += mLineHeight[lineIndex]
+                lineWidth = 0
+                lineIndex++
+            }
+            val left = paddingLeft + lineWidth + lp.leftMargin
+            val top = lineTop + lp.topMargin
+            val right = left + childWidth
+            val bottom = top + childHeight
+            child.layout(left, top, right, bottom)
+
+            lineWidth += childWidth + lp.leftMargin + lp.rightMargin
+            maxHeight = Math.max(maxHeight, childHeight)
+        }
+    }
+
+    override fun generateLayoutParams(attrs: AttributeSet?): LayoutParams {
+        return MarginLayoutParams(context, attrs)
+    }
 }
