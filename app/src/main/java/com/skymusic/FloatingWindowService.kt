@@ -71,8 +71,10 @@ class FloatingWindowService : Service() {
         val isNewData = intent?.getBooleanExtra("is_new_data", false) ?: false
         if (isNewData) {
             intent?.getSerializableExtra("song_data")?.let {
-                @Suppress("UNCHECKED_CAST"
+                // 【修复】：补上了缺失的右括号
+                @Suppress("UNCHECKED_CAST")
                 songData = it as ArrayList<Pair<Long, Int>>
+                
                 stopPlayback()
                 currentIndex = 0
                 
@@ -498,7 +500,6 @@ class FloatingWindowService : Service() {
             val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
             var displayAuthor = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知作者"
             
-            // 如果存在改编者，展示 原作者-改编者 格式
             val transcriber = transcriberRegex.find(content)?.groupValues?.getOrNull(1)
             if (!transcriber.isNullOrEmpty() && transcriber != "SkyMusic") {
                 displayAuthor = "$displayAuthor / $transcriber"
