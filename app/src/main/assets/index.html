@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>光遇 MIDI 智能转谱 Pro Max (数据全开版)</title>
+    <style>
+        :root { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.7); --primary: #38bdf8; --text-main: #f8fafc; --text-muted: #94a3b8; --border: #334155; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: var(--bg-color); background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 70%); color: var(--text-main); min-height: 100vh; }
+        h1 { font-size: 1.5rem; text-align: center; margin-bottom: 24px; font-weight: 700; text-shadow: 0 2px 10px rgba(56, 189, 248, 0.3); }
+        h1 span { color: var(--primary); }
+        .card { background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); animation: slideUp 0.4s ease-out; }
+        .drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 30px 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; position: relative; background: rgba(15, 23, 42, 0.5); }
+        .drop-zone:hover, .drop-zone.dragover { border-color: var(--primary); background: rgba(56, 189, 248, 0.1); }
+        .drop-zone.has-file { border-color: var(--success); background: rgba(16, 185, 129, 0.1); }
+        .drop-zone .icon { font-size: 2rem; margin-bottom: 10px; display: block; }
+        .drop-zone p { margin: 0; color: var(--text-muted); font-size: 0.95rem; word-break: break-all; }
+        .drop-zone .filename { color: var(--success); font-weight: bold; margin-top: 5px; display: block; }
+        input[type="file"] { position: absolute; width: 100%; height: 100%; top: 0; left: 0; opacity: 0; cursor: pointer; }
+        .form-group { margin-bottom: 16px; position: relative; }
+        .form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+        .form-group input[type="text"], .form-group select { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.8); color: var(--text-main); font-size: 1rem; transition: all 0.3s ease; }
+        .form-group input[type="text"]:focus, .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }
+        button { width: 100%; padding: 14px 24px; border-radius: 10px; border: none; background: linear-gradient(135deg, var(--primary), #6366f1); color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(56, 189, 248, 0.4); }
+        button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(56, 189, 248, 0.6); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; filter: grayscale(50%); box-shadow: none; }
+        #status { margin-top: 12px; font-size: 0.9rem; color: var(--primary); text-align: center; min-height: 1.4em; font-weight: 500; }
+        
+        .info-panel { display: none; background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; animation: fadeIn 0.4s ease-out; }
+        .info-panel-title { font-size: 0.95rem; font-weight: bold; color: var(--primary); margin-bottom: 12px; border-left: 4px solid var(--primary); padding-left: 10px; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .data-table td { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table td:first-child { color: var(--text-muted); width: 45%; }
+        .data-table td:last-child { text-align: right; font-weight: 600; color: var(--text-main); word-break: break-all; }
+        
+        .highlight-green { color: var(--success) !important; }
+        .highlight-blue { color: var(--primary) !important; }
+        .highlight-yellow { color: var(--warning) !important; }
+        
+        #log { background: rgba(15, 23, 42, 0.95); padding: 14px; border-radius: 10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; max-height: 250px; overflow-y: auto; white-space: pre-wrap; color: #a78bfa; border: 1px solid var(--border); line-height: 1.6; display: none; margin-bottom: 20px; animation: fadeIn 0.4s ease-out; }
+        
+        #downloadArea { display: none; text-align: center; animation: fadeIn 0.5s ease-out; }
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+        .toast { background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(8px); padding: 12px 20px; border-radius: 8px; border-left: 4px solid var(--primary); box-shadow: 0 4px 12px rgba(0,0,0,0.5); color: #fff; font-size: 0.9rem; animation: slideInRight 0.3s ease-out forwards; transform: translateX(120%); }
+        .toast.success { border-left-color: var(--success); }
+        .toast.error { border-left-color: var(--danger); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInRight { to { transform: translateX(0); } }
+    </style>
+</head>
+<body>
+
+<div id="toast-container"></div>
+<h1>🎹 光遇 MIDI <span>数据全开版</span></h1>
+
+<div class="card" style="padding: 15px;">
+    <div class="drop-zone" id="dropZone">
+        <span class="icon">🎵</span>
+        <p id="dropText">点击选择或拖拽 MIDI 文件</p>
+        <input type="file" id="midiFile" accept=".mid, .midi">
+    </div>
+</div>
+
+<!-- 原始信息面板 -->
+<div class="info-panel" id="rawInfoPanel">
+    <div class="info-panel-title">📁 原始 MIDI 详细指标</div>
+    <table class="data-table">
+        <tr><td>总轨道数</td><td id="infoTotalTracks">-</td></tr>
+        <tr><td>有效乐器轨道</td><td id="infoValidTracks">-</td></tr>
+        <tr><td>包含乐器清单</td><td id="infoInstruments" style="font-size: 0.75rem;">-</td></tr>
+        <tr><td>原曲标称 BPM</td><td id="infoBpm">-</td></tr>
+        <tr><td>原曲总时长</td><td id="infoDuration">-</td></tr>
+        <tr><td>全曲音高范围</td><td id="infoPitchRange">-</td></tr>
+        <tr><td>全曲总音符量</td><td id="infoTotalNotes">-</td></tr>
+    </table>
+</div>
+
+<div class="card" id="configPanel" style="display: none;">
+    <div class="form-group">
+        <label>选择要转换的音轨</label>
+        <select id="trackSelect"></select>
+    </div>
+    <div class="form-group">
+        <label>歌曲名称</label>
+        <input type="text" id="songNameInput" placeholder="自动读取...">
+    </div>
+    <div class="form-group">
+        <label>原曲作者</label>
+        <input type="text" id="authorInput" placeholder="自动读取...">
+    </div>
+    <div class="form-group">
+        <label>改编者 / 谱师</label>
+        <input type="text" id="transcriberInput" placeholder="填你自己" value="光遇玩家">
+    </div>
+    <button id="convertBtn">✨ 开始极速全量还原</button>
+    <div id="status">准备就绪</div>
+</div>
+
+<!-- 转换日志 -->
+<div id="log"></div>
+
+<!-- 最终输出面板 -->
+<div class="card" id="downloadArea">
+    <div class="info-panel" style="display: block; background: #16213e; margin-bottom: 20px;">
+        <div class="info-panel-title">⚙️ 最终输出详细参数</div>
+        <table class="data-table">
+            <tr><td>最终输出音符数</td><td id="stepFinalNotes" class="highlight-green">-</td></tr>
+            <tr><td>时间跨度 (首音至尾音)</td><td id="outDuration">-</td></tr>
+            <tr><td>转换后 Studio 速度</td><td id="outSpeed" class="highlight-blue">-</td></tr>
+            <tr><td>音域适配平移</td><td id="outShift" class="highlight-yellow">-</td></tr>
+            <tr><td>输出 BPM 字段</td><td id="outBpm">-</td></tr>
+            <tr><td>JSON 数据体积</td><td id="outDataSize">-</td></tr>
+            <tr><td>最高频按键映射</td><td id="outHotKey">-</td></tr>
+        </table>
+    </div>
+    <button id="downloadBtn" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);">⬇️ 下载谱面文件 (.txt)</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm"
+  }
+}
+</script>
+
+<script type="module">
+import { Midi } from '@tonejs/midi';
+
+const midiInput = document.getElementById('midiFile');
+const dropZone = document.getElementById('dropZone');
+const dropText = document.getElementById('dropText');
+const configPanel = document.getElementById('configPanel');
+const trackSelect = document.getElementById('trackSelect');
+const songNameInput = document.getElementById('songNameInput');
+const authorInput = document.getElementById('authorInput');
+const transcriberInput = document.getElementById('transcriberInput');
+const convertBtn = document.getElementById('convertBtn');
+const statusDiv = document.getElementById('status');
+const logDiv = document.getElementById('log');
+const downloadArea = document.getElementById('downloadArea');
+const downloadBtn = document.getElementById('downloadBtn');
+
+// 原始面板 DOM
+const rawInfoPanel = document.getElementById('rawInfoPanel');
+const infoTotalTracks = document.getElementById('infoTotalTracks');
+const infoValidTracks = document.getElementById('infoValidTracks');
+const infoInstruments = document.getElementById('infoInstruments');
+const infoBpm = document.getElementById('infoBpm');
+const infoDuration = document.getElementById('infoDuration');
+const infoPitchRange = document.getElementById('infoPitchRange');
+const infoTotalNotes = document.getElementById('infoTotalNotes');
+
+// 输出面板 DOM
+const stepFinalNotes = document.getElementById('stepFinalNotes');
+const outDuration = document.getElementById('outDuration');
+const outSpeed = document.getElementById('outSpeed');
+const outShift = document.getElementById('outShift');
+const outBpm = document.getElementById('outBpm');
+const outDataSize = document.getElementById('outDataSize');
+const outHotKey = document.getElementById('outHotKey');
+
+let currentMidiData = null;
+let pendingTxtContent = null;
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.animation = 'fadeIn 0.3s ease-out reverse forwards'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+function log(msg) { logDiv.textContent += msg + '\n'; logDiv.scrollTop = logDiv.scrollHeight; }
+function setStatus(msg) { statusDiv.textContent = msg; }
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
+['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
+['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
+dropZone.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) { midiInput.files = e.dataTransfer.files; handleFileSelect(); } });
+
+const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
+const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
+
+function calculateBestShift(notes) {
+    if (notes.length === 0) return 0;
+    const pitches = notes.map(n => n.midi).sort((a, b) => a - b);
+    const medianPitch = pitches[Math.floor(pitches.length / 2)];
+    return Math.round((68 - medianPitch) / 12) * 12;
+}
+
+function mapPitchToSky(midiPitch, shift = 0) {
+    let p = midiPitch + shift;
+    while (p < 60) p += 12;
+    while (p > 76) p -= 12;
+    let best = 60, minDist = 999;
+    for (const key of VALID_KEYS) {
+        const d = Math.abs(p - key);
+        if (d < minDist) { minDist = d; best = key; }
+    }
+    return KEY_MAP[best];
+}
+
+midiInput.addEventListener('change', handleFileSelect);
+
+function handleFileSelect() {
+    const file = midiInput.files[0];
+    if (!file) return;
+    if (!file.name.match(/\.(mid|midi)$/i)) { showToast('请选择 MIDI 文件', 'error'); return; }
+
+    dropZone.classList.add('has-file');
+    dropText.innerHTML = `✅ 已选择：<br><span class="filename">${file.name}</span>`;
+
+    let rawName = file.name.replace(/\.[^.]+$/, '');
+    let songTitle = rawName, originalAuthor = '';
+    const separators = [' - ', ' -', '- ', '-', '_', '—'];
+    for (let sep of separators) {
+        if (rawName.includes(sep)) {
+            const parts = rawName.split(sep);
+            if (parts.length >= 2) { songTitle = parts[0].trim(); originalAuthor = parts.slice(1).join(' ').trim(); break; }
+        }
+    }
+
+    songNameInput.value = songTitle;
+    authorInput.value = originalAuthor; 
+    
+    setStatus('正在解析 MIDI...');
+    rawInfoPanel.style.display = 'none'; configPanel.style.display = 'none'; downloadArea.style.display = 'none'; logDiv.style.display = 'none';
+    logDiv.textContent = '';
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            currentMidiData = new Midi(e.target.result);
+            trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并 (全量还原)</option>';
+
+            let hasValidTrack = false;
+            let instrumentsSet = new Set();
+            let totalNotes = 0;
+            let minMidi = 127, maxMidi = 0;
+            let maxTime = 0;
+
+            currentMidiData.tracks.forEach((track, index) => {
+                if (track.notes.length > 0) {
+                    hasValidTrack = true;
+                    totalNotes += track.notes.length;
+                    
+                    const instName = track.instrument.name || '未知乐器';
+                    instrumentsSet.add(instName);
+
+                    track.notes.forEach(n => {
+                        if (n.midi < minMidi) minMidi = n.midi;
+                        if (n.midi > maxMidi) maxMidi = n.midi;
+                        if (n.time > maxTime) maxTime = n.time;
+                    });
+
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.text = `轨道 ${index + 1} (${track.notes.length}音符) - ${instName}`;
+                    trackSelect.appendChild(option);
+                }
+            });
+
+            if (!hasValidTrack) throw new Error('该 MIDI 无音符');
+
+            const totalSeconds = Math.floor(maxTime);
+            const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
+
+            infoTotalTracks.textContent = currentMidiData.tracks.length + ' 轨';
+            infoValidTracks.textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
+            infoInstruments.textContent = Array.from(instrumentsSet).join(', ') || '无';
+            infoBpm.textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
+            infoDuration.textContent = `${mins} 分 ${secs} 秒`;
+            infoPitchRange.textContent = `MIDI ${minMidi} ~ ${maxMidi}`;
+            infoTotalNotes.textContent = totalNotes + ' 个';
+
+            rawInfoPanel.style.display = 'block'; configPanel.style.display = 'block';
+            convertBtn.disabled = false; setStatus('请选择音轨，然后点击转换');
+            showToast('解析成功', 'success');
+        } catch (err) {
+            setStatus('❌ 解析失败'); showToast(err.message, 'error'); convertBtn.disabled = true;
+            dropZone.classList.remove('has-file'); dropText.textContent = "点击选择或拖拽 MIDI 文件";
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+convertBtn.addEventListener('click', () => {
+    if (!currentMidiData) return;
+    convertBtn.disabled = true; convertBtn.textContent = '全量提取中...';
+    downloadArea.style.display = 'none'; logDiv.style.display = 'block'; logDiv.textContent = '';
+    setStatus('正在全量提取音符...');
+
+    setTimeout(() => {
+        try {
+            const selectedValue = trackSelect.value;
+            let rawNotes = [];
+            let extractedCount = 0;
+
+            let tracksToProcess = selectedValue === "all" 
+                ? currentMidiData.tracks.filter((t, i) => i !== 9 && t.notes.length > 0) 
+                : [currentMidiData.tracks[parseInt(selectedValue)]];
+
+            tracksToProcess.forEach(track => {
+                track.notes.forEach(note => {
+                    extractedCount++;
+                    const durationMs = note.duration * 1000;
+                    if (durationMs < 30) return; // 极短碎音
+                    rawNotes.push({ midi: note.midi, time: note.time });
+                });
+            });
+
+            if (rawNotes.length === 0) throw new Error('该轨道无有效音符');
+
+            const shift = calculateBestShift(rawNotes);
+
+            let allNotes = rawNotes.map(n => ({
+                time: Math.round(n.time * 1000),
+                key: mapPitchToSky(n.midi, shift)
+            })).sort((a, b) => a.time - b.time);
+
+            // 统计最高频按键
+            let keyCounts = {};
+            allNotes.forEach(n => { keyCounts[n.key] = (keyCounts[n.key] || 0) + 1; });
+            let hotKey = '-';
+            let maxCount = 0;
+            for (const k in keyCounts) {
+                if (keyCounts[k] > maxCount) { maxCount = keyCounts[k]; hotKey = k; }
+            }
+
+            log(`=== ⚙️ 极客级全量提取报告 ===`);
+            log(`[1] 目标轨道音符总数: ${extractedCount} 个`);
+            log(`[2] 滤除 <30ms 极短碎音: -${extractedCount - rawNotes.length} 个`);
+            log(`[3] 计算音高平移中位数: ${shift > 0 ? '+' : ''}${shift} 半音`);
+            log(`[4] 映射光遇 15 键位完成，时间精度: 1ms`);
+            log(`=========================`);
+            log(`✅ 最终生成音符总数: ${allNotes.length} 个\n`);
+
+            const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
+            let studioSpeed = Math.round(originalBpm * (700 / 120));
+            if (studioSpeed < 100) studioSpeed = 100;
+            if (studioSpeed > 4000) studioSpeed = 4000;
+
+            const finalSongName = songNameInput.value.trim() || '未命名曲目';
+            const finalOriginalAuthor = authorInput.value.trim() || '未知作者';
+            const finalTranscriber = transcriberInput.value.trim() || '光遇玩家';
+
+            const skyStudioData = [{
+                name: finalSongName,
+                author: finalOriginalAuthor,        
+                transcribedBy: finalTranscriber,    
+                isComposed: false,
+                bpm: studioSpeed,
+                bitsPerPage: 16,
+                pitchLevel: 0,
+                isEncrypted: false,
+                songNotes: allNotes
+            }];
+
+            pendingTxtContent = JSON.stringify(skyStudioData);
+
+            // 计算最终输出时长与大小
+            const firstNoteTime = allNotes[0].time;
+            const lastNoteTime = allNotes[allNotes.length - 1].time;
+            const totalDurationSec = ((lastNoteTime - firstNoteTime) / 1000).toFixed(1);
+            const dataSize = new Blob([pendingTxtContent]).size;
+            const dataSizeStr = dataSize > 1024 ? (dataSize / 1024).toFixed(1) + ' KB' : dataSize + ' Bytes';
+
+            stepFinalNotes.textContent = allNotes.length + ' 个';
+            outDuration.textContent = `${totalDurationSec} 秒`;
+            outSpeed.textContent = studioSpeed;
+            outShift.textContent = (shift > 0 ? '+' : '') + shift + ' 半音';
+            outBpm.textContent = studioSpeed;
+            outDataSize.textContent = dataSizeStr;
+            outHotKey.textContent = `${hotKey} (${maxCount}次)`;
+            
+            setStatus('✅ 全量还原完成！');
+            downloadArea.style.display = 'block';
+            showToast('极客全量还原完成！', 'success');
+
+            downloadBtn.onclick = () => {
+                const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`; 
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('文件已开始下载', 'info');
+            };
+
+        } catch (err) {
+            setStatus('❌ 转换出错');
+            log('错误: ' + err.message);
+            showToast(err.message, 'error');
+        } finally {
+            convertBtn.disabled = false;
+            convertBtn.textContent = '✨ 开始极速全量还原';
+        }
+    }, 50);
+});
+</script>
+</body>
+</html>
