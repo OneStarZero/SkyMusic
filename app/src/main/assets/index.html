@@ -394,23 +394,34 @@ convertBtn.addEventListener('click', () => {
             downloadArea.style.display = 'block';
             showToast('极客全量还原完成！', 'success');
 
-            downloadBtn.textContent = window.AndroidBridge ? "🚀 发送到 App 自动演奏" : "⬇️ 下载谱面文件 (.txt)";
-            downloadBtn.onclick = () => {
-                if (window.AndroidBridge) {
-                    const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
-                    window.AndroidBridge.startPlay(JSON.stringify(rawNotesOnly));
-                    showToast('已发送到 App 底层，请切回游戏', 'success');
-                } else {
-                    const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`; 
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    showToast('文件已开始下载', 'info');
-                }
-            };
+            // 替换原来下载 txt 的按钮逻辑
+downloadBtn.textContent = "🚀 发送并保存";
+downloadBtn.onclick = () => {
+    if (window.AndroidBridge) {
+        // 提取纯净的音符数组
+        const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
+        
+        // 组装完整的数据包：包含所有表单信息
+        const payload = {
+            name: songNameInput.value.trim() || "未命名",
+            author: authorInput.value.trim() || "未知作者",
+            transcriber: transcriberInput.value.trim() || "光遇玩家",
+            notes: rawNotesOnly
+        };
+
+        window.AndroidBridge.startPlay(JSON.stringify(payload));
+        showToast('已发送到 App 处理', 'success');
+    } else {
+        // 纯浏览器预览环境下的下载逻辑
+        const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${songNameInput.value.trim()} - ${authorInput.value.trim()}.txt`; 
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+};
 
         } catch (err) {
             setStatus('❌ 转换出错');
