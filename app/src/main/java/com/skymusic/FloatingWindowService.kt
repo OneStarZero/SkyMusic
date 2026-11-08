@@ -58,10 +58,12 @@ class FloatingWindowService : Service() {
     private lateinit var playerParams: WindowManager.LayoutParams
 
     private var currentPage = 0 // 0: 本地, 1: App发送
+    private var density = 1.0f
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        density = resources.displayMetrics.density
         loadKeyPositions()
         File(appSheetsPath).let { if (!it.exists()) it.mkdirs() }
         File(localSheetsPath).let { if (!it.exists()) it.mkdirs() }
@@ -71,7 +73,6 @@ class FloatingWindowService : Service() {
         val isNewData = intent?.getBooleanExtra("is_new_data", false) ?: false
         if (isNewData) {
             intent?.getSerializableExtra("song_data")?.let {
-                // 【修复】：补上了缺失的右括号
                 @Suppress("UNCHECKED_CAST")
                 songData = it as ArrayList<Pair<Long, Int>>
                 
@@ -101,18 +102,24 @@ class FloatingWindowService : Service() {
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
         val dm = resources.displayMetrics
 
+        // 核心优化：给所有悬浮窗添加硬件加速标志 FLAG_HARDWARE_ACCELERATED
+        val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+
+        // 1. 缩小 50%：宽度从 70% 缩到 35%，高度从 55% 缩到 28%
         panelParams = WindowManager.LayoutParams(
-            (dm.widthPixels * 0.7).toInt(), (dm.heightPixels * 0.55).toInt(), 
-            layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+            (dm.widthPixels * 0.35).toInt(), (dm.heightPixels * 0.28).toInt(), 
+            layoutType, baseFlags, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.CENTER }
 
+        // 2. 悬浮球从 80px 缩小到 60px
         ballParams = WindowManager.LayoutParams(
-            80, 80, layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+            60, 60, layoutType, baseFlags, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
 
+        // 3. 播放器胶囊缩小：宽度 45%，自适应高度
         playerParams = WindowManager.LayoutParams(
-            (dm.widthPixels * 0.85).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, 
-            layoutType, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+            (dm.widthPixels * 0.45).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, 
+            layoutType, baseFlags, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.BOTTOM or Gravity.START; x = 50; y = 100 }
 
         try {
@@ -128,9 +135,9 @@ class FloatingWindowService : Service() {
         isMiniMode = true; isPlayerMode = false
         floatView.removeAllViews()
         val ball = TextView(this).apply {
-            text = "✦"; textSize = 28f; gravity = Gravity.CENTER
+            text = "✦"; textSize = 22f; gravity = Gravity.CENTER
             setTextColor(Color.parseColor("#FDE047"))
-            setShadowLayer(10f, 0f, 0f, Color.parseColor("#EAB308")) 
+            setShadowLayer(8f, 0f, 0f, Color.parseColor("#EAB308")) 
         }
         val ballWrapper = FrameLayout(this).apply {
             setBackgroundColor(Color.parseColor("#AA0F172A"))
@@ -151,11 +158,14 @@ class FloatingWindowService : Service() {
         isMiniMode = false; isPlayerMode = false
         floatView.removeAllViews()
         
+        // 针对变小后的面板，缩小内边距
+        val pad = (10 * density).toInt()
+        
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#E6101418"))
             outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 20f) }
+                override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 15f) }
             }
             clipToOutline = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
@@ -164,19 +174,19 @@ class FloatingWindowService : Service() {
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(20, 20, 20, 20)
+            setPadding(pad, pad, pad, pad)
         }
         titleText = TextView(this).apply {
             text = if (initialPage == 0) "本地曲库" else "App 发送"
-            setTextColor(Color.WHITE); textSize = 16f
+            setTextColor(Color.WHITE); textSize = 13f
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
         val btnRefresh = TextView(this).apply {
-            text = "↻"; setTextColor(Color.WHITE); textSize = 22f; setPadding(20, 0, 20, 0)
+            text = "↻"; setTextColor(Color.WHITE); textSize = 18f; setPadding(pad, 0, pad, 0)
             setOnClickListener { showFullPanel(currentPage) } 
         }
         val btnClose = TextView(this).apply {
-            text = "✖"; setTextColor(Color.WHITE); textSize = 18f; setPadding(10, 0, 0, 0)
+            text = "✖"; setTextColor(Color.WHITE); textSize = 16f; setPadding(pad, 0, 0, 0)
             setOnClickListener { stopPlayback(); showMiniBall() }
         }
         topBar.addView(titleText); topBar.addView(btnRefresh); topBar.addView(btnClose)
@@ -185,41 +195,37 @@ class FloatingWindowService : Service() {
         rootLayout.addView(View(this).apply { setBackgroundColor(Color.parseColor("#334155")); layoutParams = LinearLayout.LayoutParams(-1, 1) })
 
         val scrollView = ScrollView(this)
-        listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(10, 10, 10, 10) }
+        listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
         scrollView.addView(listContainer)
         rootLayout.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
 
+        // 底部导航栏高度自适应
+        val bottomBarHeight = (45 * density).toInt()
         val bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Color.parseColor("#1A1F26"))
-            setPadding(0, 15, 0, 15)
+            setPadding(0, (5 * density).toInt(), 0, (5 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(-1, bottomBarHeight)
         }
-        val btnNavLocal = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setOnClickListener { currentPage = 0; showFullPanel(0) }
-        }
-        btnNavLocal.addView(TextView(this).apply { text = "📂"; textSize = 20f; gravity = Gravity.CENTER })
-        btnNavLocal.addView(TextView(this).apply { text = "本地曲库"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER })
-
-        val btnNavApp = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setOnClickListener { currentPage = 1; showFullPanel(1) }
-        }
-        btnNavApp.addView(TextView(this).apply { text = "☁️"; textSize = 20f; gravity = Gravity.CENTER })
-        btnNavApp.addView(TextView(this).apply { text = "App 发送"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER })
-
-        val btnNavSet = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setOnClickListener { 
-                if(checkAccessibility()) { showMiniBall(); startCalibration() } 
+        
+        fun createNavBtn(icon: String, label: String, onClick: () -> Unit): LinearLayout {
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                setOnClickListener { onClick() }
+                addView(TextView(this@FloatingWindowService).apply { text = icon; textSize = 16f; gravity = Gravity.CENTER })
+                addView(TextView(this@FloatingWindowService).apply { text = label; setTextColor(Color.WHITE); textSize = 10f; gravity = Gravity.CENTER })
             }
         }
-        btnNavSet.addView(TextView(this).apply { text = "🎯"; textSize = 20f; gravity = Gravity.CENTER })
-        btnNavSet.addView(TextView(this).apply { text = "校准键位"; setTextColor(Color.WHITE); textSize = 12f; gravity = Gravity.CENTER })
 
-        bottomBar.addView(btnNavLocal, LinearLayout.LayoutParams(0, -2, 1f))
-        bottomBar.addView(btnNavApp, LinearLayout.LayoutParams(0, -2, 1f))
-        bottomBar.addView(btnNavSet, LinearLayout.LayoutParams(0, -2, 1f))
+        val btnNavLocal = createNavBtn("📂", "本地") { currentPage = 0; showFullPanel(0) }
+        val btnNavApp = createNavBtn("☁️", "发送") { currentPage = 1; showFullPanel(1) }
+        val btnNavSet = createNavBtn("🎯", "校准") { 
+            if(checkAccessibility()) { showMiniBall(); startCalibration() } 
+        }
+
+        bottomBar.addView(btnNavLocal, LinearLayout.LayoutParams(0, -1, 1f))
+        bottomBar.addView(btnNavApp, LinearLayout.LayoutParams(0, -1, 1f))
+        bottomBar.addView(btnNavSet, LinearLayout.LayoutParams(0, -1, 1f))
         rootLayout.addView(bottomBar)
 
         floatView.addView(rootLayout)
@@ -243,8 +249,8 @@ class FloatingWindowService : Service() {
 
             if (filesList.isEmpty()) {
                 listContainer.addView(TextView(this).apply { 
-                    text = "未找到乐谱。\n请将 txt 文件放入：\n/storage/emulated/0/SkyMusic-OneStar/LocalSheets/"
-                    setTextColor(Color.GRAY); textSize = 13f; setPadding(20, 20, 20, 20) 
+                    text = "未找到乐谱。\n请将 txt 文件放入：\nSkyMusic-OneStar/LocalSheets/"
+                    setTextColor(Color.GRAY); textSize = 12f; setPadding(10, 10, 10, 10) 
                 })
                 return
             }
@@ -254,7 +260,7 @@ class FloatingWindowService : Service() {
             }
         } else {
             if (songData.isEmpty()) {
-                listContainer.addView(TextView(this).apply { text = "暂无 App 发送的谱面"; setTextColor(Color.GRAY); textSize = 13f; setPadding(20, 20, 20, 20) })
+                listContainer.addView(TextView(this).apply { text = "暂无 App 发送的谱面"; setTextColor(Color.GRAY); textSize = 12f; setPadding(10, 10, 10, 10) })
             } else {
                 addSongToList(currentSongName, currentAuthor, currentDuration, currentNotesCount) { preparePlay() }
             }
@@ -265,7 +271,7 @@ class FloatingWindowService : Service() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(10, 15, 10, 15)
+            setPadding((5 * density).toInt(), (10 * density).toInt(), (5 * density).toInt(), (10 * density).toInt())
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
 
@@ -276,22 +282,24 @@ class FloatingWindowService : Service() {
         }
         textLayout.addView(TextView(this).apply { 
             text = title
-            setTextColor(Color.WHITE); textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) 
+            setTextColor(Color.WHITE); textSize = 13f; setTypeface(null, android.graphics.Typeface.BOLD) 
+            setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END
         })
         textLayout.addView(TextView(this).apply { 
             text = "音符: $notes | $duration | $author"
-            setTextColor(Color.parseColor("#7B7B7B")); textSize = 13f; setPadding(0, 4, 0, 0) 
+            setTextColor(Color.parseColor("#7B7B7B")); textSize = 11f; setPadding(0, 2, 0, 0) 
+            setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END
         })
         card.addView(textLayout)
 
         val btnDelete = TextView(this).apply {
-            text = "🗑️"; textSize = 20f; setPadding(15, 0, 15, 0)
-            setOnClickListener { Toast.makeText(this@FloatingWindowService, "删除功能请在文件管理器中操作", Toast.LENGTH_SHORT).show() }
+            text = "🗑️"; textSize = 16f; setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+            setOnClickListener { Toast.makeText(this@FloatingWindowService, "请在文件管理器中删除", Toast.LENGTH_SHORT).show() }
         }
         card.addView(btnDelete)
 
         val btnPlay = TextView(this).apply {
-            text = "▶"; textSize = 22f; setTextColor(Color.WHITE); setPadding(15, 0, 15, 0)
+            text = "▶"; textSize = 18f; setTextColor(Color.WHITE); setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
             setOnClickListener { onClick() }
         }
         card.addView(btnPlay)
@@ -303,12 +311,14 @@ class FloatingWindowService : Service() {
         isMiniMode = false; isPlayerMode = true
         floatView.removeAllViews()
 
+        val pad = (12 * density).toInt()
+
         val playerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#EE0F172A"))
-            setPadding(20, 15, 20, 15)
+            setPadding(pad, pad, pad, pad)
             outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 20f) }
+                override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 15f) }
             }
             clipToOutline = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
@@ -316,15 +326,17 @@ class FloatingWindowService : Service() {
 
         val titleTv = TextView(this).apply {
             text = "《$currentSongName》 - $currentAuthor"
-            setTextColor(Color.WHITE); textSize = 13f; setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD)
             setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        tvStatus = TextView(this).apply { setTextColor(Color.parseColor("#38BDF8")); textSize = 11f; setPadding(0, 3, 0, 3) }
+        tvStatus = TextView(this).apply { setTextColor(Color.parseColor("#38BDF8")); textSize = 10f; setPadding(0, 2, 0, 2) }
         playerLayout.addView(titleTv)
         playerLayout.addView(tvStatus)
 
         seekBar = SeekBar(this).apply {
             max = 100
+            // 缩小 SeekBar 的默认内边距占位
+            setPadding(0, 0, 0, 0)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                     if (fromUser && songData.size > 1) { currentIndex = (progress / 100f * (songData.size - 1)).toInt(); updatePlayerUI() }
@@ -335,38 +347,45 @@ class FloatingWindowService : Service() {
         }
         playerLayout.addView(seekBar)
 
-        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val btnRow = LinearLayout(this).apply { 
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(-1, (35 * density).toInt()) // 统一控制按钮行高，代替原先的写死90
+        }
         
         btnPlayPause = Button(this).apply {
-            text = "▶"; textSize = 16f; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 10f }
+            text = "▶"; textSize = 13f; setTextColor(Color.WHITE)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 8f }
             setOnClickListener { togglePlayback() }
+            // 统一 Button 高度
+            layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
         }
-        btnRow.addView(btnPlayPause, LinearLayout.LayoutParams(0, 90, 1f))
+        btnRow.addView(btnPlayPause)
 
         val speedControl = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 10f }
-            setPadding(5, 0, 5, 0)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 8f }
+            setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+            layoutParams = LinearLayout.LayoutParams(0, -1, 1.6f).apply { setMargins((8 * density).toInt(), 0, (8 * density).toInt(), 0) }
         }
-        val btnSpeedDown = Button(this).apply { text = "-"; textSize = 14f; setTextColor(Color.WHITE); background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }; setOnClickListener { changeSpeed(-0.1f) } }
-        tvSpeed = TextView(this).apply { text = "1.0x"; setTextColor(Color.parseColor("#38BDF8")); textSize = 12f; gravity = Gravity.CENTER; setTypeface(null, android.graphics.Typeface.BOLD) }
-        val btnSpeedUp = Button(this).apply { text = "+"; textSize = 14f; setTextColor(Color.WHITE); background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }; setOnClickListener { changeSpeed(0.1f) } }
         
-        speedControl.addView(btnSpeedDown, LinearLayout.LayoutParams(60, 90))
+        val btnSpeedDown = Button(this).apply { text = "-"; textSize = 12f; setTextColor(Color.WHITE); background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }; setOnClickListener { changeSpeed(-0.1f) } }
+        tvSpeed = TextView(this).apply { text = "1.0x"; setTextColor(Color.parseColor("#38BDF8")); textSize = 11f; gravity = Gravity.CENTER; setTypeface(null, android.graphics.Typeface.BOLD) }
+        val btnSpeedUp = Button(this).apply { text = "+"; textSize = 12f; setTextColor(Color.WHITE); background = GradientDrawable().apply { setColor(Color.TRANSPARENT) }; setOnClickListener { changeSpeed(0.1f) } }
+        
+        speedControl.addView(btnSpeedDown, LinearLayout.LayoutParams((30 * density).toInt(), -1))
         speedControl.addView(tvSpeed, LinearLayout.LayoutParams(0, -2, 1f))
-        speedControl.addView(btnSpeedUp, LinearLayout.LayoutParams(60, 90))
+        speedControl.addView(btnSpeedUp, LinearLayout.LayoutParams((30 * density).toInt(), -1))
         
-        val speedParams = LinearLayout.LayoutParams(0, 90, 1.8f)
-        speedParams.setMargins(10, 0, 10, 0)
-        btnRow.addView(speedControl, speedParams)
+        btnRow.addView(speedControl)
 
         val btnClose = Button(this).apply {
-            text = "✖"; textSize = 14f; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 10f }
+            text = "✖"; textSize = 12f; setTextColor(Color.WHITE)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 8f }
             setOnClickListener { stopPlayback(); showFullPanel(currentPage) }
+            layoutParams = LinearLayout.LayoutParams(0, -1, 0.6f)
         }
-        btnRow.addView(btnClose, LinearLayout.LayoutParams(0, 90, 0.6f))
+        btnRow.addView(btnClose)
 
         playerLayout.addView(btnRow)
         floatView.addView(playerLayout)
@@ -382,7 +401,7 @@ class FloatingWindowService : Service() {
         seekBar.progress = progressPercent
         
         if (isPlaying) {
-            tvStatus.text = "播放中: ${currentIndex + 1} / ${songData.size}"
+            tvStatus.text = "播放: ${currentIndex + 1} / ${songData.size}"
             btnPlayPause.text = "⏸"
             (btnPlayPause.background as GradientDrawable).setColor(Color.parseColor("#EF4444"))
         } else {
@@ -451,7 +470,11 @@ class FloatingWindowService : Service() {
                     val nextInterval = songData[currentIndex].first - timeMs
                     handler.postDelayed(this, maxOf((nextInterval / currentSpeed).toLong(), 1L))
                 } else { isPlaying = false }
-                updatePlayerUI()
+                
+                // 核心性能优化：只针对 SeekBar 和状态做最轻量的 UI 更新，防止游戏内掉帧
+                val progressPercent = if (songData.size <= 1) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
+                seekBar.progress = progressPercent
+                tvStatus.text = "播放: ${currentIndex + 1} / ${songData.size}"
             }
         }
         handler.post(playRunnable!!)
@@ -463,6 +486,7 @@ class FloatingWindowService : Service() {
     }
 
     private fun setupDrag(view: View, params: WindowManager.LayoutParams) {
+        val touchSlop = (10 * density).toInt() // 自适应拖动防抖阈值
         view.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0; private var initialY = 0
             private var initialTouchX = 0f; private var initialTouchY = 0f
@@ -473,7 +497,7 @@ class FloatingWindowService : Service() {
                         initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; isDragging = false; return false
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (abs(event.rawX - initialTouchX) > 10 || abs(event.rawY - initialTouchY) > 10) isDragging = true
+                        if (abs(event.rawX - initialTouchX) > touchSlop || abs(event.rawY - initialTouchY) > touchSlop) isDragging = true
                         if (isDragging) {
                             params.x = initialX + (event.rawX - initialTouchX).toInt()
                             params.y = initialY + (event.rawY - initialTouchY).toInt()
@@ -559,22 +583,25 @@ class FloatingWindowService : Service() {
 
     private fun startCalibration() {
         val dm = resources.displayMetrics
+        val dotSize = (60 * density).toInt() // 校准点自适应大小
+        val halfSize = dotSize / 2
+
         if (keyPositions.isEmpty() || keyPositions[0].first == -1f) {
             for (i in 0 until 15) { keyPositions.add(Pair(dm.widthPixels * ((i % 5) + 1) / 6f, dm.heightPixels * ((i / 5) + 6) / 10f)) }
         }
         val calibrateViews = mutableListOf<TextView>()
         for (i in 0 until 15) {
-            val dot = TextView(this).apply { text = "${i + 1}"; setTextColor(Color.BLACK); setBackgroundColor(Color.parseColor("#80FFFFFF")); gravity = Gravity.CENTER; setPadding(20, 20, 20, 20) }
-            val params = WindowManager.LayoutParams(120, 120, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
+            val dot = TextView(this).apply { text = "${i + 1}"; setTextColor(Color.BLACK); setBackgroundColor(Color.parseColor("#80FFFFFF")); gravity = Gravity.CENTER }
+            val params = WindowManager.LayoutParams(dotSize, dotSize, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
             params.gravity = Gravity.TOP or Gravity.START
-            params.x = keyPositions[i].first.toInt() - 60; params.y = keyPositions[i].second.toInt() - 60
+            params.x = keyPositions[i].first.toInt() - halfSize; params.y = keyPositions[i].second.toInt() - halfSize
 
             dot.setOnTouchListener(object : View.OnTouchListener {
                 private var initialX = 0; private var initialY = 0; private var initialTouchX = 0f; private var initialTouchY = 0f
                 override fun onTouch(v: View?, event: MotionEvent): Boolean {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> { initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; return true }
-                        MotionEvent.ACTION_MOVE -> { params.x = initialX + (event.rawX - initialTouchX).toInt(); params.y = initialY + (event.rawY - initialTouchY).toInt(); windowManager.updateViewLayout(dot, params); keyPositions[i] = Pair((params.x + 60).toFloat(), (params.y + 60).toFloat()); return true }
+                        MotionEvent.ACTION_MOVE -> { params.x = initialX + (event.rawX - initialTouchX).toInt(); params.y = initialY + (event.rawY - initialTouchY).toInt(); windowManager.updateViewLayout(dot, params); keyPositions[i] = Pair((params.x + halfSize).toFloat(), (params.y + halfSize).toFloat()); return true }
                     }
                     return false
                 }
