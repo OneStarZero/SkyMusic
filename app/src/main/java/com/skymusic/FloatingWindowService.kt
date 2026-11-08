@@ -74,7 +74,7 @@ class FloatingWindowService : Service() {
         val dm = resources.displayMetrics
         
         // 计算基准尺寸
-        basePanelWidth = (dm.widthPixels * 0.45).toInt() // 稍微调大一点初始值，方便缩放
+        basePanelWidth = (dm.widthPixels * 0.45).toInt() 
         basePanelHeight = (dm.heightPixels * 0.35).toInt()
         basePlayerWidth = (dm.widthPixels * 0.55).toInt()
 
@@ -141,7 +141,6 @@ class FloatingWindowService : Service() {
         val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 scaleFactor *= detector.scaleFactor
-                // 限制缩放范围 0.5f ~ 2.0f
                 scaleFactor = scaleFactor.coerceIn(0.5f, 2.0f)
                 
                 if (isPanel) {
@@ -165,39 +164,37 @@ class FloatingWindowService : Service() {
         targetView.setOnTouchListener { v, event ->
             scaleDetector.onTouchEvent(event)
 
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    isDragging = false
-                    true // 必须返回 true 才能接收后续事件
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (event.pointerCount == 1) { // 单指拖动
-                        if (!isDragging && (abs(event.rawX - initialTouchX) > touchSlop || abs(event.rawY - initialTouchY) > touchSlop)) {
-                            isDragging = true
-                        }
-                        if (isDragging) {
-                            params.x = initialX + (event.rawX - initialTouchX).toInt()
-                            params.y = initialY + (event.rawY - initialTouchY).toInt()
-                            windowManager.updateViewLayout(floatView, params)
-                        }
+            // 使用 if-else 替代 when，防止 exhaustive 报错
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                initialX = params.x
+                initialY = params.y
+                initialTouchX = event.rawX
+                initialTouchY = event.rawY
+                isDragging = false
+                true
+            } else if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+                if (event.pointerCount == 1) {
+                    if (!isDragging && (abs(event.rawX - initialTouchX) > touchSlop || abs(event.rawY - initialTouchY) > touchSlop)) {
+                        isDragging = true
                     }
-                    else->true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (!isDragging && event.pointerCount == 1) {
-                        v.performClick() // 判定为点击
+                    if (isDragging) {
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(floatView, params)
                     }
-                    isDragging = false
-                    true
                 }
+                true
+            } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+                if (!isDragging && event.pointerCount == 1) {
+                    v.performClick()
+                }
+                isDragging = false
+                true
+            } else {
+                false
             }
         }
     }
-    // ==========================================
 
     private fun showMiniBall() {
         isMiniMode = true; isPlayerMode = false
@@ -239,7 +236,6 @@ class FloatingWindowService : Service() {
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
 
-        // 顶栏用于拖动和缩放
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -263,7 +259,6 @@ class FloatingWindowService : Service() {
         topBar.addView(titleText); topBar.addView(btnRefresh); topBar.addView(btnClose)
         rootLayout.addView(topBar)
 
-        // 关键：只对顶栏启用拖动和缩放，避免影响内部滑动列表
         enableDragAndScale(topBar, panelParams, isPanel = true)
 
         rootLayout.addView(View(this).apply { setBackgroundColor(Color.parseColor("#334155")); layoutParams = LinearLayout.LayoutParams(-1, 1) })
@@ -300,7 +295,6 @@ class FloatingWindowService : Service() {
 
         floatView.addView(rootLayout)
         
-        // 初始应用基准尺寸
         panelParams.width = (basePanelWidth * scaleFactor).toInt()
         panelParams.height = (basePanelHeight * scaleFactor).toInt()
         windowManager.updateViewLayout(floatView, panelParams)
@@ -388,7 +382,6 @@ class FloatingWindowService : Service() {
         topBar.addView(titleTv)
         playerLayout.addView(topBar)
 
-        // 关键：对播放器的顶栏启用拖动和双指缩放
         enableDragAndScale(topBar, playerParams, isPanel = false)
 
         tvStatus = TextView(this).apply { setTextColor(Color.parseColor("#38BDF8")); textSize = 10f; setPadding(0, 2, 0, 2) }
