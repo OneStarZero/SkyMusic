@@ -116,13 +116,14 @@ class FloatingWindowService : Service() {
         val dm = resources.displayMetrics
         val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
         
-        val panelWidthRatio = if (isLandscape) 0.60f else 0.55f
-        val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
+        // 核心修复：横屏下也保持和竖屏一样的娇小体量
+        val panelWidthRatio = if (isLandscape) 0.40f else 0.55f
+        val panelHeightRatio = if (isLandscape) 0.55f else 0.45f
 
         panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
         
-        playerParams.width = (dm.widthPixels * 0.45f).toInt()
+        playerParams.width = (dm.widthPixels * 0.40f).toInt()
         if (playerParams.y > dm.heightPixels - 200) {
             playerParams.y = (dm.heightPixels * 0.7).toInt()
         }
@@ -151,10 +152,11 @@ class FloatingWindowService : Service() {
             val dm = resources.displayMetrics
 
             val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
+            val panelWidthRatio = if (isLandscape) 0.40f else 0.55f
+            val panelHeightRatio = if (isLandscape) 0.55f else 0.45f
 
             panelParams = WindowManager.LayoutParams(
-                (dm.widthPixels * 0.55).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
+                (dm.widthPixels * panelWidthRatio).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { 
                 gravity = Gravity.TOP or Gravity.START
@@ -166,7 +168,7 @@ class FloatingWindowService : Service() {
                 60, 60, layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
 
-            val playerWidth = (dm.widthPixels * 0.45).toInt()
+            val playerWidth = (dm.widthPixels * 0.40).toInt()
             playerParams = WindowManager.LayoutParams(
                 playerWidth, WindowManager.LayoutParams.WRAP_CONTENT, 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
@@ -264,9 +266,10 @@ class FloatingWindowService : Service() {
         
         val dm = resources.displayMetrics
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
+        val panelWidthRatio = if (isLandscape) 0.40f else 0.55f
+        val panelHeightRatio = if (isLandscape) 0.55f else 0.45f
         
-        panelParams.width = (dm.widthPixels * 0.55).toInt()
+        panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
 
         val rootLayout = LinearLayout(this).apply {
@@ -537,7 +540,7 @@ class FloatingWindowService : Service() {
                     )
                     dialog.show()
                 } else {
-                    Toast.makeText(this@FloatingWindowService, "内存中的谱面无法删除", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@FloatingWindowService, "该谱面在内存中，退出 App 自动清除", Toast.LENGTH_SHORT).show()
                 }
             } 
         }
@@ -559,7 +562,7 @@ class FloatingWindowService : Service() {
         floatView.removeAllViews()
 
         val dm = resources.displayMetrics
-        playerParams.width = (dm.widthPixels * 0.45).toInt()
+        playerParams.width = (dm.widthPixels * 0.40).toInt()
 
         val playerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
