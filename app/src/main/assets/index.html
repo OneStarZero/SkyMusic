@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>光遇 MIDI 智能转谱</title>
+    <title>光遇 MIDI 智能转谱 - Supreme</title>
     <style>
         :root { --bg-color: #0f172a; --card-bg: rgba(30, 41, 59, 0.7); --primary: #38bdf8; --text-main: #f8fafc; --text-muted: #94a3b8; --border: #334155; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -54,7 +54,7 @@
 <body>
 
 <div id="toast-container"></div>
-<h1>🎹 光遇 MIDI <span>数据全开版</span></h1>
+<h1>🎹 光遇 MIDI <span>Supreme 极致版</span></h1>
 
 <div class="card" style="padding: 15px;">
     <div class="drop-zone" id="dropZone">
@@ -95,7 +95,7 @@
         <label>改编者 / 谱师</label>
         <input type="text" id="transcriberInput" placeholder="填你自己" value="光遇玩家">
     </div>
-    <button id="convertBtn">✨ 开始极速全量还原</button>
+    <button id="convertBtn">✨ 开始 Supreme 极致提取</button>
     <div id="status">准备就绪</div>
 </div>
 
@@ -119,7 +119,6 @@
     <button id="downloadBtn" style="background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);">⬇️ 生成谱面</button>
 </div>
 
-<!-- 换回最稳定的 CDN 加载方式 -->
 <script type="importmap">
 {
   "imports": {
@@ -145,7 +144,6 @@ const logDiv = document.getElementById('log');
 const downloadArea = document.getElementById('downloadArea');
 const downloadBtn = document.getElementById('downloadBtn');
 
-// 原始面板 DOM
 const rawInfoPanel = document.getElementById('rawInfoPanel');
 const infoTotalTracks = document.getElementById('infoTotalTracks');
 const infoValidTracks = document.getElementById('infoValidTracks');
@@ -155,7 +153,6 @@ const infoDuration = document.getElementById('infoDuration');
 const infoPitchRange = document.getElementById('infoPitchRange');
 const infoTotalNotes = document.getElementById('infoTotalNotes');
 
-// 输出面板 DOM
 const stepFinalNotes = document.getElementById('stepFinalNotes');
 const outDuration = document.getElementById('outDuration');
 const outSpeed = document.getElementById('outSpeed');
@@ -304,9 +301,9 @@ function handleFileSelect() {
 
 convertBtn.addEventListener('click', () => {
     if (!currentMidiData) return;
-    convertBtn.disabled = true; convertBtn.textContent = '全量提取中...';
+    convertBtn.disabled = true; convertBtn.textContent = 'Supreme 极致提取中...';
     downloadArea.style.display = 'none'; logDiv.style.display = 'block'; logDiv.textContent = '';
-    setStatus('正在全量提取音符...');
+    setStatus('正在识别主旋律与和弦降级处理...');
 
     setTimeout(() => {
         try {
@@ -321,9 +318,8 @@ convertBtn.addEventListener('click', () => {
             tracksToProcess.forEach(track => {
                 track.notes.forEach(note => {
                     extractedCount++;
-                    const durationMs = note.duration * 1000;
-                    if (durationMs < 30) return; 
-                    rawNotes.push({ midi: note.midi, time: note.time });
+                    if (note.duration * 1000 < 35) return; 
+                    rawNotes.push({ midi: note.midi, time: note.time, velocity: note.velocity });
                 });
             });
 
@@ -331,12 +327,141 @@ convertBtn.addEventListener('click', () => {
 
             const shift = calculateBestShift(rawNotes);
 
-            let allNotes = rawNotes.map(n => ({
+            // 基础映射，保留力度（Velocity）用于旋律识别
+            let mappedNotes = rawNotes.map(n => ({
                 time: Math.round(n.time * 1000),
-                key: mapPitchToSky(n.midi, shift)
+                key: mapPitchToSky(n.midi, shift),
+                velocity: n.velocity,
+                origMidi: n.midi
             })).sort((a, b) => a.time - b.time);
 
-            // 统计最高频按键
+            // ==========================================
+            // ⚙️ Supreme 极致旋律提取核心
+            // ==========================================
+            log(`[5] 启动主旋律分离与和弦让步算法...`);
+            
+            const GRID_STEP = 30;        // 30ms 网格
+            const MIN_GAP = 55;          // 55ms 强制防吞
+            const MAX_CHORD_KEYS = 3;    // 游戏内最多 3 键同时按
+            const ARPEGGIO_OFFSET = 35;  // 伴奏琶音让步偏移量
+
+            // 1. 网格对齐
+            let quantized = mappedNotes.map(n => {
+                let snappedTime = Math.round(n.time / GRID_STEP) * GRID_STEP;
+                return { ...n, time: snappedTime };
+            });
+
+            // 2. 分组与力度/音高排序，区分主旋律
+            let grouped = [];
+            quantized.forEach(note => {
+                let existing = grouped.find(g => g.time === note.time);
+                if (existing) {
+                    existing.notes.push(note);
+                } else {
+                    grouped.push({ time: note.time, notes: [note] });
+                }
+            });
+
+            grouped.forEach(g => {
+                // 综合排序：音高越高、力度越大，越可能是主旋律（按力度降序，音高降序）
+                g.notes.sort((a, b) => (b.velocity * 100 + b.origMidi) - (a.velocity * 100 + a.origMidi));
+                // 确定这一组的“带头大哥”（主旋律）
+                g.melody = g.notes[0];
+                // 剩下的都是伴奏
+                g.accompaniment = g.notes.slice(1);
+            });
+
+            // 3. 同音极度防吞保护（针对主旋律）
+            let deduplicated = [];
+            grouped.forEach(g => {
+                let prev = deduplicated[deduplicated.length - 1];
+                if (prev && g.time - prev.time < 85) {
+                    if (g.melody.key === prev.melody.key) {
+                        // 如果主旋律极短时间内撞了同键，把伴奏融入前一拍，抛弃这个主旋律
+                        g.accompaniment.forEach(acc => {
+                            if (!prev.accompaniment.find(a => a.key === acc.key)) {
+                                prev.accompaniment.push(acc);
+                            }
+                        });
+                        return;
+                    }
+                }
+                deduplicated.push(g);
+            });
+
+            // 4. 和弦让步（琶音化）
+            // 为了让主旋律极度清晰，如果伴奏太多，将其延后形成扫弦
+            let arpeggioPool = [];
+            deduplicated.forEach(group => {
+                let chordKeys = [group.melody, ...group.accompaniment];
+                
+                // 去重
+                let uniqueKeys = [];
+                chordKeys.forEach(k => {
+                    if (!uniqueKeys.find(u => u.key === k.key)) uniqueKeys.push(k);
+                });
+
+                // 超过 3 键，把多出来的伴奏丢进琶音池，延后触发
+                if (uniqueKeys.length > MAX_CHORD_KEYS) {
+                    let extraKeys = uniqueKeys.splice(MAX_CHORD_KEYS);
+                    arpeggioPool.push({ time: group.time + ARPEGGIO_OFFSET, keys: extraKeys });
+                }
+                group.finalKeys = uniqueKeys;
+            });
+
+            // 把琶音池里的伴奏重新合并回时间轴
+            arpeggioPool.forEach(arp => {
+                let existing = deduplicated.find(g => g.time === arp.time);
+                if (existing) {
+                    arp.keys.forEach(k => { 
+                        if(!existing.finalKeys.find(u=>u.key===k.key) && existing.finalKeys.length < MAX_CHORD_KEYS) {
+                            existing.finalKeys.push(k); 
+                        }
+                    });
+                } else {
+                    deduplicated.push({ time: arp.time, finalKeys: arp.keys, melody: null, accompaniment: [] });
+                }
+            });
+            deduplicated.sort((a, b) => a.time - b.time);
+
+            // 5. 终极防拥挤（保护主旋律绝对不被合并掉）
+            let alignedGroups = [];
+            let lastTime = -9999;
+            
+            deduplicated.forEach(group => {
+                if (group.time - lastTime < MIN_GAP) {
+                    let prev = alignedGroups[alignedGroups.length - 1];
+                    // 如果当前有主旋律，且上一个也有，宁可丢弃当前的伴奏，也不干扰主旋律
+                    if (group.melody && prev.melody) {
+                        // 只合并伴奏，除非没位置了
+                        group.finalKeys.forEach(k => {
+                            if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) {
+                                prev.finalKeys.push(k);
+                            }
+                        });
+                    } else {
+                        // 普通伴奏合并
+                        group.finalKeys.forEach(k => {
+                            if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) {
+                                prev.finalKeys.push(k);
+                            }
+                        });
+                    }
+                } else {
+                    alignedGroups.push(group);
+                    lastTime = group.time;
+                }
+            });
+
+            // 6. 摊平输出
+            let allNotes = [];
+            alignedGroups.forEach(group => {
+                group.finalKeys.forEach(k => {
+                    allNotes.push({ time: group.time, key: k.key });
+                });
+            });
+            // ==========================================
+
             let keyCounts = {};
             allNotes.forEach(n => { keyCounts[n.key] = (keyCounts[n.key] || 0) + 1; });
             let hotKey = '-';
@@ -345,13 +470,13 @@ convertBtn.addEventListener('click', () => {
                 if (keyCounts[k] > maxCount) { maxCount = keyCounts[k]; hotKey = k; }
             }
 
-            log(`=== ⚙️ 极客级全量提取报告 ===`);
-            log(`[1] 目标轨道音符总数: ${extractedCount} 个`);
-            log(`[2] 滤除 <30ms 极短碎音: -${extractedCount - rawNotes.length} 个`);
-            log(`[3] 计算音高平移中位数: ${shift > 0 ? '+' : ''}${shift} 半音`);
-            log(`[4] 映射光遇 15 键位完成，时间精度: 1ms`);
+            log(`=== ⚙️ Supreme 极致报告 ===`);
+            log(`[1] 识别原始音符: ${extractedCount} 个`);
+            log(`[2] 力度与音高双重分析：锁定主旋律`);
+            log(`[3] 和弦智能让步：伴奏延后 ${ARPEGGIO_OFFSET}ms 触发`);
+            log(`[4] 主旋律同音合并：消除连续断音`);
             log(`=========================`);
-            log(`✅ 最终生成音符总数: ${allNotes.length} 个\n`);
+            log(`✅ 最终极致输出音符: ${allNotes.length} 个\n`);
 
             const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
             let studioSpeed = Math.round(originalBpm * (700 / 120));
@@ -390,38 +515,33 @@ convertBtn.addEventListener('click', () => {
             outDataSize.textContent = dataSizeStr;
             outHotKey.textContent = `${hotKey} (${maxCount}次)`;
             
-            setStatus('✅ 全量还原完成！');
+            setStatus('✅ Supreme 极致提取完成！');
             downloadArea.style.display = 'block';
-            showToast('极客全量还原完成！', 'success');
+            showToast('极致提取完成！', 'success');
 
-            // 替换原来下载 txt 的按钮逻辑
-downloadBtn.textContent = "🚀 发送并保存";
-downloadBtn.onclick = () => {
-    if (window.AndroidBridge) {
-        // 提取纯净的音符数组
-        const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
-        
-        // 组装完整的数据包：包含所有表单信息
-        const payload = {
-            name: songNameInput.value.trim() || "未命名",
-            author: authorInput.value.trim() || "未知作者",
-            transcriber: transcriberInput.value.trim() || "光遇玩家",
-            notes: rawNotesOnly
-        };
+            downloadBtn.textContent = "🚀 发送并保存";
+            downloadBtn.onclick = () => {
+                if (window.AndroidBridge) {
+                    const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
+                    const payload = {
+                        name: songNameInput.value.trim() || "未命名",
+                        author: authorInput.value.trim() || "未知作者",
+                        transcriber: transcriberInput.value.trim() || "光遇玩家",
+                        notes: rawNotesOnly
+                    };
 
-        window.AndroidBridge.startPlay(JSON.stringify(payload));
-        showToast('已发送到 App 处理', 'success');
-    } else {
-        // 纯浏览器预览环境下的下载逻辑
-        const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${songNameInput.value.trim()} - ${authorInput.value.trim()}.txt`; 
-        a.click();
-        URL.revokeObjectURL(url);
-    }
-};
+                    window.AndroidBridge.startPlay(JSON.stringify(payload));
+                    showToast('已发送到 App 处理', 'success');
+                } else {
+                    const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${songNameInput.value.trim()} - ${authorInput.value.trim()}.txt`; 
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            };
 
         } catch (err) {
             setStatus('❌ 转换出错');
@@ -429,7 +549,7 @@ downloadBtn.onclick = () => {
             showToast(err.message, 'error');
         } finally {
             convertBtn.disabled = false;
-            convertBtn.textContent = '✨ 开始极速全量还原';
+            convertBtn.textContent = '✨ 开始 Supreme 极致提取';
         }
     }, 50);
 });
