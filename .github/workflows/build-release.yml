@@ -1,60 +1,65 @@
-name: Build SkyMusic Release APK
+name: Build SkyMusic Release
 
 on:
   push:
-    branches: [ "main" ]
-  workflow_dispatch: # 允许你随时手动点击按钮触发打包
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # 允许手动触发构建
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-    # 1. 检出仓库代码
-    - name: Checkout Repository
+    - name: Checkout Source
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 1 # 极速克隆，只拉取最新 commit
 
-    # 2. 配置 Java 17 环境
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
+        distribution: 'zulu'
         java-version: '17'
-        distribution: 'temurin'
 
-    # 3. 配置 Gradle 环境
+    # ⚡ 极速构建核心：官方 Gradle 缓存机制
     - name: Setup Gradle
-      uses: gradle/gradle-build-action@v3
+      uses: gradle/actions/setup-gradle@v3
       with:
-        gradle-version: 8.2
-        cache-disabled: true
+        cache-read-only: false # 允许写入缓存，大幅加速二次构建
 
-    # 4. 将 GitHub Secrets 中的 Base64 还原为真实的 .jks 文件
-    # 【注意】这里直接生成在项目根目录下
+    # 解密签名文件 (请在 GitHub 仓库 Settings -> Secrets 中配置)
     - name: Decode Keystore
       env:
-        ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
       run: |
-        echo "$ENCODED_STRING" | base64 --decode > mykey.jks
+        if [ -n "$KEYSTORE_BASE64" ]; then
+          echo "$KEYSTORE_BASE64" | base64 -d > app/release.keystore
+        fi
 
-    # 5. 生成 gradlew 并赋予执行权限（防止手机端漏传导致报错）
-    - name: Generate Gradle Wrapper
-      run: |
-        if [ ! -f gradlew ]; then gradle wrapper; fi
-        chmod +x gradlew
-
-    # 6. 编译正式版（Release）APK
     - name: Build Release APK
-      env:
-        # 对应 app/build.gradle.kts 里的环境变量读取
-        KEYSTORE_PATH: "../mykey.jks"  # 相对于 app 文件夹，返回上一层找到根目录的 jks
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      run: ./gradlew assembleRelease --stacktrace
+      run: |
+        chmod +x ./gradlew
+        ./gradlew assembleRelease \
+          --build-cache \
+          --parallel \
+          --configuration-cache \
+          -Pandroid.injected.signing.store.file=$(pwd)/app/release.keystore \
+          -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
+          -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
+          -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
-    # 7. 将编译好的正式版 APK 上传供你下载
-    - name: Upload Release APK
+    # 自动修改生成的 APK 文件名，方便直接下载
+    - name: Rename APK
+      run: |
+        cd app/build/outputs/apk/release/
+        mv *.apk SkyMusic-v0.0.6-Release.apk || true
+
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: SkyMusic-Release-APK
-        path: app/build/outputs/apk/release/app-release.apk
+        name: SkyMusic-Release-Artifact
+        path: app/build/outputs/apk/release/*.apk
+        retention-days: 7 # 产物只保留7天，节省 GitHub 存储配额
