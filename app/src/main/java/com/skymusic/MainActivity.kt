@@ -3,8 +3,11 @@ package com.skymusic
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
@@ -16,13 +19,37 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // ⚠️ 请确保你的布局文件名是 activity_main
-        setContentView(R.layout.activity_main)
         
-        webView = findViewById(R.id.webView)
-        // 配置你的 WebView 设置...
+        // 1. 用纯代码创建一个全屏的 WebView，不需要 R.layout.activity_main
+        val rootLayout = FrameLayout(this)
+        rootLayout.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
         
-        // 绑定 JS 桥接
+        webView = WebView(this)
+        webView.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+        rootLayout.addView(webView)
+        setContentView(rootLayout)
+
+        // 2. 配置 WebView
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+        }
+        
+        webView.webViewClient = WebViewClient()
+        
+        // 3. 加载 assets 里的网页
+        webView.loadUrl("file:///android_asset/index.html")
+        
+        // 4. 绑定 JS 桥接
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
     }
 
@@ -43,10 +70,9 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
 
-                // 1. 静默保存
+                // 静默覆盖保存到 AppSheets
                 saveFileToDirectory(targetFolder, name, author, fullJsonContent)
 
-                // 2. 组装播放数据
                 val notesList = ArrayList<Pair<Long, Int>>()
                 for (i in 0 until notesArray.length()) {
                     val note = notesArray.getJSONObject(i)
@@ -56,7 +82,6 @@ class MainActivity : AppCompatActivity() {
                     notesList.add(Pair(time, keyIndex))
                 }
 
-                // 3. 启动悬浮窗播放
                 val intent = Intent(this@MainActivity, FloatingWindowService::class.java).apply {
                     putExtra("is_new_data", true)
                     putExtra("song_data", notesList)
