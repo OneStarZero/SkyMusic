@@ -1,4 +1,4 @@
-name: Build SkyMusic Release
+name: SkyMusic Release Build
 
 on:
   workflow_dispatch: # 允许手动触发构建
