@@ -1,5 +1,6 @@
 package com.skymusic
 
+import android.app.AlertDialog
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -13,11 +14,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
-import android.util.AttributeSet
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.*
@@ -40,7 +39,6 @@ class FloatingWindowService : Service() {
     private var currentAuthor = ""
     private var currentDuration = "0:00"
     private var currentNotesCount = 0
-    private var currentTune = "未知调"
     private var currentBpm = "0" 
 
     private var isMiniMode = true 
@@ -69,6 +67,9 @@ class FloatingWindowService : Service() {
 
     private var cachedSongList: List<Triple<File, List<String>, String>>? = null
     private var refreshSessionId = 0
+    
+    private val playBgDrawable = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 6f }
+    private val pauseBgDrawable = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 6f }
 
     override fun onCreate() {
         super.onCreate()
@@ -92,7 +93,6 @@ class FloatingWindowService : Service() {
                     currentAuthor = intent.getStringExtra("song_author") ?: "未知作者"
                     currentNotesCount = songData.size
                     currentDuration = calculateDuration(songData)
-                    currentTune = intent.getStringExtra("song_tune") ?: "未知调"
                     currentBpm = intent.getStringExtra("song_bpm") ?: "0"
                     
                     if (!this::floatView.isInitialized) createFloatingWindow()
@@ -109,6 +109,33 @@ class FloatingWindowService : Service() {
         return START_STICKY
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!this::floatView.isInitialized) return
+
+        val dm = resources.displayMetrics
+        val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+
+        panelParams.width = (dm.widthPixels * 0.85).toInt()
+        panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
+        
+        playerParams.width = (dm.widthPixels * 0.55).toInt()
+        if (playerParams.y > dm.heightPixels - 200) {
+            playerParams.y = (dm.heightPixels * 0.7).toInt()
+        }
+
+        try {
+            when {
+                isMiniMode -> windowManager.updateViewLayout(floatView, ballParams)
+                isPlayerMode -> windowManager.updateViewLayout(floatView, playerParams)
+                else -> windowManager.updateViewLayout(floatView, panelParams)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     private fun createFloatingWindow() {
         try {
             floatView = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }
@@ -120,7 +147,6 @@ class FloatingWindowService : Service() {
             val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
 
-            // 统一坐标系，彻底解决拖拽反向 Bug
             panelParams = WindowManager.LayoutParams(
                 (dm.widthPixels * 0.85).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
@@ -134,7 +160,6 @@ class FloatingWindowService : Service() {
                 60, 60, layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
 
-            // 播放器面板变窄
             val playerWidth = (dm.widthPixels * 0.55).toInt()
             playerParams = WindowManager.LayoutParams(
                 playerWidth, WindowManager.LayoutParams.WRAP_CONTENT, 
@@ -153,7 +178,7 @@ class FloatingWindowService : Service() {
         }
     }
 
-    private fun enableDrag(view: View, params: WindowManager.LayoutParams) {
+    private fun enableDrag(view: View, params: WindowManager.LayoutParams, isLocked: () -> Boolean = { false }) {
         var initialX = 0
         var initialY = 0
         var initialTouchX = 0f
@@ -162,6 +187,8 @@ class FloatingWindowService : Service() {
         val touchSlop = 8 * density
 
         view.setOnTouchListener { v, event ->
+            if (isLocked()) return@setOnTouchListener false
+
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -323,7 +350,6 @@ class FloatingWindowService : Service() {
         listContainer.removeAllViews()
 
         if (page == 0) {
-            // 本地曲库只读 LocalSheets
             if (cachedSongList != null) {
                 renderLocalList(cachedSongList!!)
                 return
@@ -362,9 +388,9 @@ class FloatingWindowService : Service() {
                 }
             }
         } else {
-            // App 发送曲库：显示当前接收的 songData + 历史 AppSheets
             if (songData.isNotEmpty()) {
-                addSongToList(currentSongName, currentAuthor, currentDuration, currentNotesCount, currentTune, currentBpm) { preparePlay() }
+                // App 发送的谱面暂不涉及直接删除，传空 File 占位
+                addSongToList(currentSongName, currentAuthor, currentDuration, currentNotesCount, currentBpm, null) { preparePlay() }
             }
 
             val appFolder = File(appSheetsPath)
@@ -375,7 +401,7 @@ class FloatingWindowService : Service() {
             } else {
                 for (file in appFiles) {
                     val info = readLocalFileInfo(file)
-                    addSongToList(info[0], info[1], info[2], info[3].toInt(), info[4], info[5]) { directLoadLocalFile(file) }
+                    addSongToList(info[0], info[1], info[2], info[3].toInt(), info[5], file) { directLoadLocalFile(file) }
                 }
             }
         }
@@ -391,11 +417,12 @@ class FloatingWindowService : Service() {
             return
         }
         for ((file, info, _) in songInfoList) {
-            addSongToList(info[0], info[1], info[2], info[3].toInt(), info[4], info[5]) { directLoadLocalFile(file) }
+            addSongToList(info[0], info[1], info[2], info[3].toInt(), info[5], file) { directLoadLocalFile(file) }
         }
     }
 
-    private fun addSongToList(songName: String, author: String, duration: String, notes: Int, tune: String, bpm: String, onClick: () -> Unit) {
+    // 新增了 file: File? 参数，用于删除操作
+    private fun addSongToList(songName: String, author: String, duration: String, notes: Int, bpm: String, file: File?, onClick: () -> Unit) {
         if (!this::listContainer.isInitialized) return
 
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -431,7 +458,7 @@ class FloatingWindowService : Service() {
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val items = listOf(
-            "作者: $author", "音符: $notes", "BPM: $bpm", "时长: $duration", "调性: $tune", "倍速: $speedStr"
+            "作者: $author", "音符: $notes", "BPM: $bpm", "时长: $duration", "倍速: $speedStr"
         )
 
         var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -470,7 +497,34 @@ class FloatingWindowService : Service() {
         
         val btnDelete = TextView(this).apply { 
             text = "🗑️"; textSize = btnSize; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
-            setOnClickListener { Toast.makeText(this@FloatingWindowService, "请在文件管理器中删除", Toast.LENGTH_SHORT).show() } 
+            setOnClickListener { 
+                if (file != null) {
+                    // 弹出确认删除对话框
+                    AlertDialog.Builder(this@FloatingWindowService, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("确认删除")
+                        .setMessage("确定要删除该谱面吗？\n\n路径：\n${file.absolutePath}")
+                        .setPositiveButton("删除") { _, _ ->
+                            if (file.exists()) {
+                                if (file.delete()) {
+                                    Toast.makeText(this@FloatingWindowService, "已删除", Toast.LENGTH_SHORT).show()
+                                    // 刷新列表
+                                    if (currentPage == 0) {
+                                        cachedSongList = null
+                                        showFullPanel(0)
+                                    } else {
+                                        showFullPanel(1)
+                                    }
+                                } else {
+                                    Toast.makeText(this@FloatingWindowService, "删除失败，请检查权限", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                } else {
+                    Toast.makeText(this@FloatingWindowService, "内存中的谱面无法删除", Toast.LENGTH_SHORT).show()
+                }
+            } 
         }
         btnLayout.addView(btnDelete)
         
@@ -505,7 +559,6 @@ class FloatingWindowService : Service() {
             setPadding(0, 0, 0, 0)
         }
         
-        // 移除拖动文字
         val titleTv = TextView(this).apply {
             text = "《$currentSongName》"
             setTextColor(Color.WHITE); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD)
@@ -515,7 +568,7 @@ class FloatingWindowService : Service() {
         topBar.addView(titleTv)
         playerLayout.addView(topBar)
 
-        // 此处移除 enableDrag，播放中禁止拖动
+        enableDrag(playerLayout, playerParams) { isPlaying }
 
         tvStatus = TextView(this).apply { setTextColor(Color.parseColor("#38BDF8")); textSize = 10f; setPadding(0, 2, 0, 2) }
         playerLayout.addView(tvStatus)
@@ -525,10 +578,15 @@ class FloatingWindowService : Service() {
             layoutParams = LinearLayout.LayoutParams(-1, (25 * density).toInt())
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                    if (fromUser && songData.size > 1) { currentIndex = (progress / 100f * (songData.size - 1)).toInt(); updatePlayerUI() }
+                    if (fromUser && songData.size > 1) { 
+                        currentIndex = (progress / 100f * (songData.size - 1)).toInt()
+                        updatePlayerUI() 
+                    }
                 }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) { if (isPlaying) { stopPlayback(); togglePlayback() } }
+                override fun onStopTrackingTouch(sb: SeekBar?) { 
+                    if (isPlaying) { stopPlayback(); togglePlayback() } 
+                }
             })
         }
         playerLayout.addView(seekBar)
@@ -537,7 +595,7 @@ class FloatingWindowService : Service() {
         
         btnPlayPause = Button(this).apply {
             text = "▶"; textSize = 12f; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 6f }
+            background = playBgDrawable
             setOnClickListener { togglePlayback() }
             layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
         }
@@ -579,13 +637,13 @@ class FloatingWindowService : Service() {
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         if (isPlaying) {
-            tvStatus.text = "播放: ${currentIndex + 1} / ${songData.size}  |  $speedStr"
+            tvStatus.text = "播放: $currentIndex / ${songData.size}  |  $speedStr"
             btnPlayPause.text = "⏸"
-            (btnPlayPause.background as GradientDrawable).setColor(Color.parseColor("#EF4444"))
+            btnPlayPause.background = pauseBgDrawable
         } else {
             tvStatus.text = "已暂停  |  $speedStr"
             btnPlayPause.text = "▶"
-            (btnPlayPause.background as GradientDrawable).setColor(Color.parseColor("#10B981"))
+            btnPlayPause.background = playBgDrawable
         }
     }
 
@@ -619,8 +677,12 @@ class FloatingWindowService : Service() {
     private fun togglePlayback() {
         if (songData.isEmpty()) return
         if (!checkAccessibility()) return
-        if (isPlaying) stopPlayback() else {
-            if (currentIndex >= songData.size) currentIndex = 0
+        if (isPlaying) {
+            stopPlayback()
+        } else {
+            if (currentIndex >= songData.size) {
+                currentIndex = 0
+            }
             startPlayback()
         }
         updatePlayerUI()
@@ -651,69 +713,77 @@ class FloatingWindowService : Service() {
         isPlaying = true
         playRunnable = object : Runnable {
             override fun run() {
-                if (!isPlaying || currentIndex >= songData.size) { isPlaying = false; updatePlayerUI(); return }
+                if (!isPlaying || currentIndex >= songData.size) { 
+                    resetPlayState()
+                    return 
+                }
+                
                 val (timeMs, keyIndex) = songData[currentIndex]
                 val point = keyPositions.getOrNull(keyIndex) ?: Pair(0f, 0f)
                 if (point.first != -1f) SkyAccessibilityService.instance?.clickPoints(listOf(point))
+                
                 currentIndex++
+                updatePlayerUI() 
+
                 if (currentIndex < songData.size) {
                     val nextInterval = songData[currentIndex].first - timeMs
                     handler.postDelayed(this, maxOf((nextInterval / currentSpeed).toLong(), 1L))
-                } else { isPlaying = false }
-                
-                val progressPercent = if (songData.size <= 1) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
-                if (this@FloatingWindowService::seekBar.isInitialized) {
-                    seekBar.progress = progressPercent
-                }
-                
-                val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-                if (this@FloatingWindowService::tvStatus.isInitialized) {
-                    tvStatus.text = "播放: ${currentIndex + 1} / ${songData.size}  |  $speedStr"
+                } else {
+                    resetPlayState()
                 }
             }
         }
         handler.post(playRunnable!!)
     }
 
+    private fun resetPlayState() {
+        stopPlayback()
+        currentIndex = 0
+        handler.post {
+            if (isPlayerMode && this::seekBar.isInitialized) {
+                updatePlayerUI()
+            }
+        }
+    }
+
     private fun stopPlayback() {
         isPlaying = false
-        if (playRunnable != null) { handler.removeCallbacks(playRunnable!!); playRunnable = null }
+        if (playRunnable != null) { 
+            handler.removeCallbacks(playRunnable!!)
+            playRunnable = null 
+        }
     }
 
     private fun readLocalFileInfo(file: File): List<String> {
         try {
-            var content = file.readText(Charsets.UTF_8)
-            if (content.contains("\u0000")) content = file.readText(Charsets.UTF_16LE)
-            
-            val timeRegex = Regex("\"time\"\\s*:\\s*(\\d+)")
+            val content = if (file.length() > 50 * 1024) {
+                file.inputStream().bufferedReader().use { it.readText().take(15000) }
+            } else {
+                var text = file.readText(Charsets.UTF_8)
+                if (text.contains("\u0000")) text = file.readText(Charsets.UTF_16LE)
+                text
+            }
+
             val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
-            val transcriberRegex = Regex("\"transcribedBy\"\\s*:\\s*\"([^\"]+)\"")
             val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"")
-            val tuneRegex = Regex("\"tune\"\\s*:\\s*\"([^\"]+)\"") 
             val bpmRegex = Regex("\"bpm\"\\s*:\\s*(\\d+)")
-            
-            val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
             
             var songName = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
             var displayAuthor = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
-            var tune = tuneRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知调"
             var bpm = bpmRegex.find(content)?.groupValues?.getOrNull(1) ?: "0"
             
-            val transcriber = transcriberRegex.find(content)?.groupValues?.getOrNull(1)
-            if (!transcriber.isNullOrEmpty() && transcriber != "SkyMusic") {
-                displayAuthor = "$displayAuthor / $transcriber"
-            }
             if (displayAuthor == "Unknown") displayAuthor = "未知作者"
 
-            val notesCount = timeMatches.size
+            val notesCount = Regex("\"time\"").findAll(content).count()
             val duration = if (notesCount > 0) {
-                val totalSec = timeMatches.maxOrNull()!! / 1000
-                String.format(Locale.getDefault(), "%d:%02d", totalSec / 60, totalSec % 60)
+                 val lastTimeStr = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(content).lastOrNull()?.groupValues?.getOrNull(1) ?: "0"
+                 val totalSec = lastTimeStr.toLong() / 1000
+                 String.format(Locale.getDefault(), "%d:%02d", totalSec / 60, totalSec % 60)
             } else "0:00"
 
-            return listOf(songName, displayAuthor, duration, notesCount.toString(), tune, bpm)
+            return listOf(songName, displayAuthor, duration, notesCount.toString(), "", bpm)
         } catch (e: Exception) {
-            return listOf(file.nameWithoutExtension, "未知作者", "0:00", "0", "未知调", "0")
+            return listOf(file.nameWithoutExtension, "未知作者", "0:00", "0", "", "0")
         }
     }
 
@@ -732,7 +802,6 @@ class FloatingWindowService : Service() {
                 val keyRegex = Regex("\"key\"\\s*:\\s*\"1Key(\\d+)\"")
                 val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
                 val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"")
-                val tuneRegex = Regex("\"tune\"\\s*:\\s*\"([^\"]+)\"")
                 val bpmRegex = Regex("\"bpm\"\\s*:\\s*(\\d+)")
                 
                 val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
@@ -740,7 +809,6 @@ class FloatingWindowService : Service() {
                 
                 var nameMatch = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
                 var authorMatch = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
-                var tuneMatch = tuneRegex.find(content)?.groupValues?.getOrNull(1) ?: "未知调"
                 var bpmMatch = bpmRegex.find(content)?.groupValues?.getOrNull(1) ?: "0"
                 if (authorMatch == "Unknown") authorMatch = "未知作者"
                 
@@ -759,7 +827,6 @@ class FloatingWindowService : Service() {
                     currentIndex = 0
                     currentSongName = nameMatch
                     currentAuthor = authorMatch
-                    currentTune = tuneMatch
                     currentBpm = bpmMatch
                     currentNotesCount = songData.size
                     currentDuration = calculateDuration(songData)
@@ -823,8 +890,12 @@ class FloatingWindowService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy(); stopPlayback()
-        if (this::floatView.isInitialized) { try { windowManager.removeView(floatView) } catch (e: Exception) {} }
+        super.onDestroy()
+        stopPlayback()
+        handler.removeCallbacksAndMessages(null)
+        if (this::floatView.isInitialized) { 
+            try { windowManager.removeView(floatView) } catch (e: Exception) {} 
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
