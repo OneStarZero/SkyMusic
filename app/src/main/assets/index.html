@@ -3,120 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SkyMusic 智能转谱 - Supreme</title>
+    <title>光遇 MIDI 智能转谱 - Supreme</title>
     <style>
-        /* 全局赛博朋克暗黑主题 */
         :root { 
-            --bg-color: #0b1120;
-            --card-bg: rgba(30, 41, 59, 0.65); 
-            --primary: #0ea5e9;
-            --primary-glow: rgba(14, 165, 233, 0.5);
+            --bg-color: #0f172a; 
+            --card-bg: rgba(30, 41, 59, 0.7); 
+            --primary: #38bdf8; 
             --text-main: #f8fafc; 
             --text-muted: #94a3b8; 
-            --border: rgba(71, 85, 105, 0.5); 
+            --border: #334155; 
             --success: #10b981; 
             --warning: #f59e0b; 
             --danger: #ef4444; 
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
             padding: 20px; max-width: 600px; margin: 0 auto; 
             background: var(--bg-color); 
-            background-image: 
-                radial-gradient(circle at 15% 50%, rgba(14, 165, 233, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.15) 0%, transparent 50%);
+            background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 70%); 
             color: var(--text-main); min-height: 100vh; 
         }
-        
-        h1 { font-size: 1.6rem; text-align: center; margin-bottom: 24px; font-weight: 800; letter-spacing: 1px; }
-        h1 span { color: var(--primary); text-shadow: 0 0 15px var(--primary-glow); }
+        h1 { font-size: 1.5rem; text-align: center; margin-bottom: 24px; font-weight: 700; text-shadow: 0 2px 10px rgba(56, 189, 248, 0.3); }
+        h1 span { color: var(--primary); }
         
         .card { 
-            background: var(--card-bg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            background: var(--card-bg); backdrop-filter: blur(12px); 
             border: 1px solid var(--border); border-radius: 16px; 
             padding: 20px; margin-bottom: 20px; 
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,255,255,0.05); 
-            animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); 
+            animation: slideUp 0.4s ease-out; 
         }
         
         .drop-zone { 
-            border: 2px dashed rgba(148, 163, 184, 0.3); border-radius: 12px; padding: 35px 20px; 
+            border: 2px dashed var(--border); border-radius: 12px; padding: 30px 20px; 
             text-align: center; cursor: pointer; transition: all 0.3s ease; 
-            position: relative; background: rgba(15, 23, 42, 0.4); 
+            position: relative; background: rgba(15, 23, 42, 0.5); 
         }
-        .drop-zone:hover, .drop-zone.dragover { 
-            border-color: var(--primary); background: rgba(14, 165, 233, 0.08); box-shadow: inset 0 0 20px rgba(14, 165, 233, 0.1);
-        }
-        .drop-zone.has-file { border-color: var(--success); background: rgba(16, 185, 129, 0.08); }
-        .drop-zone .icon { font-size: 2.2rem; margin-bottom: 12px; display: block; filter: drop-shadow(0 0 8px var(--primary-glow)); transition: transform 0.3s; }
-        .drop-zone:hover .icon { transform: translateY(-5px) scale(1.05); }
-        .drop-zone p { margin: 0; color: var(--text-muted); font-size: 0.95rem; font-weight: 500; }
-        .drop-zone .filename { color: var(--success); font-weight: bold; margin-top: 8px; display: block; font-size: 0.9rem; word-break: break-all; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: var(--primary); background: rgba(56, 189, 248, 0.1); }
+        .drop-zone.has-file { border-color: var(--success); background: rgba(16, 185, 129, 0.1); }
+        .drop-zone .icon { font-size: 2rem; margin-bottom: 10px; display: block; }
+        .drop-zone p { margin: 0; color: var(--text-muted); font-size: 0.95rem; word-break: break-all; }
+        .drop-zone .filename { color: var(--success); font-weight: bold; margin-top: 5px; display: block; }
         input[type="file"] { position: absolute; width: 100%; height: 100%; top: 0; left: 0; opacity: 0; cursor: pointer; }
         
-        .form-group { margin-bottom: 18px; position: relative; }
-        .form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; letter-spacing: 0.5px; }
+        .form-group { margin-bottom: 16px; position: relative; }
+        .form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
         .form-group input[type="text"], .form-group select { 
-            width: 100%; padding: 14px 16px; border-radius: 10px; 
-            border: 1px solid rgba(71, 85, 105, 0.6); background: rgba(15, 23, 42, 0.7); 
-            color: var(--text-main); font-size: 0.95rem; transition: all 0.3s ease; 
+            width: 100%; padding: 12px 14px; border-radius: 10px; 
+            border: 1px solid var(--border); background: rgba(15, 23, 42, 0.8); 
+            color: var(--text-main); font-size: 1rem; transition: all 0.3s ease; 
         }
         .form-group input[type="text"]:focus, .form-group select:focus { 
-            outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2); background: rgba(15, 23, 42, 0.9);
+            outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); 
         }
         
         button { 
-            width: 100%; padding: 15px 24px; border-radius: 10px; border: none; 
-            background: linear-gradient(135deg, #0ea5e9, #4f46e5); 
+            width: 100%; padding: 14px 24px; border-radius: 10px; border: none; 
+            background: linear-gradient(135deg, var(--primary), #6366f1); 
             color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; 
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); 
-            box-shadow: 0 4px 15px rgba(14, 165, 233, 0.4); letter-spacing: 1px;
+            transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(56, 189, 248, 0.4); 
         }
-        button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(14, 165, 233, 0.6); }
-        button:active:not(:disabled) { transform: scale(0.97); box-shadow: 0 2px 10px rgba(14, 165, 233, 0.4); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(100%); box-shadow: none; }
-        
-        #status { margin-top: 14px; font-size: 0.9rem; color: var(--primary); text-align: center; min-height: 1.4em; font-weight: 600; text-shadow: 0 0 8px var(--primary-glow); }
+        button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(56, 189, 248, 0.6); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; filter: grayscale(50%); box-shadow: none; }
+        #status { margin-top: 12px; font-size: 0.9rem; color: var(--primary); text-align: center; min-height: 1.4em; font-weight: 500; }
         
         .info-panel { 
-            display: none; background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border); 
-            border-radius: 12px; padding: 18px; margin-bottom: 20px; animation: fadeIn 0.4s ease-out; 
+            display: none; background: rgba(15, 23, 42, 0.85); 
+            border: 1px solid var(--border); border-radius: 12px; 
+            padding: 16px; margin-bottom: 20px; animation: fadeIn 0.4s ease-out; 
         }
-        .info-panel-title { font-size: 0.95rem; font-weight: bold; color: var(--primary); margin-bottom: 14px; border-left: 4px solid var(--primary); padding-left: 10px; letter-spacing: 0.5px; }
+        .info-panel-title { 
+            font-size: 0.95rem; font-weight: bold; color: var(--primary); 
+            margin-bottom: 12px; border-left: 4px solid var(--primary); padding-left: 10px; 
+        }
         .data-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        .data-table td { padding: 10px 0; border-bottom: 1px solid rgba(71, 85, 105, 0.3); }
+        .data-table td { padding: 8px 0; border-bottom: 1px dashed var(--border); }
         .data-table tr:last-child td { border-bottom: none; }
         .data-table td:first-child { color: var(--text-muted); width: 45%; }
         .data-table td:last-child { text-align: right; font-weight: 600; color: var(--text-main); word-break: break-all; }
         
-        .highlight-green { color: var(--success) !important; text-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
-        .highlight-blue { color: var(--primary) !important; text-shadow: 0 0 10px var(--primary-glow); }
-        .highlight-yellow { color: var(--warning) !important; text-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+        .highlight-green { color: var(--success) !important; }
+        .highlight-blue { color: var(--primary) !important; }
+        .highlight-yellow { color: var(--warning) !important; }
         
         #log { 
-            background: #000000; padding: 16px; border-radius: 12px; 
+            background: rgba(15, 23, 42, 0.95); padding: 14px; border-radius: 10px; 
             font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; 
             max-height: 250px; overflow-y: auto; white-space: pre-wrap; color: #a78bfa; 
-            border: 1px solid #1e293b; line-height: 1.6; display: none; 
-            margin-bottom: 20px; animation: fadeIn 0.4s ease-out; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            border: 1px solid var(--border); line-height: 1.6; display: none; 
+            margin-bottom: 20px; animation: fadeIn 0.4s ease-out; 
         }
         
-        #downloadArea { display: none; text-align: center; animation: fadeIn 0.6s ease-out; }
-        #actionButtonsContainer button { width: 49%; }
+        #downloadArea { display: none; text-align: center; animation: fadeIn 0.5s ease-out; }
         
-        #toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; width: 90%; max-width: 400px; pointer-events: none; }
+        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
         .toast { 
-            background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(10px); padding: 12px 24px; 
-            border-radius: 30px; border-left: 4px solid var(--primary); box-shadow: 0 8px 25px rgba(0,0,0,0.5); 
-            color: #fff; font-size: 0.9rem; font-weight: 500; animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(-20px); text-align: center;
+            background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(8px); 
+            padding: 12px 20px; border-radius: 8px; border-left: 4px solid var(--primary); 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); color: #fff; font-size: 0.9rem; 
+            animation: slideInRight 0.3s ease-out forwards; transform: translateX(120%); 
         }
-        .toast.success { border-left-color: var(--success); color: var(--success); }
-        .toast.error { border-left-color: var(--danger); color: var(--danger); }
+        .toast.success { border-left-color: var(--success); }
+        .toast.error { border-left-color: var(--danger); }
         
-        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideDown { to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideInRight { to { transform: translateX(0); } }
     </style>
 </head>
 <body>
@@ -146,10 +139,22 @@
 </div>
 
 <div class="card" id="configPanel" style="display: none;">
-    <div class="form-group"><label>选择要转换的音轨</label><select id="trackSelect"></select></div>
-    <div class="form-group"><label>歌曲名称</label><input type="text" id="songNameInput" placeholder="自动读取..."></div>
-    <div class="form-group"><label>原曲作者</label><input type="text" id="authorInput" placeholder="自动读取..."></div>
-    <div class="form-group"><label>改编者 / 谱师</label><input type="text" id="transcriberInput" placeholder="填你自己" value="光遇玩家"></div>
+    <div class="form-group">
+        <label>选择要转换的音轨</label>
+        <select id="trackSelect"></select>
+    </div>
+    <div class="form-group">
+        <label>歌曲名称</label>
+        <input type="text" id="songNameInput" placeholder="自动读取...">
+    </div>
+    <div class="form-group">
+        <label>原曲作者</label>
+        <input type="text" id="authorInput" placeholder="自动读取...">
+    </div>
+    <div class="form-group">
+        <label>改编者 / 谱师</label>
+        <input type="text" id="transcriberInput" placeholder="填你自己" value="光遇玩家">
+    </div>
     <button id="convertBtn">✨ 开始 Supreme 极致提取</button>
     <div id="status">准备就绪</div>
 </div>
@@ -322,10 +327,15 @@ function handleFileSelect() {
             const totalSeconds = Math.floor(maxTime);
             const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
 
+            let bpmVal = 120;
+            if (currentMidiData.header.tempos && currentMidiData.header.tempos.length > 0) {
+                bpmVal = Math.round(currentMidiData.header.tempos[0].bpm);
+            }
+
             infoTotalTracks.textContent = currentMidiData.tracks.length + ' 轨';
             infoValidTracks.textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
             infoInstruments.textContent = Array.from(instrumentsSet).join(', ') || '无';
-            infoBpm.textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
+            infoBpm.textContent = bpmVal;
             infoDuration.textContent = `${mins} 分 ${secs} 秒`;
             infoPitchRange.textContent = `MIDI ${minMidi} ~ ${maxMidi}`;
             infoTotalNotes.textContent = totalNotes + ' 个';
@@ -354,137 +364,92 @@ function handleFileSelect() {
 
 convertBtn.addEventListener('click', () => {
     if (!currentMidiData) return;
-    convertBtn.disabled = true; convertBtn.textContent = 'Supreme 极致提取中...';
+    convertBtn.disabled = true; convertBtn.textContent = '净化提取中...';
     downloadArea.style.display = 'none'; logDiv.style.display = 'block'; logDiv.textContent = '';
-    setStatus('正在识别主旋律与和弦降级处理...');
+    setStatus('正在清洗长音与重复轨道...');
 
     setTimeout(() => {
         try {
             const selectedValue = trackSelect.value;
             let rawNotes = [];
             let extractedCount = 0;
+            let longNoteCount = 0;
+            let duplicateCount = 0;
 
             let tracksToProcess = selectedValue === "all" 
                 ? currentMidiData.tracks.filter((t, i) => i !== 9 && t.notes.length > 0) 
                 : [currentMidiData.tracks[parseInt(selectedValue)]];
 
+            // 唯一音符哈希表，用于去重
+            let seenKeys = new Set();
+
             tracksToProcess.forEach(track => {
                 track.notes.forEach(note => {
                     extractedCount++;
-                    if (note.duration * 1000 < 20) return; // 进一步放宽碎音限制
-                    rawNotes.push({ midi: note.midi, time: note.time, velocity: note.velocity });
+                    
+                    // 1. 去除长音（过滤掉持续时间超过 1000ms 的音符）
+                    if (note.duration * 1000 > 1000) {
+                        longNoteCount++;
+                        return;
+                    }
+
+                    const timeMs = Math.round(note.time * 1000);
+                    const mappedKey = mapPitchToSky(note.midi, 0); 
+                    
+                    // 2. 去重：如果相同的键在极短时间（50ms内）已经被触发过，则跳过
+                    // 这里我们需要一个更精确的去重逻辑。先建立一个临时对象来处理后面。
+                    rawNotes.push({ time: timeMs, midi: note.midi, velocity: note.velocity, mappedKey: mappedKey });
                 });
             });
 
             if (rawNotes.length === 0) throw new Error('该轨道无有效音符');
 
-            const shift = calculateBestShift(rawNotes);
+            // 核心去重逻辑：扫描所有音符，剔除那些在 80ms 内完全重复的键（解决多轨重叠问题）
+            rawNotes.sort((a, b) => a.time - b.time);
+            let uniqueNotes = [];
+            let lastPlayed = {}; // 记录每个键最后一次触发的时间
 
-            let mappedNotes = rawNotes.map(n => ({
-                time: Math.round(n.time * 1000),
+            rawNotes.forEach(note => {
+                let key = note.mappedKey;
+                if (lastPlayed[key] !== undefined && note.time - lastPlayed[key] < 80) {
+                    duplicateCount++;
+                    return; // 重复了，丢弃
+                }
+                uniqueNotes.push(note);
+                lastPlayed[key] = note.time;
+            });
+
+            const shift = calculateBestShift(uniqueNotes);
+            
+            let mappedNotes = uniqueNotes.map(n => ({
+                time: n.time,
                 key: mapPitchToSky(n.midi, shift),
                 velocity: n.velocity,
                 origMidi: n.midi
-            })).sort((a, b) => a.time - b.time);
+            }));
 
-            log(`[5] 启动主旋律分离与和弦让步算法...`);
+            // 此时我们不再做大量的合并与压缩，保留几乎所有可用音符
+            log(`[1] 原始识别: ${extractedCount} 个`);
+            log(`[2] 剔除长音: -${longNoteCount} 个`);
+            log(`[3] 剔除轨道重音: -${duplicateCount} 个`);
             
-            // 🚀 终极调优：极强细节保留
-            const GRID_STEP = 20;        // 20ms 极细网格
-            const MIN_GAP = 35;          // 35ms 强制防吞（很宽松了）
-            const MAX_CHORD_KEYS = 4;    // 允许 4 键
-            const ARPEGGIO_OFFSET = 25;  // 极速琶音
-
-            let quantized = mappedNotes.map(n => {
-                let snappedTime = Math.round(n.time / GRID_STEP) * GRID_STEP;
-                return { ...n, time: snappedTime };
-            });
-
-            let grouped = [];
-            quantized.forEach(note => {
-                let existing = grouped.find(g => g.time === note.time);
-                if (existing) {
-                    existing.notes.push(note);
+            // 极轻微的防吞音处理
+            let finalNotes = [];
+            let lastT = -9999;
+            mappedNotes.forEach(n => {
+                if (n.time - lastT < 25) {
+                     // 极短间隔的音符合并为和弦，否则保留
+                     let prev = finalNotes[finalNotes.length - 1];
+                     if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
                 } else {
-                    grouped.push({ time: note.time, notes: [note] });
-                }
-            });
-
-            grouped.forEach(g => {
-                g.notes.sort((a, b) => (b.velocity * 100 + b.origMidi) - (a.velocity * 100 + a.origMidi));
-                g.melody = g.notes[0];
-                g.accompaniment = g.notes.slice(1);
-            });
-
-            let deduplicated = [];
-            grouped.forEach(g => {
-                let prev = deduplicated[deduplicated.length - 1];
-                // 进一步降低阈值，只为防止极其极端的重复连击
-                if (prev && g.time - prev.time < 50) {
-                    if (g.melody.key === prev.melody.key) {
-                        g.accompaniment.forEach(acc => {
-                            if (!prev.accompaniment.find(a => a.key === acc.key)) {
-                                prev.accompaniment.push(acc);
-                            }
-                        });
-                        return;
-                    }
-                }
-                deduplicated.push(g);
-            });
-
-            let arpeggioPool = [];
-            deduplicated.forEach(group => {
-                let chordKeys = [group.melody, ...group.accompaniment];
-                let uniqueKeys = [];
-                chordKeys.forEach(k => {
-                    if (!uniqueKeys.find(u => u.key === k.key)) uniqueKeys.push(k);
-                });
-
-                // 超过 4 键才进行琶音处理，保证音符密度
-                if (uniqueKeys.length > MAX_CHORD_KEYS) {
-                    let extraKeys = uniqueKeys.splice(MAX_CHORD_KEYS);
-                    arpeggioPool.push({ time: group.time + ARPEGGIO_OFFSET, keys: extraKeys });
-                }
-                group.finalKeys = uniqueKeys;
-            });
-
-            arpeggioPool.forEach(arp => {
-                let existing = deduplicated.find(g => g.time === arp.time);
-                if (existing) {
-                    arp.keys.forEach(k => { 
-                        if(!existing.finalKeys.find(u=>u.key===k.key) && existing.finalKeys.length < MAX_CHORD_KEYS) {
-                            existing.finalKeys.push(k); 
-                        }
-                    });
-                } else {
-                    deduplicated.push({ time: arp.time, finalKeys: arp.keys, melody: null, accompaniment: [] });
-                }
-            });
-            deduplicated.sort((a, b) => a.time - b.time);
-
-            let alignedGroups = [];
-            let lastTime = -9999;
-            
-            deduplicated.forEach(group => {
-                if (group.time - lastTime < MIN_GAP) {
-                    let prev = alignedGroups[alignedGroups.length - 1];
-                    group.finalKeys.forEach(k => {
-                        if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) {
-                            prev.finalKeys.push(k);
-                        }
-                    });
-                } else {
-                    alignedGroups.push(group);
-                    lastTime = group.time;
+                     finalNotes.push({ time: n.time, keys: [n.key] });
+                     lastT = n.time;
                 }
             });
 
             let allNotes = [];
-            alignedGroups.forEach(group => {
-                group.finalKeys.forEach(k => {
-                    allNotes.push({ time: group.time, key: k.key });
-                });
+            finalNotes.forEach(g => {
+                g.keys.forEach(k => { allNotes.push({ time: g.time, key: k }); });
             });
 
             let keyCounts = {};
@@ -495,15 +460,13 @@ convertBtn.addEventListener('click', () => {
                 if (keyCounts[k] > maxCount) { maxCount = keyCounts[k]; hotKey = k; }
             }
 
-            log(`=== ⚙️ Supreme 极致报告 ===`);
-            log(`[1] 识别原始音符: ${extractedCount} 个`);
-            log(`[2] 力度与音高双重分析：锁定主旋律`);
-            log(`[3] 和弦智能让步：伴奏延后 ${ARPEGGIO_OFFSET}ms 触发`);
-            log(`[4] 主旋律同音合并：消除连续断音`);
-            log(`=========================`);
-            log(`✅ 最终极致输出音符: ${allNotes.length} 个\n`);
+            log(`✅ 最终保留纯净音符: ${allNotes.length} 个\n`);
 
-            const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
+            let originalBpm = 120;
+            if (currentMidiData.header.tempos && currentMidiData.header.tempos.length > 0) {
+                originalBpm = currentMidiData.header.tempos[0].bpm;
+            }
+
             let studioSpeed = Math.round(originalBpm * (700 / 120));
             if (studioSpeed < 100) studioSpeed = 100;
             if (studioSpeed > 4000) studioSpeed = 4000;
@@ -540,9 +503,9 @@ convertBtn.addEventListener('click', () => {
             outDataSize.textContent = dataSizeStr;
             outHotKey.textContent = `${hotKey} (${maxCount}次)`;
             
-            setStatus('✅ Supreme 极致提取完成！');
+            setStatus('✅ 净化提取完成！');
             downloadArea.style.display = 'block';
-            showToast('极致提取完成！', 'success');
+            showToast('净化提取完成！', 'success');
 
             actionButtonsContainer.innerHTML = `
                 <button id="btnSendApp" style="background: linear-gradient(135deg, #38bdf8, #6366f1); flex: 1;">🚀 发送至 App</button>
@@ -556,7 +519,9 @@ convertBtn.addEventListener('click', () => {
                         name: songNameInput.value.trim() || "未命名",
                         author: authorInput.value.trim() || "未知作者",
                         transcriber: transcriberInput.value.trim() || "光遇玩家",
-                        notes: rawNotesOnly
+                        notes: rawNotesOnly,
+                        fullJson: pendingTxtContent,
+                        targetFolder: "AppSheets"
                     };
                     window.AndroidBridge.startPlay(JSON.stringify(payload));
                 } else {
@@ -569,7 +534,8 @@ convertBtn.addEventListener('click', () => {
                     const payload = {
                         name: songNameInput.value.trim() || "未命名",
                         author: authorInput.value.trim() || "未知作者",
-                        fullJson: pendingTxtContent
+                        fullJson: pendingTxtContent,
+                        targetFolder: "LocalSheets"
                     };
                     window.AndroidBridge.saveLocal(JSON.stringify(payload));
                 } else {
@@ -583,7 +549,7 @@ convertBtn.addEventListener('click', () => {
             showToast(err.message, 'error');
         } finally {
             convertBtn.disabled = false;
-            convertBtn.textContent = '✨ 开始 Supreme 极致提取';
+            convertBtn.textContent = '✨ 开始智能提取';
         }
     }, 50);
 });
