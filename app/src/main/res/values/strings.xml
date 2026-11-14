@@ -2,4 +2,4 @@
     <string name="app_name">##「✨SkyMusic」</string>
     <!-- 这段就是系统设置里显示的无障碍名称与介绍 -->
     <string name="accessibility_service_description">🌟SkyMusic 自动演奏服务❤️。开启后，App 才能在光遇游戏内自动识别琴键并模拟多指点击👍，帮您自动弹琴。(¯▽¯)👍</string>
-</accessibility-service>
+</resources>
