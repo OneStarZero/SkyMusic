@@ -158,27 +158,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendToPlayService(notesList: List<Pair<Long, Int>>, name: String, author: String) {
-        if (SkyAccessibilityService.instance == null) {
-            AlertDialog.Builder(this)
-                .setTitle("提示")
-                .setMessage("需要开启无障碍服务才能自动演奏，是否前往设置？")
-                .setPositiveButton("前往") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                .setNegativeButton("取消", null)
-                .show()
-            return
-        }
+   private fun sendToPlayService(notesList: List<Pair<Long, Int>>, name: String, author: String) {
+    if (SkyAccessibilityService.instance == null) {
+        AlertDialog.Builder(this)
+            .setTitle("提示")
+            .setMessage("需要开启无障碍服务才能自动演奏，是否前往设置？")
+            .setPositiveButton("前往") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            .setNegativeButton("取消", null)
+            .show()
+        return
+    }
 
-        val intent = Intent(this, FloatingWindowService::class.java)
-        intent.putExtra("is_new_data", true)
-        intent.putExtra("song_data", ArrayList(notesList))
-        intent.putExtra("song_name", name)
-        intent.putExtra("song_author", author)
-        
+    val intent = Intent(this, FloatingWindowService::class.java)
+    intent.putExtra("is_new_data", true)
+    intent.putExtra("song_data", ArrayList(notesList))
+    intent.putExtra("song_name", name)
+    intent.putExtra("song_author", author)
+    
+    try {
+        // 兼容高版本系统
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
