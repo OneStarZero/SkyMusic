@@ -113,7 +113,6 @@
             <tr><td>最高频按键映射</td><td id="outHotKey">-</td></tr>
         </table>
     </div>
-    <!-- 按钮容器，稍后由 JS 动态填充 -->
     <div id="actionButtonsContainer" style="display: flex; gap: 10px;"></div>
 </div>
 
@@ -495,38 +494,46 @@ convertBtn.addEventListener('click', () => {
             showToast('极致提取完成！', 'success');
 
             // ==========================================
-            // ⚡ 优化：动态生成两个按钮选择保存位置
+            // ⚡ 动态生成两个按钮（无弹窗，直接静默保存）
             // ==========================================
             actionButtonsContainer.innerHTML = `
-                <button id="btnSaveApp" style="background: linear-gradient(135deg, #38bdf8, #6366f1); flex: 1;">🚀 发送到 App</button>
-                <button id="btnSaveLocal" style="background: linear-gradient(135deg, #10b981, #059669); flex: 1;">📁 保存本地</button>
+                <button id="btnSendApp" style="background: linear-gradient(135deg, #38bdf8, #6366f1); flex: 1;">🚀 发送至 App (自动覆盖)</button>
+                <button id="btnSaveLocal" style="background: linear-gradient(135deg, #10b981, #059669); flex: 1;">📁 保存至本地</button>
             `;
 
-            document.getElementById('btnSaveApp').onclick = () => {
+            // 发送并保存至 App（静默覆盖保存到 AppSheets 并打开悬浮窗）
+            document.getElementById('btnSendApp').onclick = () => {
                 if (window.AndroidBridge) {
                     const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
                     const payload = {
                         name: songNameInput.value.trim() || "未命名",
                         author: authorInput.value.trim() || "未知作者",
                         transcriber: transcriberInput.value.trim() || "光遇玩家",
-                        notes: rawNotesOnly
+                        notes: rawNotesOnly,
+                        fullJson: pendingTxtContent,
+                        targetFolder: "AppSheets"
                     };
                     window.AndroidBridge.startPlay(JSON.stringify(payload));
-                    showToast('已发送到 App 悬浮窗', 'success');
+                    showToast('已保存到 AppSheets 并发送', 'success');
                 } else {
-                    showToast('请使用 App 打开以发送', 'error');
+                    showToast('请在 App 内使用此功能', 'error');
                 }
             };
 
+            // 保存至本地曲库（静默覆盖保存到 LocalSheets，不打开悬浮窗）
             document.getElementById('btnSaveLocal').onclick = () => {
-                const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${songNameInput.value.trim()} - ${authorInput.value.trim()}.txt`; 
-                a.click();
-                URL.revokeObjectURL(url);
-                showToast('已保存到下载目录', 'success');
+                if (window.AndroidBridge) {
+                    const payload = {
+                        name: songNameInput.value.trim() || "未命名",
+                        author: authorInput.value.trim() || "未知作者",
+                        fullJson: pendingTxtContent,
+                        targetFolder: "LocalSheets"
+                    };
+                    window.AndroidBridge.saveLocal(JSON.stringify(payload));
+                    showToast('已保存到 LocalSheets', 'success');
+                } else {
+                    showToast('请在 App 内使用此功能', 'error');
+                }
             };
             // ==========================================
 
