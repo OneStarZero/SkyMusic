@@ -494,48 +494,47 @@ convertBtn.addEventListener('click', () => {
             showToast('极致提取完成！', 'success');
 
             // ==========================================
-            // ⚡ 动态生成两个按钮（无弹窗，直接静默保存）
-            // ==========================================
-            actionButtonsContainer.innerHTML = `
-                <button id="btnSendApp" style="background: linear-gradient(135deg, #38bdf8, #6366f1); flex: 1;">🚀 发送至 App (自动覆盖)</button>
-                <button id="btnSaveLocal" style="background: linear-gradient(135deg, #10b981, #059669); flex: 1;">📁 保存至本地</button>
-            `;
+// ⚡ 动态生成两个按钮
+// ==========================================
+actionButtonsContainer.innerHTML = `
+    <button id="btnSendApp" style="background: linear-gradient(135deg, #38bdf8, #6366f1); flex: 1;">🚀 发送至 App (自动覆盖)</button>
+    <button id="btnSaveLocal" style="background: linear-gradient(135deg, #10b981, #059669); flex: 1;">📁 保存至本地</button>
+`;
 
-            // 发送并保存至 App（静默覆盖保存到 AppSheets 并打开悬浮窗）
-            document.getElementById('btnSendApp').onclick = () => {
-                if (window.AndroidBridge) {
-                    const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
-                    const payload = {
-                        name: songNameInput.value.trim() || "未命名",
-                        author: authorInput.value.trim() || "未知作者",
-                        transcriber: transcriberInput.value.trim() || "光遇玩家",
-                        notes: rawNotesOnly,
-                        fullJson: pendingTxtContent,
-                        targetFolder: "AppSheets"
-                    };
-                    window.AndroidBridge.startPlay(JSON.stringify(payload));
-                    showToast('已保存到 AppSheets 并发送', 'success');
-                } else {
-                    showToast('请在 App 内使用此功能', 'error');
-                }
-            };
+// 发送并保存至 App
+document.getElementById('btnSendApp').onclick = () => {
+    if (window.AndroidBridge) {
+        const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
+        const payload = {
+            name: songNameInput.value.trim() || "未命名",
+            author: authorInput.value.trim() || "未知作者",
+            transcriber: transcriberInput.value.trim() || "光遇玩家",
+            notes: rawNotesOnly,
+            fullJson: pendingTxtContent,
+            targetFolder: "AppSheets"
+        };
+        window.AndroidBridge.startPlay(JSON.stringify(payload));
+        showToast('指令已发送到 App 后台', 'success');
+    } else {
+        showToast('当前不在 App 环境内', 'error');
+    }
+};
 
-            // 保存至本地曲库（静默覆盖保存到 LocalSheets，不打开悬浮窗）
-            document.getElementById('btnSaveLocal').onclick = () => {
-                if (window.AndroidBridge) {
-                    const payload = {
-                        name: songNameInput.value.trim() || "未命名",
-                        author: authorInput.value.trim() || "未知作者",
-                        fullJson: pendingTxtContent,
-                        targetFolder: "LocalSheets"
-                    };
-                    window.AndroidBridge.saveLocal(JSON.stringify(payload));
-                    showToast('已保存到 LocalSheets', 'success');
-                } else {
-                    showToast('请在 App 内使用此功能', 'error');
-                }
-            };
-            // ==========================================
+// 保存至本地曲库
+document.getElementById('btnSaveLocal').onclick = () => {
+    if (window.AndroidBridge) {
+        const payload = {
+            name: songNameInput.value.trim() || "未命名",
+            author: authorInput.value.trim() || "未知作者",
+            fullJson: pendingTxtContent,
+            targetFolder: "LocalSheets"
+        };
+        window.AndroidBridge.saveLocal(JSON.stringify(payload));
+        showToast('指令已发送到 App 后台', 'success');
+    } else {
+        showToast('当前不在 App 环境内', 'error');
+    }
+};
 
         } catch (err) {
             setStatus('❌ 转换出错');
