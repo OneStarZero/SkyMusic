@@ -79,38 +79,50 @@ class FloatingWindowService : Service() {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
             density = resources.displayMetrics.density
             
-            startForegroundService() // 8.0+ 保命操作
+            // 🚨 Android 8.0+ 必须启动前台通知
+            startForegroundService()
             
             loadKeyPositions()
             File(appSheetsPath).let { if (!it.exists()) it.mkdirs() }
             File(localSheetsPath).let { if (!it.exists()) it.mkdirs() }
         } catch (e: Exception) {
-            e.printStackTrace()
+            showError("Service onCreate 失败: ${e.message}")
             stopSelf()
         }
     }
 
     private fun startForegroundService() {
-        val channelId = "skymusic_fg"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "SkyMusic 运行中", NotificationManager.IMPORTANCE_LOW)
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-            
-            val notification = Notification.Builder(this, channelId)
-                .setContentTitle("SkyMusic 正在运行")
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setOngoing(true)
-                .build()
-            startForeground(1, notification)
+        try {
+            val channelId = "skymusic_fg"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(channelId, "SkyMusic 运行中", NotificationManager.IMPORTANCE_LOW)
+                val manager = getSystemService(NotificationManager::class.java)
+                manager.createNotificationChannel(channel)
+                
+                val notification = Notification.Builder(this, channelId)
+                    .setContentTitle("SkyMusic 正在运行")
+                    .setSmallIcon(android.R.drawable.ic_media_play)
+                    .setOngoing(true)
+                    .build()
+                startForeground(1, notification)
+            }
+        } catch (e: Exception) {
+            showError("通知创建失败，可能是通知权限问题: ${e.message}")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val isNewData = intent?.getBooleanExtra("is_new_data", false) ?: false
-        if (isNewData) {
-            intent?.getSerializableExtra("song_data")?.let {
-                try {
+        // 🚨 必须在这一步先检查悬浮窗权限，没权限直接退出，防止崩溃
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            showError("缺少悬浮窗权限，请前往设置开启！")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        try {
+            val isNewData = intent?.getBooleanExtra("is_new_data", false) ?: false
+            if (isNewData) {
+                intent?.getSerializableExtra("song_data")?.let {
                     @Suppress("UNCHECKED_CAST")
                     songData = it as ArrayList<Pair<Long, Int>>
                     stopPlayback()
@@ -128,46 +140,15 @@ class FloatingWindowService : Service() {
                             showFullPanel(1) 
                         }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
                 }
             }
-        }
-        if (floatView == null) createFloatingWindow()
-        return START_STICKY
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        if (floatView == null) return
-
-        val dm = resources.displayMetrics
-        val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
-        
-        val panelWidth = if (isLandscape) (dm.widthPixels * 0.38).toInt() else (dm.widthPixels * 0.55).toInt()
-        val panelHeight = if (isLandscape) WindowManager.LayoutParams.WRAP_CONTENT else (dm.heightPixels * 0.45).toInt()
-
-        panelParams.width = panelWidth
-        panelParams.height = panelHeight
-        
-        playerParams.width = (dm.widthPixels * 0.45f).toInt()
-        if (playerParams.y > dm.heightPixels - 200) {
-            playerParams.y = (dm.heightPixels * 0.7).toInt()
-        }
-
-        try {
-            when {
-                isMiniMode -> windowManager.updateViewLayout(floatView, ballParams)
-                isPlayerMode -> windowManager.updateViewLayout(floatView, playerParams)
-                else -> {
-                    floatView?.requestLayout()
-                    windowManager.updateViewLayout(floatView, panelParams)
-                    showFullPanel(currentPage) 
-                }
-            }
+            if (floatView == null) createFloatingWindow()
         } catch (e: Exception) {
-            e.printStackTrace()
+            showError("onStartCommand 崩溃: ${e.message}")
+            stopSelf()
         }
+        
+        return START_STICKY
     }
 
     private fun createFloatingWindow() {
@@ -205,13 +186,28 @@ class FloatingWindowService : Service() {
                 y = dm.heightPixels - 400 
             }
 
+            // 这一步最容易因为权限或窗口冲突报错
             windowManager.addView(floatView, ballParams)
             showMiniBall()
         } catch (e: Exception) {
-            Toast.makeText(this, "悬浮窗启动失败，请检查权限或应用是否在后台被限制", Toast.LENGTH_SHORT).show()
+            showError("悬浮窗渲染失败 (可能被系统拦截): ${e.message}")
             stopSelf()
         }
     }
+
+    // 🚨 核心救命方法：强行弹出一个 Toast 告诉你为什么闪退
+    private fun showError(msg: String) {
+        handler.post {
+            try {
+                Toast.makeText(applicationContext, "崩溃拦截: $msg", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+    }
+
+    // ... 后续的所有拖动、面板、播放逻辑保持原样（这里因为篇幅省略，请保留你之前那版的剩余代码，直接拼在下面即可）
+    // 为了确保你直接复制能用，我把后面完整的代码也贴出来：
 
     private fun enableDrag(view: View, params: WindowManager.LayoutParams, isLocked: () -> Boolean = { false }) {
         var initialX = 0
