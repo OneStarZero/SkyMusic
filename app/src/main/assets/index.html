@@ -7,7 +7,6 @@
     <style>
         :root { 
             --sky-bg: #050914; 
-            /* 高性能纯色磨砂底：用较高的不透明度保证可读性，省去 GPU 模糊计算 */
             --card-bg: rgba(15, 23, 42, 0.85); 
             --card-border: rgba(56, 189, 248, 0.2);
             --card-glow: rgba(56, 189, 248, 0.1);
@@ -20,7 +19,6 @@
             --success: #10b981; 
             --danger: #ef4444; 
             
-            /* 极速过渡曲线 */
             --fast-ease: cubic-bezier(0.2, 0, 0, 1);
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -34,10 +32,7 @@
         }
 
         /* ==========================================
-           光遇随机风景背景层
-           - 纯 CSS radial-gradient 光晕，GPU 合成，无 backdrop-filter
-           - 每次打开随机一套光遇配色，两套叠加 + 缓慢漂移
-           - pointer-events:none 绝不挡交互
+           光遇随机风景背景层 (网络图片 + 渐变兜底)
            ========================================== */
         .sky-scenery {
             position: fixed;
@@ -45,41 +40,45 @@
             z-index: 0;
             pointer-events: none;
             overflow: hidden;
-            transform: translateZ(0);
             background: var(--sky-bg);
-            transition: opacity 0.6s var(--fast-ease);
         }
-        .sky-layer {
-            position: absolute;
-            inset: -20%;
-            will-change: transform;
+        
+        /* 兜底渐变层（防止网络图加载失败变黑） */
+        .sky-fallback {
+            position: absolute; inset: -20%;
+            opacity: 1; transition: opacity 1.2s ease;
+            animation: skyDrift 40s ease-in-out infinite alternate;
+            background: radial-gradient(circle at 25% 20%, rgba(56,189,248,0.3), transparent 60%), 
+                        radial-gradient(circle at 78% 30%, rgba(129,140,248,0.2), transparent 50%),
+                        radial-gradient(circle at 50% 80%, rgba(16,185,129,0.15), transparent 50%);
+        }
+        .sky-fallback.hidden { opacity: 0; }
+
+        /* 网络图片层 */
+        .sky-photo {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            opacity: 0; 
+            transition: opacity 1.2s var(--fast-ease);
             transform: translateZ(0);
+            
+            /* 【按要求修改】透明度 60%，把亮度稍微压一点保证文字清晰 */
+            opacity: 0.6;
+            filter: brightness(0.8) saturate(1.1);
         }
-        .sky-layer.a {
-            animation: skyDriftA 40s ease-in-out infinite alternate;
-        }
-        .sky-layer.b {
-            animation: skyDriftB 55s ease-in-out infinite alternate;
-        }
-        @keyframes skyDriftA {
-            0%   { transform: translate3d(-2%, -1%, 0) scale(1.02); }
-            100% { transform: translate3d(3%, 2%, 0) scale(1.08); }
-        }
-        @keyframes skyDriftB {
-            0%   { transform: translate3d(2%, 1%, 0) scale(1.05); }
-            100% { transform: translate3d(-3%, -2%, 0) scale(1.0); }
+        .sky-photo.loaded { opacity: 0.6; }
+
+        /* 蒙版层：底部加深，让文字更清晰 */
+        .sky-overlay {
+            position: absolute; inset: 0;
+            background: linear-gradient(to bottom, rgba(5,9,20,0.1) 0%, rgba(5,9,20,0.6) 60%, rgba(5,9,20,0.95) 100%);
+            pointer-events: none;
         }
 
-        /* 底部地平线微光，模拟光遇云海 */
-        .sky-horizon {
-            position: absolute;
-            left: -10%; right: -10%; bottom: -10%;
-            height: 45%;
-            pointer-events: none;
-            z-index: 1;
-            opacity: 0.55;
-            filter: blur(18px);
-            transform: translateZ(0);
+        @keyframes skyDrift {
+            0%   { transform: translate3d(-2%, -1%, 0) scale(1.02); }
+            100% { transform: translate3d(3%, 2%, 0) scale(1.08); }
         }
 
         .stars { position: fixed; inset: 0; pointer-events: none; z-index: 2; overflow: hidden;}
@@ -104,23 +103,20 @@
         }
         @keyframes dropIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* 高性能“实体磨砂”卡片 */
         .glass-card { 
             background: var(--card-bg); 
             border: 1px solid var(--card-border); 
             border-radius: 20px; 
             padding: 20px; margin-bottom: 16px; 
-            /* 用内阴影模拟玻璃边缘折射，用外阴影做霓虹发光 */
             box-shadow: 
                 0 10px 30px rgba(0, 0, 0, 0.5), 
                 inset 0 1px 1px rgba(255, 255, 255, 0.1),
                 0 0 20px var(--card-glow);
             animation: slideUpFade 0.5s var(--fast-ease) both;
-            transform: translateZ(0); /* 强制 GPU 渲染该层 */
+            transform: translateZ(0); 
         }
         @keyframes slideUpFade { from { opacity: 0; transform: translateY(20px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-        /* 拖拽区 */
         .drop-zone { 
             border: 2px dashed rgba(56, 189, 248, 0.3); border-radius: 16px; padding: 30px 20px; 
             text-align: center; cursor: pointer; transition: all 0.15s var(--fast-ease); 
@@ -142,14 +138,12 @@
         .drop-zone .filename { color: var(--success); font-weight: bold; margin-top: 8px; display: block; font-size: 0.9rem; }
         input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 10; }
 
-        /* 标题分割线 */
         .section-title {
             display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
             font-size: 0.95rem; font-weight: 800; color: var(--primary); letter-spacing: 0.5px;
         }
         .section-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(56,189,248,0.3), transparent); }
 
-        /* 表单输入 */
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .form-group { margin-bottom: 14px; position: relative; }
         .form-group label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
@@ -166,7 +160,6 @@
             box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15); 
         }
 
-        /* 原始指标 */
         .metrics-flex { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
         .metric-row { 
             display: flex; justify-content: space-between; align-items: center; 
@@ -178,7 +171,6 @@
         .metric-label { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
         .metric-value { font-size: 0.85rem; font-weight: 700; color: #fff; text-align: right; }
 
-        /* 模型卡片 */
         .model-card {
             border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 14px; padding: 16px;
             margin-bottom: 12px; cursor: pointer; 
@@ -208,7 +200,6 @@
         .model-card.active .model-name { color: var(--primary); }
         .model-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-left: 28px; }
         
-        /* 按钮 */
         button.primary-btn { 
             width: 100%; padding: 16px; border-radius: 14px; border: none; 
             background: linear-gradient(135deg, #0ea5e9, #6366f1); 
@@ -229,7 +220,6 @@
             border: 1px solid rgba(56, 189, 248, 0.1); display: none; margin-bottom: 16px; 
         }
 
-        /* 结果卡片 */
         #resultCard { display: none; border-color: rgba(16, 185, 129, 0.3); box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 20px rgba(16,185,129,0.1); }
         .res-metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
         .res-item { background: rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 12px; text-align: center; border: 1px solid rgba(16, 185, 129, 0.1); }
@@ -245,7 +235,6 @@
         }
         .action-row button:active { transform: scale(0.95); }
         
-        /* 卡片隐藏动画（切换模型时平滑淡出缩小） */
         .card-hiding {
             opacity: 0 !important;
             transform: translateY(10px) scale(0.96) !important;
@@ -267,11 +256,11 @@
 </head>
 <body>
 
-<!-- 光遇随机风景背景（CSS 生成，JS 注入具体配色） -->
+<!-- 光遇随机风景背景（网络图片 + 渐变兜底） -->
 <div class="sky-scenery" id="skyScenery">
-    <div class="sky-layer a" id="skyLayerA"></div>
-    <div class="sky-layer b" id="skyLayerB"></div>
-    <div class="sky-horizon" id="skyHorizon"></div>
+    <div class="sky-fallback" id="skyFallback"></div>
+    <img class="sky-photo" id="skyPhoto" src="" alt="">
+    <div class="sky-overlay"></div>
 </div>
 
 <div class="stars" id="stars"></div>
@@ -374,56 +363,44 @@
 import { Midi } from '@tonejs/midi';
 
 /* ==========================================
-   光遇随机风景背景生成
-   - 多组光遇标志性配色，每次打开随机一套
-   - 纯 radial-gradient 光晕叠加，GPU 合成
-   - 无 backdrop-filter、无网络请求、零卡顿
+   光遇随机风景背景（网络图片获取 + 60%透明度）
    ========================================== */
-const SKY_SCENES = [
-    { // 晨岛·蓝绿晨光
-        a: 'radial-gradient(circle at 25% 20%, rgba(56,189,248,0.35), transparent 55%), radial-gradient(circle at 78% 30%, rgba(129,140,248,0.25), transparent 50%)',
-        b: 'radial-gradient(circle at 60% 75%, rgba(16,185,129,0.22), transparent 55%), radial-gradient(circle at 20% 85%, rgba(56,189,248,0.18), transparent 50%)',
-        horizon: 'linear-gradient(to top, rgba(56,189,248,0.35), rgba(16,185,129,0.08), transparent)'
-    },
-    { // 霞谷·暖橙黄昏
-        a: 'radial-gradient(circle at 30% 25%, rgba(251,146,60,0.35), transparent 55%), radial-gradient(circle at 75% 35%, rgba(244,114,182,0.25), transparent 50%)',
-        b: 'radial-gradient(circle at 55% 78%, rgba(253,224,71,0.20), transparent 55%), radial-gradient(circle at 18% 80%, rgba(239,68,68,0.15), transparent 50%)',
-        horizon: 'linear-gradient(to top, rgba(251,146,60,0.40), rgba(244,114,182,0.10), transparent)'
-    },
-    { // 云野·青粉晨雾
-        a: 'radial-gradient(circle at 22% 30%, rgba(129,140,248,0.32), transparent 55%), radial-gradient(circle at 80% 22%, rgba(244,114,182,0.22), transparent 50%)',
-        b: 'radial-gradient(circle at 62% 72%, rgba(56,189,248,0.22), transparent 55%), radial-gradient(circle at 25% 85%, rgba(165,180,252,0.18), transparent 50%)',
-        horizon: 'linear-gradient(to top, rgba(129,140,248,0.35), rgba(244,114,182,0.08), transparent)'
-    },
-    { // 雨林·幽绿湿光
-        a: 'radial-gradient(circle at 28% 22%, rgba(16,185,129,0.32), transparent 55%), radial-gradient(circle at 76% 30%, rgba(56,189,248,0.22), transparent 50%)',
-        b: 'radial-gradient(circle at 58% 78%, rgba(20,184,166,0.24), transparent 55%), radial-gradient(circle at 20% 82%, rgba(34,197,94,0.16), transparent 50%)',
-        horizon: 'linear-gradient(to top, rgba(16,185,129,0.35), rgba(20,184,166,0.08), transparent)'
-    },
-    { // 禁阁·深紫夜光
-        a: 'radial-gradient(circle at 26% 24%, rgba(139,92,246,0.32), transparent 55%), radial-gradient(circle at 78% 32%, rgba(56,189,248,0.22), transparent 50%)',
-        b: 'radial-gradient(circle at 60% 76%, rgba(99,102,241,0.24), transparent 55%), radial-gradient(circle at 22% 84%, rgba(192,132,252,0.16), transparent 50%)',
-        horizon: 'linear-gradient(to top, rgba(139,92,246,0.38), rgba(56,189,248,0.08), transparent)'
-    },
-    { // 伊甸·红黑余烬
-        a: 'radial-gradient(circle at 30% 26%, rgba(239,68,68,0.30), transparent 55%), radial-gradient(circle at 74% 34%, rgba(251,146,60,0.22), transparent 50%)',
-        b: 'radial-gradient(circle at 56% 78%, rgba(190,24,93,0.22), transparent 55%), radial-gradient(circle at 20% 82%, rgba(239,68,68,0.14), transparent 50%)',
-        horizon: 'linear-gradient(to top, rgba(239,68,68,0.35), rgba(251,146,60,0.08), transparent)'
-    }
+// 【修改这里】填入光遇风景图的网络直链
+// 这里的链接使用了 GitHub 的 raw 直链，国内手机通常能直连
+const SKY_PHOTOS = [
+    "https://raw.githubusercontent.com/Light-Photo/SkySkyImages/main/sky_1.jpg",
+    "https://raw.githubusercontent.com/Light-Photo/SkySkyImages/main/sky_2.jpg",
+    "https://raw.githubusercontent.com/Light-Photo/SkySkyImages/main/sky_3.jpg",
+    "https://raw.githubusercontent.com/Light-Photo/SkySkyImages/main/sky_4.jpg"
 ];
 
 (function applyRandomSkyScene() {
-    const scene = SKY_SCENES[Math.floor(Math.random() * SKY_SCENES.length)];
-    const layerA = document.getElementById('skyLayerA');
-    const layerB = document.getElementById('skyLayerB');
-    const horizon = document.getElementById('skyHorizon');
-    if (layerA) layerA.style.background = scene.a;
-    if (layerB) layerB.style.background = scene.b;
-    if (horizon) horizon.style.background = scene.horizon;
+    const fallbackLayer = document.getElementById('skyFallback');
+    const photoImg = document.getElementById('skyPhoto');
+    
+    // 随机挑一张网络图片
+    const pick = SKY_PHOTOS[Math.floor(Math.random() * SKY_PHOTOS.length)];
+    
+    if (photoImg && pick) {
+        // 图片加载成功
+        photoImg.onload = () => {
+            photoImg.classList.add('loaded');
+            // 图片加载出来后，渐变兜底隐藏
+            if (fallbackLayer) fallbackLayer.classList.add('hidden');
+        };
+        
+        // 图片加载失败（断网/链接失效）
+        photoImg.onerror = () => {
+            console.warn('光遇网络图加载失败，使用兜底渐变');
+            photoImg.style.display = 'none';
+        };
+        
+        photoImg.src = pick;
+    }
 })();
 
 /* ==========================================
-   极简星空粒子层（40 颗，随机分布 + 闪烁）
+   极简星空粒子层
    ========================================== */
 const starContainer = document.getElementById('stars');
 for (let i = 0; i < 40; i++) {
@@ -462,7 +439,6 @@ let currentMidiData = null;
 let pendingTxtContent = null;
 let selectedMode = 'melody';
 
-/* 切换模型：结果卡片与日志平滑淡出缩小后隐藏 */
 document.querySelectorAll('.model-card').forEach(card => {
     card.addEventListener('click', () => {
         if(card.classList.contains('active')) return;
@@ -797,9 +773,6 @@ convertBtn.addEventListener('click', () => {
             
             setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 
-            // ==========================================
-            // 环境检查与按钮渲染逻辑
-            // ==========================================
             const isApp = typeof window.AndroidBridge !== 'undefined';
             const appActions = document.getElementById('appActions');
             const browserActions = document.getElementById('browserActions');
