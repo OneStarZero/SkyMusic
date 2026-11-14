@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -108,7 +109,7 @@ class FloatingWindowService : Service() {
         return START_STICKY
     }
 
-    // === 核心修复 3：旋转屏幕实时重绘布局 ===
+    // === 核心修复：旋转屏幕实时重绘布局 ===
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (!this::floatView.isInitialized) return
@@ -116,14 +117,12 @@ class FloatingWindowService : Service() {
         val dm = resources.displayMetrics
         val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
         
-        // 根据屏幕方向动态设置宽高比例
         val panelWidthRatio = if (isLandscape) 0.60f else 0.55f
         val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
 
         panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
         
-        // 播放器面板变窄
         playerParams.width = (dm.widthPixels * 0.45f).toInt()
         if (playerParams.y > dm.heightPixels - 200) {
             playerParams.y = (dm.heightPixels * 0.7).toInt()
@@ -136,7 +135,7 @@ class FloatingWindowService : Service() {
                 else -> {
                     floatView.requestLayout()
                     windowManager.updateViewLayout(floatView, panelParams)
-                    showFullPanel(currentPage) // 强制重新渲染里面的列表文字
+                    showFullPanel(currentPage) 
                 }
             }
         } catch (e: Exception) {
@@ -511,7 +510,11 @@ class FloatingWindowService : Service() {
             text = "🗑️"; textSize = btnSize; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
             setOnClickListener { 
                 if (file != null) {
-                    AlertDialog.Builder(this@FloatingWindowService, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    // ==========================================
+                    // 🔧 修复悬浮窗弹出 AlertDialog 闪退问题
+                    // ==========================================
+                    val contextWrapper = ContextThemeWrapper(this@FloatingWindowService, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    val dialog = AlertDialog.Builder(contextWrapper)
                         .setTitle("确认删除")
                         .setMessage("确定要删除该谱面吗？\n\n路径：\n${file.absolutePath}")
                         .setPositiveButton("删除") { _, _ ->
@@ -530,7 +533,14 @@ class FloatingWindowService : Service() {
                             }
                         }
                         .setNegativeButton("取消", null)
-                        .show()
+                        .create()
+                    
+                    dialog.window?.setType(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY 
+                        else WindowManager.LayoutParams.TYPE_PHONE
+                    )
+                    dialog.show()
+                    // ==========================================
                 } else {
                     Toast.makeText(this@FloatingWindowService, "内存中的谱面无法删除", Toast.LENGTH_SHORT).show()
                 }
@@ -548,7 +558,6 @@ class FloatingWindowService : Service() {
         listContainer.addView(card)
     }
 
-    // === 核心修复 4：播放器面板更小、更短、信息更密集 ===
     private fun showPlayerPanel() {
         if (!this::floatView.isInitialized) return
         isMiniMode = false; isPlayerMode = true
