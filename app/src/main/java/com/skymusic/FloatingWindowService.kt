@@ -1,9 +1,6 @@
 package com.skymusic
 
 import android.app.AlertDialog
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.res.Configuration
@@ -75,29 +72,11 @@ class FloatingWindowService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        try {
-            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-            density = resources.displayMetrics.density
-            startForegroundService()
-            loadKeyPositions()
-            File(appSheetsPath).let { if (!it.exists()) it.mkdirs() }
-            File(localSheetsPath).let { if (!it.exists()) it.mkdirs() }
-        } catch (e: Exception) {
-            stopSelf()
-        }
-    }
-
-    private fun startForegroundService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channelId = "skymusic_fg"
-            val channel = NotificationChannel(channelId, "SkyMusic 运行中", NotificationManager.IMPORTANCE_LOW)
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-            val notification = Notification.Builder(this, channelId)
-                .setContentTitle("SkyMusic 运行中")
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setOngoing(true).build()
-            startForeground(1, notification)
-        }
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        density = resources.displayMetrics.density
+        loadKeyPositions()
+        File(appSheetsPath).let { if (!it.exists()) it.mkdirs() }
+        File(localSheetsPath).let { if (!it.exists()) it.mkdirs() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -319,7 +298,6 @@ class FloatingWindowService : Service() {
 
         val btnLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; layoutParams = LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, -1) }
         
-        // 垃圾桶逻辑：实体文件弹窗，内存提示
         val btnDelete = TextView(this).apply { 
             text = "🗑️"; textSize = btnSize; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
             setOnClickListener { 
@@ -416,7 +394,6 @@ class FloatingWindowService : Service() {
         return true
     }
 
-    // 延迟检查无障碍
     private fun preparePlay() {
         if (!checkAccessibility()) return
         if (keyPositions.isEmpty() || keyPositions[0].first == -1f) { Toast.makeText(this, "请先校准键位！", Toast.LENGTH_SHORT).show(); return }

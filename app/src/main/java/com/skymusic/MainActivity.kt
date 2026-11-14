@@ -105,7 +105,7 @@ class MainActivity : AppCompatActivity() {
                             Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
                         } else {
                             val intent = Intent(this, FloatingWindowService::class.java)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                            startService(intent)
                             Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -125,7 +125,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 发送到 App (只传内存，不存文件)
     private fun handleSendApp(payloadStr: String) {
         try {
             val payload = JSONObject(payloadStr)
@@ -145,18 +144,13 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_name", payload.optString("name", "未命名"))
             intent.putExtra("song_author", payload.optString("author", "未知作者"))
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
+            startService(intent)
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "❌ 发送失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // 保存到本地 (LocalSheets)
     private fun handleSaveLocal(payloadStr: String) {
         try {
             val payload = JSONObject(payloadStr)
