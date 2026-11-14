@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.webkit.*
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,12 +49,25 @@ class MainActivity : AppCompatActivity() {
         val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
 
         val webView = WebView(this).apply {
+            // ⚡ 极限性能优化配置
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.allowContentAccess = true
             settings.allowFileAccessFromFileURLs = true
             settings.allowUniversalAccessFromFileURLs = true
+            
+            settings.cacheMode = WebSettings.LOAD_NO_CACHE // 本地页面禁用缓存，直接秒读
+            settings.mediaPlaybackRequiresUserGesture = false // 允许 JS 自动操作
+            settings.setSupportZoom(false) // 禁用缩放计算，极大降低渲染压力
+            settings.builtInZoomControls = false
+            settings.displayZoomControls = false
+
+            // 强制开启硬件加速渲染（必须）
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            }
+
             webViewClient = WebViewClient()
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
