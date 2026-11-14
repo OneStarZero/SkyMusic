@@ -6,56 +6,69 @@
     <title>光遇 MIDI 智能转谱</title>
     <style>
         :root { 
-            --bg: #0f172a; --card: #1e293b; --primary: #38bdf8; 
-            --text: #f8fafc; --muted: #94a3b8; --border: #334155; --success: #10b981; 
+            --bg-color: #0f172a; 
+            --card-bg: rgba(30, 41, 59, 0.7); 
+            --primary: #38bdf8; 
+            --text-main: #f8fafc; 
+            --text-muted: #94a3b8; 
+            --border: #334155; 
+            --success: #10b981; 
+            --warning: #f59e0b; 
+            --danger: #ef4444; 
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: var(--bg); color: var(--text); }
-        h1 { font-size: 1.4rem; text-align: center; margin-bottom: 5px; font-weight: 700; color: var(--text); }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: var(--bg-color); background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 70%); color: var(--text-main); min-height: 100vh; }
+        h1 { font-size: 1.5rem; text-align: center; margin-bottom: 24px; font-weight: 700; text-shadow: 0 2px 10px rgba(56, 189, 248, 0.3); }
         h1 span { color: var(--primary); }
-        .ai-badge { text-align: center; font-size: 0.75rem; color: #64748b; margin-bottom: 20px; }
+        .card { background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--border); border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); animation: slideUp 0.4s ease-out; }
         
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
-        .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 30px 20px; text-align: center; position: relative; background: rgba(15,23,42,0.4); }
-        .drop-zone.has-file { border-color: var(--success); }
-        .drop-zone .icon { font-size: 2rem; display: block; margin-bottom: 10px; }
-        .drop-zone p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-        .drop-zone .filename { color: var(--success); font-weight: bold; margin-top: 8px; display: block; font-size: 0.9rem; }
-        input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 30px 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; position: relative; background: rgba(15, 23, 42, 0.5); }
+        .drop-zone:hover, .drop-zone.dragover { border-color: var(--primary); background: rgba(56, 189, 248, 0.1); }
+        .drop-zone.has-file { border-color: var(--success); background: rgba(16, 185, 129, 0.1); }
+        .drop-zone .icon { font-size: 2rem; margin-bottom: 10px; display: block; }
+        .drop-zone p { margin: 0; color: var(--text-muted); font-size: 0.95rem; word-break: break-all; }
+        .drop-zone .filename { color: var(--success); font-weight: bold; margin-top: 5px; display: block; }
+        input[type="file"] { position: absolute; width: 100%; height: 100%; top: 0; left: 0; opacity: 0; cursor: pointer; }
         
-        .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
-        .form-group input, .form-group select { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; color: var(--text); outline: none; }
-        .form-group input:focus, .form-group select:focus { border-color: var(--primary); }
+        .form-group { margin-bottom: 16px; position: relative; }
+        .form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+        .form-group input[type="text"], .form-group select { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.8); color: var(--text-main); font-size: 1rem; transition: all 0.3s ease; outline: none; }
+        .form-group input[type="text"]:focus, .form-group select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }
         
-        button { width: 100%; padding: 14px; border-radius: 8px; border: none; background: #6366f1; color: #fff; font-weight: 600; cursor: pointer; }
-        button:active:not(:disabled) { background: #4f46e5; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button { width: 100%; padding: 14px 24px; border-radius: 10px; border: none; background: linear-gradient(135deg, var(--primary), #6366f1); color: #fff; font-size: 1rem; font-weight: 700; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(56, 189, 248, 0.4); }
+        button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(56, 189, 248, 0.6); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; filter: grayscale(50%); box-shadow: none; }
+        #status { margin-top: 12px; font-size: 0.9rem; color: var(--primary); text-align: center; min-height: 1.4em; font-weight: 500; }
         
-        .info-panel { display: none; background: rgba(15,23,42,0.6); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+        .info-panel { display: none; background: rgba(15, 23, 42, 0.85); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; animation: fadeIn 0.4s ease-out; }
+        .info-panel-title { font-size: 0.95rem; font-weight: bold; color: var(--primary); margin-bottom: 12px; border-left: 4px solid var(--primary); padding-left: 10px; }
         .data-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-        .data-table td { padding: 8px 0; border-bottom: 1px solid var(--border); }
-        .data-table td:first-child { color: var(--muted); }
-        .data-table td:last-child { text-align: right; font-weight: 600; }
-        .highlight-green { color: var(--success) !important; }
+        .data-table td { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+        .data-table tr:last-child td { border-bottom: none; }
+        .data-table td:first-child { color: var(--text-muted); width: 45%; }
+        .data-table td:last-child { text-align: right; font-weight: 600; color: var(--text-main); word-break: break-all; }
         
-        #log { background: #000; padding: 14px; border-radius: 8px; font-family: monospace; font-size: 0.8rem; max-height: 200px; overflow-y: auto; color: #a78bfa; display: none; margin-bottom: 20px; }
-        #downloadArea { display: none; text-align: center; }
+        .highlight-green { color: var(--success) !important; }
+        .highlight-blue { color: var(--primary) !important; }
+        .highlight-yellow { color: var(--warning) !important; }
+        
+        #log { background: rgba(15, 23, 42, 0.95); padding: 14px; border-radius: 10px; font-family: monospace; font-size: 0.8rem; max-height: 250px; overflow-y: auto; white-space: pre-wrap; color: #a78bfa; border: 1px solid var(--border); line-height: 1.6; display: none; margin-bottom: 20px; }
+        #downloadArea { display: none; text-align: center; animation: fadeIn 0.5s ease-out; }
         
         #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
-        .toast { background: var(--card); padding: 12px 20px; border-radius: 8px; border-left: 4px solid var(--primary); box-shadow: 0 4px 12px rgba(0,0,0,0.4); color: #fff; font-size: 0.9rem; }
+        .toast { background: rgba(30, 41, 59, 0.95); backdrop-filter: blur(8px); padding: 12px 20px; border-radius: 8px; border-left: 4px solid var(--primary); box-shadow: 0 4px 12px rgba(0,0,0,0.5); color: #fff; font-size: 0.9rem; animation: slideInRight 0.3s ease-out forwards; transform: translateX(120%); }
         .toast.success { border-left-color: var(--success); }
-        .toast.error { border-left-color: #ef4444; }
+        .toast.error { border-left-color: var(--danger); }
         
-        .tips { text-align: center; font-size: 0.75rem; color: var(--muted); margin-top: 30px; line-height: 1.6; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInRight { to { transform: translateX(0); } }
     </style>
 </head>
 <body>
 
 <div id="toast-container"></div>
-
-<h1>🎹 光遇 MIDI <span>智能转谱</span></h1>
-<div class="ai-badge">AI 辅助生成</div>
+<h1>🎹 光遇 MIDI <span>Supreme 极致版</span></h1>
 
 <div class="card" style="padding: 15px;">
     <div class="drop-zone" id="dropZone">
@@ -66,47 +79,57 @@
 </div>
 
 <div class="info-panel" id="rawInfoPanel">
-    <div style="font-weight:bold; color:var(--primary); margin-bottom:10px;">📁 原始 MIDI 指标</div>
+    <div class="info-panel-title">📁 原始 MIDI 详细指标</div>
     <table class="data-table">
         <tr><td>总轨道数</td><td id="infoTotalTracks">-</td></tr>
-        <tr><td>有效音轨</td><td id="infoValidTracks">-</td></tr>
-        <tr><td>包含乐器</td><td id="infoInstruments" style="font-size:0.75rem;">-</td></tr>
-        <tr><td>标称 BPM</td><td id="infoBpm">-</td></tr>
-        <tr><td>总时长</td><td id="infoDuration">-</td></tr>
-        <tr><td>音高范围</td><td id="infoPitchRange">-</td></tr>
-        <tr><td>总音符量</td><td id="infoTotalNotes">-</td></tr>
+        <tr><td>有效乐器轨道</td><td id="infoValidTracks">-</td></tr>
+        <tr><td>包含乐器清单</td><td id="infoInstruments" style="font-size: 0.75rem;">-</td></tr>
+        <tr><td>原曲标称 BPM</td><td id="infoBpm">-</td></tr>
+        <tr><td>原曲总时长</td><td id="infoDuration">-</td></tr>
+        <tr><td>全曲音高范围</td><td id="infoPitchRange">-</td></tr>
+        <tr><td>全曲总音符量</td><td id="infoTotalNotes">-</td></tr>
     </table>
 </div>
 
 <div class="card" id="configPanel" style="display: none;">
-    <div class="form-group"><label>选择转换音轨</label><select id="trackSelect"></select></div>
-    <div class="form-group"><label>歌曲名称</label><input type="text" id="songNameInput" placeholder="未命名"></div>
-    <div class="form-group"><label>原曲作者</label><input type="text" id="authorInput" placeholder="未知作者"></div>
-    <div class="form-group"><label>谱师</label><input type="text" id="transcriberInput" value="光遇玩家"></div>
-    <button id="convertBtn">✨ 开始智能转换</button>
-    <div id="status" style="margin-top:10px;text-align:center;color:var(--primary);">准备就绪</div>
+    <div class="form-group">
+        <label>选择要转换的音轨</label>
+        <select id="trackSelect"></select>
+    </div>
+    <div class="form-group">
+        <label>歌曲名称</label>
+        <input type="text" id="songNameInput" placeholder="自动读取...">
+    </div>
+    <div class="form-group">
+        <label>原曲作者</label>
+        <input type="text" id="authorInput" placeholder="自动读取...">
+    </div>
+    <div class="form-group">
+        <label>改编者 / 谱师</label>
+        <input type="text" id="transcriberInput" placeholder="填你自己" value="光遇玩家">
+    </div>
+    <button id="convertBtn">✨ 开始 Supreme 极致提取</button>
+    <div id="status">准备就绪</div>
 </div>
 
 <div id="log"></div>
 
 <div class="card" id="downloadArea">
-    <div class="info-panel" style="display: block; margin-bottom: 20px;">
-        <div style="font-weight:bold; color:var(--primary); margin-bottom:10px;">⚙️ 输出参数</div>
+    <div class="info-panel" style="display: block; background: #16213e; margin-bottom: 20px;">
+        <div class="info-panel-title">⚙️ 最终输出详细参数</div>
         <table class="data-table">
-            <tr><td>最终音符数</td><td id="stepFinalNotes" class="highlight-green">-</td></tr>
-            <tr><td>时间跨度</td><td id="outDuration">-</td></tr>
-            <tr><td>Studio 速度</td><td id="outSpeed">-</td></tr>
-            <tr><td>音域平移</td><td id="outShift">-</td></tr>
-            <tr><td>BPM 字段</td><td id="outBpm">-</td></tr>
-            <tr><td>数据体积</td><td id="outDataSize">-</td></tr>
+            <tr><td>最终输出音符数</td><td id="stepFinalNotes" class="highlight-green">-</td></tr>
+            <tr><td>时间跨度 (首音至尾音)</td><td id="outDuration">-</td></tr>
+            <tr><td>转换后 Studio 速度</td><td id="outSpeed" class="highlight-blue">-</td></tr>
+            <tr><td>音域适配平移</td><td id="outShift" class="highlight-yellow">-</td></tr>
+            <tr><td>输出 BPM 字段</td><td id="outBpm">-</td></tr>
+            <tr><td>JSON 数据体积</td><td id="outDataSize">-</td></tr>
+            <tr><td>最高频按键映射</td><td id="outHotKey">-</td></tr>
         </table>
     </div>
     <div id="actionButtonsContainer" style="display: flex; gap: 10px;"></div>
 </div>
 
-<div class="tips">💡 温馨提示：转换过程已自动优化主旋律与和弦冲突。<br>发送至 App 后，同名曲目将自动覆盖更新。</div>
-
-<!-- 回归最稳定的 CDN 引入，删除了本地 js 的引用 -->
 <script type="importmap">
 {
   "imports": {
@@ -117,16 +140,6 @@
 
 <script type="module">
 import { Midi } from '@tonejs/midi';
-
-// 极简提示
-function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    container.appendChild(toast);
-    setTimeout(() => { toast.remove(); }, 3000);
-}
 
 const midiInput = document.getElementById('midiFile');
 const dropZone = document.getElementById('dropZone');
@@ -141,10 +154,37 @@ const statusDiv = document.getElementById('status');
 const logDiv = document.getElementById('log');
 const downloadArea = document.getElementById('downloadArea');
 const actionButtonsContainer = document.getElementById('actionButtonsContainer');
+
 const rawInfoPanel = document.getElementById('rawInfoPanel');
+const infoTotalTracks = document.getElementById('infoTotalTracks');
+const infoValidTracks = document.getElementById('infoValidTracks');
+const infoInstruments = document.getElementById('infoInstruments');
+const infoBpm = document.getElementById('infoBpm');
+const infoDuration = document.getElementById('infoDuration');
+const infoPitchRange = document.getElementById('infoPitchRange');
+const infoTotalNotes = document.getElementById('infoTotalNotes');
+
+const stepFinalNotes = document.getElementById('stepFinalNotes');
+const outDuration = document.getElementById('outDuration');
+const outSpeed = document.getElementById('outSpeed');
+const outShift = document.getElementById('outShift');
+const outBpm = document.getElementById('outBpm');
+const outDataSize = document.getElementById('outDataSize');
+const outHotKey = document.getElementById('outHotKey');
 
 let currentMidiData = null;
 let pendingTxtContent = null;
+
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.animation = 'fadeIn 0.3s ease-out reverse forwards'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+function log(msg) { logDiv.textContent += msg + '\n'; logDiv.scrollTop = logDiv.scrollHeight; }
+function setStatus(msg) { statusDiv.textContent = msg; }
 
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
 ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
@@ -195,18 +235,20 @@ function handleFileSelect() {
     songNameInput.value = songTitle;
     authorInput.value = originalAuthor; 
 
-    statusDiv.textContent = '正在读取文件...';
+    setStatus('正在读取 MIDI 文件...');
+    showToast('文件读取中，请稍候...', 'info');
     rawInfoPanel.style.display = 'none'; configPanel.style.display = 'none'; downloadArea.style.display = 'none'; logDiv.style.display = 'none';
+    logDiv.textContent = '';
 
     const reader = new FileReader();
     reader.onload = function(event) {
         try {
             const arrayBuffer = event.target.result;
-            if (arrayBuffer.byteLength === 0) throw new Error('文件为空');
+            if (arrayBuffer.byteLength === 0) throw new Error('读取到的文件为空，请检查存储权限');
 
             currentMidiData = new Midi(arrayBuffer);
             
-            trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并</option>';
+            trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并 (全量还原)</option>';
             let hasValidTrack = false;
             let instrumentsSet = new Set();
             let totalNotes = 0;
@@ -217,7 +259,7 @@ function handleFileSelect() {
                 if (track.notes.length > 0) {
                     hasValidTrack = true;
                     totalNotes += track.notes.length;
-                    const instName = (track.instrument && track.instrument.name) ? track.instrument.name : '未知乐器';
+                    const instName = track.instrument.name || '未知乐器';
                     instrumentsSet.add(instName);
 
                     track.notes.forEach(n => {
@@ -228,46 +270,51 @@ function handleFileSelect() {
 
                     const option = document.createElement('option');
                     option.value = index;
-                    option.text = `轨道 ${index + 1} (${track.notes.length}音符)`;
+                    option.text = `轨道 ${index + 1} (${track.notes.length}音符) - ${instName}`;
                     trackSelect.appendChild(option);
                 }
             });
 
-            if (!hasValidTrack) throw new Error('无有效音符');
+            if (!hasValidTrack) throw new Error('该 MIDI 内没有任何音符数据');
 
             const totalSeconds = Math.floor(maxTime);
             const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
 
-            document.getElementById('infoTotalTracks').textContent = currentMidiData.tracks.length + ' 轨';
-            document.getElementById('infoValidTracks').textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
-            document.getElementById('infoInstruments').textContent = Array.from(instrumentsSet).join(', ') || '无';
-            document.getElementById('infoBpm').textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
-            document.getElementById('infoDuration').textContent = `${mins} 分 ${secs} 秒`;
-            document.getElementById('infoPitchRange').textContent = `${minMidi} ~ ${maxMidi}`;
-            document.getElementById('infoTotalNotes').textContent = totalNotes + ' 个';
+            infoTotalTracks.textContent = currentMidiData.tracks.length + ' 轨';
+            infoValidTracks.textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
+            infoInstruments.textContent = Array.from(instrumentsSet).join(', ') || '无';
+            infoBpm.textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
+            infoDuration.textContent = `${mins} 分 ${secs} 秒`;
+            infoPitchRange.textContent = `MIDI ${minMidi} ~ ${maxMidi}`;
+            infoTotalNotes.textContent = totalNotes + ' 个';
 
             rawInfoPanel.style.display = 'block'; 
             configPanel.style.display = 'block';
             convertBtn.disabled = false; 
-            statusDiv.textContent = '请选择音轨';
-            showToast('解析成功', 'success');
+            setStatus('请选择音轨，然后点击转换');
+            showToast('MIDI 解析成功', 'success');
             
         } catch (err) {
-            statusDiv.textContent = '❌ 解析失败';
+            console.error(err);
+            setStatus('❌ 解析失败');
             showToast('解析失败: ' + err.message, 'error');
             convertBtn.disabled = true;
             dropZone.classList.remove('has-file'); 
             dropText.textContent = "点击选择或拖拽 MIDI 文件";
         }
     };
+    reader.onerror = function() {
+        setStatus('❌ 文件读取失败');
+        showToast('无权限读取该文件', 'error');
+    };
     reader.readAsArrayBuffer(file);
 }
 
 convertBtn.addEventListener('click', () => {
     if (!currentMidiData) return;
-    convertBtn.disabled = true; convertBtn.textContent = '提取中...';
+    convertBtn.disabled = true; convertBtn.textContent = 'Supreme 极致提取中...';
     downloadArea.style.display = 'none'; logDiv.style.display = 'block'; logDiv.textContent = '';
-    statusDiv.textContent = '正在提取主旋律...';
+    setStatus('正在识别主旋律与和弦降级处理...');
 
     setTimeout(() => {
         try {
@@ -287,7 +334,8 @@ convertBtn.addEventListener('click', () => {
                 });
             });
 
-            if (rawNotes.length === 0) throw new Error('无有效音符');
+            if (rawNotes.length === 0) throw new Error('该轨道无有效音符');
+
             const shift = calculateBestShift(rawNotes);
 
             let mappedNotes = rawNotes.map(n => ({
@@ -297,13 +345,26 @@ convertBtn.addEventListener('click', () => {
                 origMidi: n.midi
             })).sort((a, b) => a.time - b.time);
 
-            const GRID_STEP = 30, MIN_GAP = 55, MAX_CHORD_KEYS = 3, ARPEGGIO_OFFSET = 35;
+            log(`[5] 启动主旋律分离与和弦让步算法...`);
+            
+            const GRID_STEP = 30;        
+            const MIN_GAP = 55;          
+            const MAX_CHORD_KEYS = 3;    
+            const ARPEGGIO_OFFSET = 35;  
 
-            let quantized = mappedNotes.map(n => { return { ...n, time: Math.round(n.time / GRID_STEP) * GRID_STEP }; });
+            let quantized = mappedNotes.map(n => {
+                let snappedTime = Math.round(n.time / GRID_STEP) * GRID_STEP;
+                return { ...n, time: snappedTime };
+            });
+
             let grouped = [];
             quantized.forEach(note => {
                 let existing = grouped.find(g => g.time === note.time);
-                if (existing) existing.notes.push(note); else grouped.push({ time: note.time, notes: [note] });
+                if (existing) {
+                    existing.notes.push(note);
+                } else {
+                    grouped.push({ time: note.time, notes: [note] });
+                }
             });
 
             grouped.forEach(g => {
@@ -317,7 +378,11 @@ convertBtn.addEventListener('click', () => {
                 let prev = deduplicated[deduplicated.length - 1];
                 if (prev && g.time - prev.time < 85) {
                     if (g.melody.key === prev.melody.key) {
-                        g.accompaniment.forEach(acc => { if (!prev.accompaniment.find(a => a.key === acc.key)) prev.accompaniment.push(acc); });
+                        g.accompaniment.forEach(acc => {
+                            if (!prev.accompaniment.find(a => a.key === acc.key)) {
+                                prev.accompaniment.push(acc);
+                            }
+                        });
                         return;
                     }
                 }
@@ -328,7 +393,10 @@ convertBtn.addEventListener('click', () => {
             deduplicated.forEach(group => {
                 let chordKeys = [group.melody, ...group.accompaniment];
                 let uniqueKeys = [];
-                chordKeys.forEach(k => { if (!uniqueKeys.find(u => u.key === k.key)) uniqueKeys.push(k); });
+                chordKeys.forEach(k => {
+                    if (!uniqueKeys.find(u => u.key === k.key)) uniqueKeys.push(k);
+                });
+
                 if (uniqueKeys.length > MAX_CHORD_KEYS) {
                     let extraKeys = uniqueKeys.splice(MAX_CHORD_KEYS);
                     arpeggioPool.push({ time: group.time + ARPEGGIO_OFFSET, keys: extraKeys });
@@ -338,19 +406,37 @@ convertBtn.addEventListener('click', () => {
 
             arpeggioPool.forEach(arp => {
                 let existing = deduplicated.find(g => g.time === arp.time);
-                if (existing) arp.keys.forEach(k => { if(!existing.finalKeys.find(u=>u.key===k.key) && existing.finalKeys.length < MAX_CHORD_KEYS) existing.finalKeys.push(k); });
-                else deduplicated.push({ time: arp.time, finalKeys: arp.keys, melody: null, accompaniment: [] });
+                if (existing) {
+                    arp.keys.forEach(k => { 
+                        if(!existing.finalKeys.find(u=>u.key===k.key) && existing.finalKeys.length < MAX_CHORD_KEYS) {
+                            existing.finalKeys.push(k); 
+                        }
+                    });
+                } else {
+                    deduplicated.push({ time: arp.time, finalKeys: arp.keys, melody: null, accompaniment: [] });
+                }
             });
             deduplicated.sort((a, b) => a.time - b.time);
 
             let alignedGroups = [];
             let lastTime = -9999;
+            
             deduplicated.forEach(group => {
                 if (group.time - lastTime < MIN_GAP) {
                     let prev = alignedGroups[alignedGroups.length - 1];
-                    group.finalKeys.forEach(k => {
-                        if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(k);
-                    });
+                    if (group.melody && prev.melody) {
+                        group.finalKeys.forEach(k => {
+                            if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) {
+                                prev.finalKeys.push(k);
+                            }
+                        });
+                    } else {
+                        group.finalKeys.forEach(k => {
+                            if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) {
+                                prev.finalKeys.push(k);
+                            }
+                        });
+                    }
                 } else {
                     alignedGroups.push(group);
                     lastTime = group.time;
@@ -358,41 +444,79 @@ convertBtn.addEventListener('click', () => {
             });
 
             let allNotes = [];
-            alignedGroups.forEach(group => { group.finalKeys.forEach(k => { allNotes.push({ time: group.time, key: k.key }); }); });
+            alignedGroups.forEach(group => {
+                group.finalKeys.forEach(k => {
+                    allNotes.push({ time: group.time, key: k.key });
+                });
+            });
 
-            log(`=== 提取报告 ===\n识别音符: ${extractedCount} 个\n生成成品: ${allNotes.length} 个`);
+            let keyCounts = {};
+            allNotes.forEach(n => { keyCounts[n.key] = (keyCounts[n.key] || 0) + 1; });
+            let hotKey = '-';
+            let maxCount = 0;
+            for (const k in keyCounts) {
+                if (keyCounts[k] > maxCount) { maxCount = keyCounts[k]; hotKey = k; }
+            }
+
+            log(`=== ⚙️ Supreme 极致报告 ===`);
+            log(`[1] 识别原始音符: ${extractedCount} 个`);
+            log(`[2] 力度与音高双重分析：锁定主旋律`);
+            log(`[3] 和弦智能让步：伴奏延后 ${ARPEGGIO_OFFSET}ms 触发`);
+            log(`[4] 主旋律同音合并：消除连续断音`);
+            log(`=========================`);
+            log(`✅ 最终极致输出音符: ${allNotes.length} 个\n`);
 
             const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
             let studioSpeed = Math.round(originalBpm * (700 / 120));
-            if (studioSpeed < 100) studioSpeed = 100; if (studioSpeed > 4000) studioSpeed = 4000;
+            if (studioSpeed < 100) studioSpeed = 100;
+            if (studioSpeed > 4000) studioSpeed = 4000;
 
-            pendingTxtContent = JSON.stringify([{
-                name: songNameInput.value.trim() || '未命名',
-                author: authorInput.value.trim() || '未知作者',
-                transcribedBy: transcriberInput.value.trim() || '光遇玩家',
-                isComposed: false, bpm: studioSpeed, bitsPerPage: 16, pitchLevel: 0, isEncrypted: false, songNotes: allNotes
-            }]);
+            const finalSongName = songNameInput.value.trim() || '未命名曲目';
+            const finalOriginalAuthor = authorInput.value.trim() || '未知作者';
+            const finalTranscriber = transcriberInput.value.trim() || '光遇玩家';
 
-            document.getElementById('stepFinalNotes').textContent = allNotes.length + ' 个';
-            document.getElementById('outDuration').textContent = `${((allNotes[allNotes.length - 1].time - allNotes[0].time) / 1000).toFixed(1)} 秒`;
-            document.getElementById('outSpeed').textContent = studioSpeed;
-            document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
-            document.getElementById('outBpm').textContent = studioSpeed;
-            document.getElementById('outDataSize').textContent = (new Blob([pendingTxtContent]).size / 1024).toFixed(1) + ' KB';
+            const skyStudioData = [{
+                name: finalSongName,
+                author: finalOriginalAuthor,        
+                transcribedBy: finalTranscriber,    
+                isComposed: false,
+                bpm: studioSpeed,
+                bitsPerPage: 16,
+                pitchLevel: 0,
+                isEncrypted: false,
+                songNotes: allNotes
+            }];
+
+            pendingTxtContent = JSON.stringify(skyStudioData);
+
+            const firstNoteTime = allNotes[0].time;
+            const lastNoteTime = allNotes[allNotes.length - 1].time;
+            const totalDurationSec = ((lastNoteTime - firstNoteTime) / 1000).toFixed(1);
+            const dataSize = new Blob([pendingTxtContent]).size;
+            const dataSizeStr = dataSize > 1024 ? (dataSize / 1024).toFixed(1) + ' KB' : dataSize + ' Bytes';
+
+            stepFinalNotes.textContent = allNotes.length + ' 个';
+            outDuration.textContent = `${totalDurationSec} 秒`;
+            outSpeed.textContent = studioSpeed;
+            outShift.textContent = (shift > 0 ? '+' : '') + shift + ' 半音';
+            outBpm.textContent = studioSpeed;
+            outDataSize.textContent = dataSizeStr;
+            outHotKey.textContent = `${hotKey} (${maxCount}次)`;
             
-            statusDiv.textContent = '✅ 转换完成';
+            setStatus('✅ Supreme 极致提取完成！');
             downloadArea.style.display = 'block';
-            showToast('提取完成！', 'success');
+            showToast('极致提取完成！', 'success');
 
+            // 动态生成按钮
             actionButtonsContainer.innerHTML = `
-                <button id="btnSendApp" style="background: #6366f1; flex: 1;">🚀 发送至 App</button>
-                <button id="btnSaveLocal" style="background: #10b981; flex: 1;">📁 保存至本地</button>
+                <button id="btnSendApp" style="background: linear-gradient(135deg, #38bdf8, #6366f1); flex: 1;">🚀 发送至 App</button>
+                <button id="btnSaveLocal" style="background: linear-gradient(135deg, #10b981, #059669); flex: 1;">📁 保存至本地</button>
             `;
 
             document.getElementById('btnSendApp').onclick = () => {
                 if (window.AndroidBridge) {
                     const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
-                    const payload = { name: songNameInput.value.trim() || "未命名", author: authorInput.value.trim() || "未知作者", notes: rawNotesOnly };
+                    const payload = { name: finalSongName, author: finalOriginalAuthor, notes: rawNotesOnly };
                     window.AndroidBridge.startPlay(JSON.stringify(payload));
                     showToast('已发送至 App', 'success');
                 } else {
@@ -402,7 +526,7 @@ convertBtn.addEventListener('click', () => {
 
             document.getElementById('btnSaveLocal').onclick = () => {
                 if (window.AndroidBridge) {
-                    const payload = { name: songNameInput.value.trim() || "未命名", author: authorInput.value.trim() || "未知作者", fullJson: pendingTxtContent, targetFolder: "LocalSheets" };
+                    const payload = { name: finalSongName, author: finalOriginalAuthor, fullJson: pendingTxtContent, targetFolder: "LocalSheets" };
                     window.AndroidBridge.saveLocal(JSON.stringify(payload));
                     showToast('已保存至本地', 'success');
                 } else {
@@ -411,12 +535,12 @@ convertBtn.addEventListener('click', () => {
             };
 
         } catch (err) {
-            statusDiv.textContent = '❌ 转换出错';
+            setStatus('❌ 转换出错');
             log('错误: ' + err.message);
             showToast(err.message, 'error');
         } finally {
             convertBtn.disabled = false;
-            convertBtn.textContent = '✨ 开始智能转换';
+            convertBtn.textContent = '✨ 开始 Supreme 极致提取';
         }
     }, 50);
 });
