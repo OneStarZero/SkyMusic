@@ -55,18 +55,12 @@ class MainActivity : AppCompatActivity() {
                 allowContentAccess = true
                 allowFileAccessFromFileURLs = true
                 allowUniversalAccessFromFileURLs = true
-                
-                // 极限性能优化
                 cacheMode = WebSettings.LOAD_NO_CACHE
                 setSupportZoom(false)
-                builtInZoomControls = false
-                displayZoomControls = false
             }
-            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
             }
-
             webViewClient = WebViewClient()
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
@@ -81,7 +75,6 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
 
-        // ⚙️ 加回设置按钮
         val btnSettings = TextView(this).apply {
             text = "⚙️ 设置"
             textSize = 14f
@@ -111,7 +104,8 @@ class MainActivity : AppCompatActivity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                             Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
                         } else {
-                            startService(Intent(this, FloatingWindowService::class.java))
+                            val intent = Intent(this, FloatingWindowService::class.java)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
                             Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -121,19 +115,23 @@ class MainActivity : AppCompatActivity() {
 
     inner class WebAppInterface {
         @JavascriptInterface
-        fun startPlay(jsonString: String) { runOnUiThread { handlePayload(jsonString, false) } }
+        fun startPlay(jsonString: String) {
+            runOnUiThread { handleSendApp(jsonString) }
+        }
+
         @JavascriptInterface
-        fun saveLocal(jsonString: String) { runOnUiThread { handlePayload(jsonString, true) } }
+        fun saveLocal(jsonString: String) {
+            runOnUiThread { handleSaveLocal(jsonString) }
+        }
     }
 
-    private fun handlePayload(payloadStr: String, isSaveAction: Boolean) {
+    // 发送到 App (只传内存，不存文件)
+    private fun handleSendApp(payloadStr: String) {
         try {
             val payload = JSONObject(payloadStr)
-            val name = payload.optString("name", "未命名")
-            val author = payload.optString("author", "未知作者")
-            
             val notesArray = payload.optJSONArray("notes")
             val notesList = mutableListOf<Pair<Long, Int>>()
+            
             if (notesArray != null) {
                 for (i in 0 until notesArray.length()) {
                     val obj = notesArray.getJSONObject(i)
@@ -141,44 +139,41 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            if (isSaveAction) {
-                val fullJson = payload.optString("fullJson", payloadStr)
-                val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
-                if (!folder.exists()) folder.mkdirs()
-                val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
-                val targetFile = File(folder, fileName)
-                targetFile.writeText(fullJson, Charsets.UTF_8)
-                Toast.makeText(this@MainActivity, "✅ 已保存至 LocalSheets", Toast.LENGTH_SHORT).show()
+            val intent = Intent(this, FloatingWindowService::class.java)
+            intent.putExtra("is_new_data", true)
+            intent.putExtra("song_data", ArrayList(notesList))
+            intent.putExtra("song_name", payload.optString("name", "未命名"))
+            intent.putExtra("song_author", payload.optString("author", "未知作者"))
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
             } else {
-                sendToPlayService(notesList, name, author)
-                Toast.makeText(this@MainActivity, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
+                startService(intent)
             }
+            Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(this, "❌ 处理失败: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "❌ 发送失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun sendToPlayService(notesList: List<Pair<Long, Int>>, name: String, author: String) {
-        if (SkyAccessibilityService.instance == null) {
-            AlertDialog.Builder(this)
-                .setTitle("提示")
-                .setMessage("需要开启无障碍服务才能自动演奏，是否前往设置？")
-                .setPositiveButton("前往") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                .setNegativeButton("取消", null)
-                .show()
-            return
-        }
-
-        val intent = Intent(this, FloatingWindowService::class.java)
-        intent.putExtra("is_new_data", true)
-        intent.putExtra("song_data", ArrayList(notesList))
-        intent.putExtra("song_name", name)
-        intent.putExtra("song_author", author)
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+    // 保存到本地 (LocalSheets)
+    private fun handleSaveLocal(payloadStr: String) {
+        try {
+            val payload = JSONObject(payloadStr)
+            val name = payload.optString("name", "未命名")
+            val author = payload.optString("author", "未知作者")
+            val fullJson = payload.optString("fullJson", payloadStr)
+            
+            val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
+            if (!folder.exists()) folder.mkdirs()
+            
+            val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val targetFile = File(folder, fileName)
+            targetFile.writeText(fullJson, Charsets.UTF_8)
+            
+            Toast.makeText(this, "✅ 已保存至:\n${targetFile.absolutePath}", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }
