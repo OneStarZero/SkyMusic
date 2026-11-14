@@ -37,87 +37,66 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 🚨 全局异常捕获，防止玄学闪退
-        Thread.setDefaultUncaughtExceptionHandler { _, e ->
-            e.printStackTrace()
-            runOnUiThread {
-                AlertDialog.Builder(this)
-                    .setTitle("💥 App 崩溃啦")
-                    .setMessage("错误信息:\n\n${e.message}\n\n${e.stackTrace.joinToString("\n")}")
-                    .setPositiveButton("知道了") { _, _ -> finish() }
-                    .setCancelable(false)
-                    .show()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                )
             }
         }
 
-        try {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                    registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
-                        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    )
-                }
-            }
+        val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
 
-            val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
-
-            val webView = WebView(this).apply {
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    allowFileAccess = true
-                    allowContentAccess = true
-                    allowFileAccessFromFileURLs = true
-                    allowUniversalAccessFromFileURLs = true
-                    
-                    cacheMode = WebSettings.LOAD_NO_CACHE
-                    setSupportZoom(false)
-                    builtInZoomControls = false
-                    displayZoomControls = false
-                }
+        val webView = WebView(this).apply {
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                allowFileAccess = true
+                allowContentAccess = true
+                allowFileAccessFromFileURLs = true
+                allowUniversalAccessFromFileURLs = true
                 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                }
-
-                webViewClient = WebViewClient()
-                webChromeClient = object : WebChromeClient() {
-                    override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                        filePathCallback?.onReceiveValue(null)
-                        filePathCallback = cb
-                        try { fileChooserLauncher.launch(params?.createIntent()) } catch (e: Exception) { filePathCallback = null; return false }
-                        return true
-                    }
-                }
-                addJavascriptInterface(WebAppInterface(), "AndroidBridge")
-                loadUrl("file:///android_asset/index.html")
+                // 极限性能优化
+                cacheMode = WebSettings.LOAD_NO_CACHE
+                setSupportZoom(false)
+                builtInZoomControls = false
+                displayZoomControls = false
             }
-            rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
-
-            val btnSettings = TextView(this).apply {
-                text = "⚙️ 设置"
-                textSize = 14f
-                setTextColor(Color.WHITE)
-                setPadding(30, 20, 30, 20)
-                setBackgroundColor(Color.parseColor("#CC000000"))
-                setOnClickListener { showSettingsDialog() }
-            }
-            val settingsParams = FrameLayout.LayoutParams(-2, -2).apply {
-                gravity = Gravity.TOP or Gravity.END
-                topMargin = 60
-                rightMargin = 20
-            }
-            rootLayout.addView(btnSettings, settingsParams)
-            setContentView(rootLayout)
             
-        } catch (e: Exception) {
-            e.printStackTrace()
-            AlertDialog.Builder(this)
-                .setTitle("初始化失败")
-                .setMessage(e.message)
-                .setPositiveButton("退出") { _, _ -> finish() }
-                .show()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            }
+
+            webViewClient = WebViewClient()
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                    filePathCallback?.onReceiveValue(null)
+                    filePathCallback = cb
+                    try { fileChooserLauncher.launch(params?.createIntent()) } catch (e: Exception) { filePathCallback = null; return false }
+                    return true
+                }
+            }
+            addJavascriptInterface(WebAppInterface(), "AndroidBridge")
+            loadUrl("file:///android_asset/index.html")
         }
+        rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
+
+        // ⚙️ 加回设置按钮
+        val btnSettings = TextView(this).apply {
+            text = "⚙️ 设置"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(30, 20, 30, 20)
+            setBackgroundColor(Color.parseColor("#CC000000"))
+            setOnClickListener { showSettingsDialog() }
+        }
+        val settingsParams = FrameLayout.LayoutParams(-2, -2).apply {
+            gravity = Gravity.TOP or Gravity.END
+            topMargin = 60
+            rightMargin = 20
+        }
+        rootLayout.addView(btnSettings, settingsParams)
+        setContentView(rootLayout)
     }
 
     private fun showSettingsDialog() {
@@ -126,31 +105,14 @@ class MainActivity : AppCompatActivity() {
             .setTitle("SkyMusic 设置")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-                        }
-                    }
-                    1 -> {
-                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    }
+                    0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                    1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     2 -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                            Toast.makeText(this, "启动失败：请先开启悬浮窗权限！", Toast.LENGTH_LONG).show()
-                            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                            Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
                         } else {
-                            try {
-                                val intent = Intent(this, FloatingWindowService::class.java)
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                    startForegroundService(intent)
-                                } else {
-                                    startService(intent)
-                                }
-                                Toast.makeText(this, "悬浮球启动指令已发送", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(this, "启动异常: ${e.message}", Toast.LENGTH_LONG).show()
-                                e.printStackTrace()
-                            }
+                            startService(Intent(this, FloatingWindowService::class.java))
+                            Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -213,15 +175,10 @@ class MainActivity : AppCompatActivity() {
         intent.putExtra("song_name", name)
         intent.putExtra("song_author", author)
         
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "拉起服务失败: ${e.message}", Toast.LENGTH_LONG).show()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
     }
 }
