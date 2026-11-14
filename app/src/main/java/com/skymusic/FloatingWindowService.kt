@@ -115,9 +115,11 @@ class FloatingWindowService : Service() {
 
         val dm = resources.displayMetrics
         val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+        // 横屏最大高度降低，使UI更加紧凑
+        val panelHeightRatio = if (isLandscape) 0.60f else 0.45f
 
-        panelParams.width = (dm.widthPixels * 0.85).toInt()
+        // 宽度缩小到 55%（和你要求的红框大小差不多）
+        panelParams.width = (dm.widthPixels * 0.55).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
         
         playerParams.width = (dm.widthPixels * 0.55).toInt()
@@ -145,10 +147,10 @@ class FloatingWindowService : Service() {
             val dm = resources.displayMetrics
 
             val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+            val panelHeightRatio = if (isLandscape) 0.60f else 0.45f
 
             panelParams = WindowManager.LayoutParams(
-                (dm.widthPixels * 0.85).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
+                (dm.widthPixels * 0.55).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { 
                 gravity = Gravity.TOP or Gravity.START
@@ -258,9 +260,9 @@ class FloatingWindowService : Service() {
         
         val dm = resources.displayMetrics
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val panelHeightRatio = if (isLandscape) 0.75f else 0.45f
+        val panelHeightRatio = if (isLandscape) 0.60f else 0.45f
         
-        panelParams.width = (dm.widthPixels * 0.85).toInt()
+        panelParams.width = (dm.widthPixels * 0.55).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
 
         val rootLayout = LinearLayout(this).apply {
@@ -309,10 +311,18 @@ class FloatingWindowService : Service() {
 
         rootLayout.addView(View(this).apply { setBackgroundColor(Color.parseColor("#334155")); layoutParams = LinearLayout.LayoutParams(-1, 1) })
 
-        val scrollView = ScrollView(this)
-        listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(10, 10, 10, 10) }
+        val scrollView = ScrollView(this).apply {
+            // 强制填满剩余空间，防止因为 Item 过少而居中
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
+        }
+        // 新增 gravity = TOP，彻底解决内容居中问题
+        listContainer = LinearLayout(this).apply { 
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.TOP 
+            setPadding(10, 10, 10, 10) 
+        }
         scrollView.addView(listContainer)
-        rootLayout.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1f))
+        rootLayout.addView(scrollView)
 
         val bottomBarHeight = (45 * density).toInt()
         val bottomBar = LinearLayout(this).apply {
@@ -389,7 +399,6 @@ class FloatingWindowService : Service() {
             }
         } else {
             if (songData.isNotEmpty()) {
-                // App 发送的谱面暂不涉及直接删除，传空 File 占位
                 addSongToList(currentSongName, currentAuthor, currentDuration, currentNotesCount, currentBpm, null) { preparePlay() }
             }
 
@@ -421,7 +430,6 @@ class FloatingWindowService : Service() {
         }
     }
 
-    // 新增了 file: File? 参数，用于删除操作
     private fun addSongToList(songName: String, author: String, duration: String, notes: Int, bpm: String, file: File?, onClick: () -> Unit) {
         if (!this::listContainer.isInitialized) return
 
@@ -463,7 +471,7 @@ class FloatingWindowService : Service() {
 
         var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         var currentLineWidth = 0f
-        val maxWidth = resources.displayMetrics.widthPixels * 0.70f - (100 * density)
+        val maxWidth = resources.displayMetrics.widthPixels * 0.45f - (100 * density)
 
         for (item in items) {
             val tv = TextView(this).apply {
@@ -499,7 +507,6 @@ class FloatingWindowService : Service() {
             text = "🗑️"; textSize = btnSize; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
             setOnClickListener { 
                 if (file != null) {
-                    // 弹出确认删除对话框
                     AlertDialog.Builder(this@FloatingWindowService, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                         .setTitle("确认删除")
                         .setMessage("确定要删除该谱面吗？\n\n路径：\n${file.absolutePath}")
@@ -507,7 +514,6 @@ class FloatingWindowService : Service() {
                             if (file.exists()) {
                                 if (file.delete()) {
                                     Toast.makeText(this@FloatingWindowService, "已删除", Toast.LENGTH_SHORT).show()
-                                    // 刷新列表
                                     if (currentPage == 0) {
                                         cachedSongList = null
                                         showFullPanel(0)
@@ -754,27 +760,27 @@ class FloatingWindowService : Service() {
         }
     }
 
+    // === 修复 3：解决谱面读取信息错误 ===
     private fun readLocalFileInfo(file: File): List<String> {
         try {
-            val content = if (file.length() > 50 * 1024) {
-                file.inputStream().bufferedReader().use { it.readText().take(15000) }
-            } else {
-                var text = file.readText(Charsets.UTF_8)
-                if (text.contains("\u0000")) text = file.readText(Charsets.UTF_16LE)
-                text
-            }
+            // 彻底取消 50KB 切片限制，全量读取并清洗乱码
+            var text = file.readText(Charsets.UTF_8)
+            if (text.contains("\u0000")) text = file.readText(Charsets.UTF_16LE)
+            val content = text.replace("\u0000", "").replace("\uFEFF", "")
 
-            val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
-            val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"")
+            val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"")
+            val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"")
             val bpmRegex = Regex("\"bpm\"\\s*:\\s*(\\d+)")
             
             var songName = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
             var displayAuthor = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
             var bpm = bpmRegex.find(content)?.groupValues?.getOrNull(1) ?: "0"
             
-            if (displayAuthor == "Unknown") displayAuthor = "未知作者"
+            if (displayAuthor.isBlank()) displayAuthor = "未知作者"
+            if (songName.isBlank()) songName = file.nameWithoutExtension
 
-            val notesCount = Regex("\"time\"").findAll(content).count()
+            // 全量匹配 time 字段，确保音符统计绝对精确
+            val notesCount = Regex("\"time\"\\s*:\\s*\\d+").findAll(content).count()
             val duration = if (notesCount > 0) {
                  val lastTimeStr = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(content).lastOrNull()?.groupValues?.getOrNull(1) ?: "0"
                  val totalSec = lastTimeStr.toLong() / 1000
@@ -798,10 +804,12 @@ class FloatingWindowService : Service() {
             try {
                 var content = file.readText(Charsets.UTF_8)
                 if (content.contains("\u0000")) content = file.readText(Charsets.UTF_16LE)
+                content = content.replace("\u0000", "").replace("\uFEFF", "")
+
                 val timeRegex = Regex("\"time\"\\s*:\\s*(\\d+)")
                 val keyRegex = Regex("\"key\"\\s*:\\s*\"1Key(\\d+)\"")
-                val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]+)\"")
-                val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"")
+                val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"")
+                val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"")
                 val bpmRegex = Regex("\"bpm\"\\s*:\\s*(\\d+)")
                 
                 val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
@@ -810,7 +818,8 @@ class FloatingWindowService : Service() {
                 var nameMatch = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
                 var authorMatch = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
                 var bpmMatch = bpmRegex.find(content)?.groupValues?.getOrNull(1) ?: "0"
-                if (authorMatch == "Unknown") authorMatch = "未知作者"
+                if (authorMatch.isBlank()) authorMatch = "未知作者"
+                if (nameMatch.isBlank()) nameMatch = file.nameWithoutExtension
                 
                 if (timeMatches.isEmpty() || keyMatches.isEmpty()) {
                     handler.post { Toast.makeText(this, "读取失败: 空乐谱", Toast.LENGTH_SHORT).show() }
@@ -838,16 +847,30 @@ class FloatingWindowService : Service() {
         }
     }
 
+    // === 修复 2：优化键位校准 UI ===
     private fun startCalibration() {
         val dm = resources.displayMetrics
-        val dotSize = (60 * density).toInt()
+        val dotSize = (38 * density).toInt() // 尺寸缩小
         val halfSize = dotSize / 2
         if (keyPositions.isEmpty() || keyPositions[0].first == -1f) {
             for (i in 0 until 15) { keyPositions.add(Pair(dm.widthPixels * ((i % 5) + 1) / 6f, dm.heightPixels * ((i / 5) + 6) / 10f)) }
         }
         val calibrateViews = mutableListOf<TextView>()
         for (i in 0 until 15) {
-            val dot = TextView(this).apply { text = "${i + 1}"; setTextColor(Color.BLACK); setBackgroundColor(Color.parseColor("#80FFFFFF")); gravity = Gravity.CENTER }
+            val dot = TextView(this).apply { 
+                text = "${i + 1}"
+                setTextColor(Color.parseColor("#38BDF8"))
+                textSize = 14f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = Gravity.CENTER
+                
+                // 使用自定义背景：半透明黑底 + 发光青色边框
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#BB0F172A"))
+                    setStroke((2 * density).toInt(), Color.parseColor("#38BDF8"))
+                }
+            }
             val params = WindowManager.LayoutParams(dotSize, dotSize, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
             params.gravity = Gravity.TOP or Gravity.START
             params.x = keyPositions[i].first.toInt() - halfSize; params.y = keyPositions[i].second.toInt() - halfSize
@@ -865,7 +888,14 @@ class FloatingWindowService : Service() {
             windowManager.addView(dot, params); calibrateViews.add(dot)
         }
         val saveBtn = Button(this).apply {
-            text = "✅ 保存键位"; setBackgroundColor(Color.GREEN)
+            text = "✅ 保存键位"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            // 按钮也做成扁平化设计
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#10B981"))
+                cornerRadius = 8f
+            }
             setOnClickListener {
                 saveKeyPositions(); calibrateViews.forEach { windowManager.removeView(it) }; windowManager.removeView(this)
                 Toast.makeText(this@FloatingWindowService, "键位已保存！", Toast.LENGTH_SHORT).show()
