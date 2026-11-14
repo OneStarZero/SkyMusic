@@ -109,6 +109,7 @@ class FloatingWindowService : Service() {
         return START_STICKY
     }
 
+    // === 横竖屏切换自适应 ===
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (!this::floatView.isInitialized) return
@@ -116,11 +117,12 @@ class FloatingWindowService : Service() {
         val dm = resources.displayMetrics
         val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
         
-        val panelWidthRatio = if (isLandscape) 0.60f else 0.55f
-        val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
+        // 横屏改为较小的卡片形态
+        val panelWidth = if (isLandscape) (dm.widthPixels * 0.38).toInt() else (dm.widthPixels * 0.55).toInt()
+        val panelHeight = if (isLandscape) WindowManager.LayoutParams.WRAP_CONTENT else (dm.heightPixels * 0.45).toInt()
 
-        panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
-        panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
+        panelParams.width = panelWidth
+        panelParams.height = panelHeight
         
         playerParams.width = (dm.widthPixels * 0.45f).toInt()
         if (playerParams.y > dm.heightPixels - 200) {
@@ -151,10 +153,11 @@ class FloatingWindowService : Service() {
             val dm = resources.displayMetrics
 
             val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
+            val panelWidth = if (isLandscape) (dm.widthPixels * 0.38).toInt() else (dm.widthPixels * 0.55).toInt()
+            val panelHeight = if (isLandscape) WindowManager.LayoutParams.WRAP_CONTENT else (dm.heightPixels * 0.45).toInt()
 
             panelParams = WindowManager.LayoutParams(
-                (dm.widthPixels * 0.55).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
+                panelWidth, panelHeight, 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { 
                 gravity = Gravity.TOP or Gravity.START
@@ -264,10 +267,10 @@ class FloatingWindowService : Service() {
         
         val dm = resources.displayMetrics
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val panelHeightRatio = if (isLandscape) 0.70f else 0.45f
         
-        panelParams.width = (dm.widthPixels * 0.55).toInt()
-        panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
+        // 修正面板尺寸
+        panelParams.width = if (isLandscape) (dm.widthPixels * 0.38).toInt() else (dm.widthPixels * 0.55).toInt()
+        panelParams.height = if (isLandscape) WindowManager.LayoutParams.WRAP_CONTENT else (dm.heightPixels * 0.45).toInt()
 
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
