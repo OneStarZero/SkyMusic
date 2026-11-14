@@ -16,7 +16,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -109,98 +108,65 @@ class MainActivity : AppCompatActivity() {
     inner class WebAppInterface {
         @JavascriptInterface
         fun startPlay(jsonString: String) {
-            runOnUiThread {
-                handlePayload(jsonString)
-            }
+            runOnUiThread { handlePayload(jsonString, "AppSheets", false) }
+        }
+
+        @JavascriptInterface
+        fun saveLocal(jsonString: String) {
+            runOnUiThread { handlePayload(jsonString, "LocalSheets", true) }
         }
     }
 
-    // 核心逻辑：解析 -> 检查重名 -> 保存 -> 发送
-    private fun handlePayload(payloadStr: String) {
+    // 核心逻辑：根据 isSaveAction 区分是保存还是播放
+    private fun handlePayload(payloadStr: String, defaultFolder: String, isSaveAction: Boolean) {
         try {
             val payload = JSONObject(payloadStr)
-            val name = payload.getString("name")
-            val author = payload.getString("author")
-            val transcriber = payload.getString("transcriber")
-            val notesArray = payload.getJSONArray("notes")
-
+            val name = payload.optString("name", "未命名")
+            val author = payload.optString("author", "未知作者")
+            val transcriber = payload.optString("transcriber", "未知作者")
+            
+            val notesArray = payload.optJSONArray("notes")
             val notesList = mutableListOf<Pair<Long, Int>>()
-            for (i in 0 until notesArray.length()) {
-                val obj = notesArray.getJSONObject(i)
-                notesList.add(Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
+            if (notesArray != null) {
+                for (i in 0 until notesArray.length()) {
+                    val obj = notesArray.getJSONObject(i)
+                    notesList.add(Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
+                }
             }
 
-            // 构造目标路径
-            val folder = File("/storage/emulated/0/SkyMusic-OneStar/AppSheets/")
-            if (!folder.exists()) folder.mkdirs()
+            // 如果是保存动作
+            if (isSaveAction) {
+                val fullJson = payload.optString("fullJson", payloadStr)
+                // 网页端传的是 AppSheets，但原生端强制判断：如果是保存，就存到 LocalSheets（或者你可以根据实际需求调整）
+                // 这里为了适配你 "只有点击保存到本地才保存" 的需求，强制存在 LocalSheets
+                val targetFolder = "LocalSheets" 
+                
+                val folder = File("/storage/emulated/0/SkyMusic-OneStar/$targetFolder/")
+                if (!folder.exists()) folder.mkdirs()
 
-            // 规范命名格式：歌曲名-原作者.txt
-            val fileName = "$name-$author.txt".replace("/", "_")
-            val targetFile = File(folder, fileName)
+                val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
+                val targetFile = File(folder, fileName)
 
-            val saveAction = {
-                // 构造标准 Sky Studio 格式数据
-                val finalJson = JSONObject()
-                finalJson.put("name", name)
-                finalJson.put("author", author)
-                // 【核心修复】：这里写入用户输入的改编者！
-                finalJson.put("transcribedBy", transcriber) 
-                finalJson.put("isComposed", false)
-                finalJson.put("bpm", 700)
-                finalJson.put("bitsPerPage", 16)
-                finalJson.put("pitchLevel", 0)
-                finalJson.put("isEncrypted", false)
-                finalJson.put("songNotes", notesArray)
-
-                val wrapperArray = JSONArray()
-                wrapperArray.put(finalJson)
-
-                targetFile.writeText(wrapperArray.toString(), Charsets.UTF_8)
-                Toast.makeText(this@MainActivity, "已保存至本地曲库", Toast.LENGTH_SHORT).show()
-            }
-
-            if (targetFile.exists()) {
-                // 重名询问覆盖
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("文件已存在")
-                    .setMessage("本地已存在《$name - $author》的谱面，是否替换？")
-                    .setCancelable(false)
-                    .setPositiveButton("替换") { _, _ ->
-                        saveAction()
-                        sendToPlayService(notesList, name, author)
-                    }
-                    .setNegativeButton("取消") { _, _ ->
-                        sendToPlayService(notesList, name, author) // 不保存，只播放
-                    }
-                    .show()
+                // 强制覆盖写入
+                targetFile.writeText(fullJson, Charsets.UTF_8)
+                
+                Toast.makeText(this@MainActivity, "✅ 已保存至 $targetFolder", Toast.LENGTH_SHORT).show()
             } else {
-                // 正常询问保存
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("保存谱面")
-                    .setMessage("是否将当前谱面保存到本地曲库？")
-                    .setCancelable(false)
-                    .setPositiveButton("保存") { _, _ ->
-                        saveAction()
-                        sendToPlayService(notesList, name, author)
-                    }
-                    .setNegativeButton("取消") { _, _ ->
-                        sendToPlayService(notesList, name, author) // 不保存，只播放
-                    }
-                    .show()
+                // 如果是播放动作，直接发送到悬浮窗，不写文件
+                sendToPlayService(notesList, name, author)
+                Toast.makeText(this@MainActivity, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
             }
 
         } catch (e: Exception) {
-            Toast.makeText(this, "数据解析错误: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "❌ 处理失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // 独立的发送到播放服务逻辑
     private fun sendToPlayService(notesList: List<Pair<Long, Int>>, name: String, author: String) {
-        // 【核心修复】：未开无障碍时，只提示不阻断保存
         if (SkyAccessibilityService.instance == null) {
             AlertDialog.Builder(this)
                 .setTitle("提示")
-                .setMessage("谱面已处理！但需要开启无障碍服务才能自动演奏，是否前往设置？")
+                .setMessage("谱面已就绪！但需要开启无障碍服务才能自动演奏，是否前往设置？")
                 .setPositiveButton("前往") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                 .setNegativeButton("取消", null)
                 .show()
@@ -212,8 +178,11 @@ class MainActivity : AppCompatActivity() {
         intent.putExtra("song_data", ArrayList(notesList))
         intent.putExtra("song_name", name)
         intent.putExtra("song_author", author)
-        startService(intent)
         
-        Toast.makeText(this, "已发送至悬浮窗", Toast.LENGTH_SHORT).show()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
     }
 }
