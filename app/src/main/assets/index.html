@@ -2,8 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <!-- 增加 interactive-widget 优化键盘弹出时的卡顿 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>光遇 MIDI 智能转谱</title>
     <style>
         :root { 
@@ -16,7 +15,6 @@
         h1 span { color: var(--primary); }
         .ai-badge { text-align: center; font-size: 0.75rem; color: #64748b; margin-bottom: 20px; }
         
-        /* 去除高耗的渐变和阴影，提升滚动帧率 */
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
         .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 30px 20px; text-align: center; position: relative; background: rgba(15,23,42,0.4); }
         .drop-zone.has-file { border-color: var(--success); }
@@ -108,323 +106,320 @@
 
 <div class="tips">💡 温馨提示：转换过程已自动优化主旋律与和弦冲突。<br>发送至 App 后，同名曲目将自动覆盖更新。</div>
 
-<!-- 加入 defer 属性，防止 JS 阻塞页面渲染 -->
-<script src="local-midi.js" defer></script>
+<!-- 回归最稳定的 CDN 引入，删除了本地 js 的引用 -->
+<script type="importmap">
+{
+  "imports": {
+    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm"
+  }
+}
+</script>
 
-<script>
-    // 等待页面和本地库加载完毕后再执行
-    document.addEventListener('DOMContentLoaded', () => {
-        if (!window.Midi) {
-            alert("解析库加载失败！请检查 local-midi.js 是否存在。");
-            return;
+<script type="module">
+import { Midi } from '@tonejs/midi';
+
+// 极简提示
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => { toast.remove(); }, 3000);
+}
+
+const midiInput = document.getElementById('midiFile');
+const dropZone = document.getElementById('dropZone');
+const dropText = document.getElementById('dropText');
+const configPanel = document.getElementById('configPanel');
+const trackSelect = document.getElementById('trackSelect');
+const songNameInput = document.getElementById('songNameInput');
+const authorInput = document.getElementById('authorInput');
+const transcriberInput = document.getElementById('transcriberInput');
+const convertBtn = document.getElementById('convertBtn');
+const statusDiv = document.getElementById('status');
+const logDiv = document.getElementById('log');
+const downloadArea = document.getElementById('downloadArea');
+const actionButtonsContainer = document.getElementById('actionButtonsContainer');
+const rawInfoPanel = document.getElementById('rawInfoPanel');
+
+let currentMidiData = null;
+let pendingTxtContent = null;
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
+['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
+['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
+dropZone.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) { midiInput.files = e.dataTransfer.files; handleFileSelect(); } });
+
+const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
+const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
+
+function calculateBestShift(notes) {
+    if (notes.length === 0) return 0;
+    const pitches = notes.map(n => n.midi).sort((a, b) => a - b);
+    const medianPitch = pitches[Math.floor(pitches.length / 2)];
+    return Math.round((68 - medianPitch) / 12) * 12;
+}
+
+function mapPitchToSky(midiPitch, shift = 0) {
+    let p = midiPitch + shift;
+    while (p < 60) p += 12;
+    while (p > 76) p -= 12;
+    let best = 60, minDist = 999;
+    for (const key of VALID_KEYS) {
+        const d = Math.abs(p - key);
+        if (d < minDist) { minDist = d; best = key; }
+    }
+    return KEY_MAP[best];
+}
+
+midiInput.addEventListener('change', handleFileSelect);
+
+function handleFileSelect() {
+    const file = midiInput.files[0];
+    if (!file) return;
+    if (!file.name.match(/\.(mid|midi)$/i)) { showToast('请选择 MIDI 文件', 'error'); return; }
+
+    dropZone.classList.add('has-file');
+    dropText.innerHTML = `✅ 已选择：<br><span class="filename">${file.name}</span>`;
+    
+    let rawName = file.name.replace(/\.[^.]+$/, '');
+    let songTitle = rawName, originalAuthor = '';
+    const separators = [' - ', ' -', '- ', '-', '_', '—'];
+    for (let sep of separators) {
+        if (rawName.includes(sep)) {
+            const parts = rawName.split(sep);
+            if (parts.length >= 2) { songTitle = parts[0].trim(); originalAuthor = parts.slice(1).join(' ').trim(); break; }
         }
-        const Midi = window.Midi;
+    }
+    songNameInput.value = songTitle;
+    authorInput.value = originalAuthor; 
 
-        function showToast(message, type = 'info') {
-            const container = document.getElementById('toast-container');
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
-            toast.textContent = message;
-            container.appendChild(toast);
-            setTimeout(() => { toast.remove(); }, 3000);
-        }
+    statusDiv.textContent = '正在读取文件...';
+    rawInfoPanel.style.display = 'none'; configPanel.style.display = 'none'; downloadArea.style.display = 'none'; logDiv.style.display = 'none';
 
-        const midiInput = document.getElementById('midiFile');
-        const dropZone = document.getElementById('dropZone');
-        const dropText = document.getElementById('dropText');
-        const configPanel = document.getElementById('configPanel');
-        const trackSelect = document.getElementById('trackSelect');
-        const songNameInput = document.getElementById('songNameInput');
-        const authorInput = document.getElementById('authorInput');
-        const transcriberInput = document.getElementById('transcriberInput');
-        const convertBtn = document.getElementById('convertBtn');
-        const statusDiv = document.getElementById('status');
-        const logDiv = document.getElementById('log');
-        const downloadArea = document.getElementById('downloadArea');
-        const actionButtonsContainer = document.getElementById('actionButtonsContainer');
-        const rawInfoPanel = document.getElementById('rawInfoPanel');
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        try {
+            const arrayBuffer = event.target.result;
+            if (arrayBuffer.byteLength === 0) throw new Error('文件为空');
 
-        let currentMidiData = null;
-        let pendingTxtContent = null;
-
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
-        ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
-        ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
-        dropZone.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) { midiInput.files = e.dataTransfer.files; handleFileSelect(); } });
-
-        const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
-        const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
-
-        function calculateBestShift(notes) {
-            if (notes.length === 0) return 0;
-            const pitches = notes.map(n => n.midi).sort((a, b) => a - b);
-            const medianPitch = pitches[Math.floor(pitches.length / 2)];
-            return Math.round((68 - medianPitch) / 12) * 12;
-        }
-
-        function mapPitchToSky(midiPitch, shift = 0) {
-            let p = midiPitch + shift;
-            while (p < 60) p += 12;
-            while (p > 76) p -= 12;
-            let best = 60, minDist = 999;
-            for (const key of VALID_KEYS) {
-                const d = Math.abs(p - key);
-                if (d < minDist) { minDist = d; best = key; }
-            }
-            return KEY_MAP[best];
-        }
-
-        midiInput.addEventListener('change', handleFileSelect);
-
-        function handleFileSelect() {
-            const file = midiInput.files[0];
-            if (!file) return;
-            if (!file.name.match(/\.(mid|midi)$/i)) { showToast('请选择 MIDI 文件', 'error'); return; }
-
-            dropZone.classList.add('has-file');
-            dropText.innerHTML = `✅ 已选择：<br><span class="filename">${file.name}</span>`;
+            currentMidiData = new Midi(arrayBuffer);
             
-            let rawName = file.name.replace(/\.[^.]+$/, '');
-            let songTitle = rawName, originalAuthor = '';
-            const separators = [' - ', ' -', '- ', '-', '_', '—'];
-            for (let sep of separators) {
-                if (rawName.includes(sep)) {
-                    const parts = rawName.split(sep);
-                    if (parts.length >= 2) { songTitle = parts[0].trim(); originalAuthor = parts.slice(1).join(' ').trim(); break; }
+            trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并</option>';
+            let hasValidTrack = false;
+            let instrumentsSet = new Set();
+            let totalNotes = 0;
+            let minMidi = 127, maxMidi = 0;
+            let maxTime = 0;
+
+            currentMidiData.tracks.forEach((track, index) => {
+                if (track.notes.length > 0) {
+                    hasValidTrack = true;
+                    totalNotes += track.notes.length;
+                    const instName = (track.instrument && track.instrument.name) ? track.instrument.name : '未知乐器';
+                    instrumentsSet.add(instName);
+
+                    track.notes.forEach(n => {
+                        if (n.midi < minMidi) minMidi = n.midi;
+                        if (n.midi > maxMidi) maxMidi = n.midi;
+                        if (n.time > maxTime) maxTime = n.time;
+                    });
+
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.text = `轨道 ${index + 1} (${track.notes.length}音符)`;
+                    trackSelect.appendChild(option);
                 }
-            }
-            songNameInput.value = songTitle;
-            authorInput.value = originalAuthor; 
+            });
 
-            statusDiv.textContent = '正在读取文件...';
-            rawInfoPanel.style.display = 'none'; configPanel.style.display = 'none'; downloadArea.style.display = 'none'; logDiv.style.display = 'none';
+            if (!hasValidTrack) throw new Error('无有效音符');
 
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                // 延迟 30ms 执行解析，让 UI 先刷新出“正在读取”的文字，防止大文件卡死
-                setTimeout(() => {
-                    try {
-                        const arrayBuffer = event.target.result;
-                        if (arrayBuffer.byteLength === 0) throw new Error('文件为空');
+            const totalSeconds = Math.floor(maxTime);
+            const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
 
-                        currentMidiData = new Midi(arrayBuffer);
-                        
-                        trackSelect.innerHTML = '<option value="all">🌟 全部音轨合并</option>';
-                        let hasValidTrack = false;
-                        let instrumentsSet = new Set();
-                        let totalNotes = 0;
-                        let minMidi = 127, maxMidi = 0;
-                        let maxTime = 0;
+            document.getElementById('infoTotalTracks').textContent = currentMidiData.tracks.length + ' 轨';
+            document.getElementById('infoValidTracks').textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
+            document.getElementById('infoInstruments').textContent = Array.from(instrumentsSet).join(', ') || '无';
+            document.getElementById('infoBpm').textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
+            document.getElementById('infoDuration').textContent = `${mins} 分 ${secs} 秒`;
+            document.getElementById('infoPitchRange').textContent = `${minMidi} ~ ${maxMidi}`;
+            document.getElementById('infoTotalNotes').textContent = totalNotes + ' 个';
 
-                        currentMidiData.tracks.forEach((track, index) => {
-                            if (track.notes.length > 0) {
-                                hasValidTrack = true;
-                                totalNotes += track.notes.length;
-                                const instName = (track.instrument && track.instrument.name) ? track.instrument.name : '未知乐器';
-                                instrumentsSet.add(instName);
-
-                                track.notes.forEach(n => {
-                                    if (n.midi < minMidi) minMidi = n.midi;
-                                    if (n.midi > maxMidi) maxMidi = n.midi;
-                                    if (n.time > maxTime) maxTime = n.time;
-                                });
-
-                                const option = document.createElement('option');
-                                option.value = index;
-                                option.text = `轨道 ${index + 1} (${track.notes.length}音符)`;
-                                trackSelect.appendChild(option);
-                            }
-                        });
-
-                        if (!hasValidTrack) throw new Error('无有效音符');
-
-                        const totalSeconds = Math.floor(maxTime);
-                        const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
-
-                        document.getElementById('infoTotalTracks').textContent = currentMidiData.tracks.length + ' 轨';
-                        document.getElementById('infoValidTracks').textContent = currentMidiData.tracks.filter(t=>t.notes.length>0).length + ' 轨';
-                        document.getElementById('infoInstruments').textContent = Array.from(instrumentsSet).join(', ') || '无';
-                        document.getElementById('infoBpm').textContent = Math.round(currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120);
-                        document.getElementById('infoDuration').textContent = `${mins} 分 ${secs} 秒`;
-                        document.getElementById('infoPitchRange').textContent = `${minMidi} ~ ${maxMidi}`;
-                        document.getElementById('infoTotalNotes').textContent = totalNotes + ' 个';
-
-                        rawInfoPanel.style.display = 'block'; 
-                        configPanel.style.display = 'block';
-                        convertBtn.disabled = false; 
-                        statusDiv.textContent = '请选择音轨';
-                        showToast('解析成功', 'success');
-                        
-                    } catch (err) {
-                        statusDiv.textContent = '❌ 解析失败';
-                        showToast('解析失败: ' + err.message, 'error');
-                        convertBtn.disabled = true;
-                        dropZone.classList.remove('has-file'); 
-                        dropText.textContent = "点击选择或拖拽 MIDI 文件";
-                    }
-                }, 30);
-            };
-            reader.readAsArrayBuffer(file);
+            rawInfoPanel.style.display = 'block'; 
+            configPanel.style.display = 'block';
+            convertBtn.disabled = false; 
+            statusDiv.textContent = '请选择音轨';
+            showToast('解析成功', 'success');
+            
+        } catch (err) {
+            statusDiv.textContent = '❌ 解析失败';
+            showToast('解析失败: ' + err.message, 'error');
+            convertBtn.disabled = true;
+            dropZone.classList.remove('has-file'); 
+            dropText.textContent = "点击选择或拖拽 MIDI 文件";
         }
+    };
+    reader.readAsArrayBuffer(file);
+}
 
-        convertBtn.addEventListener('click', () => {
-            if (!currentMidiData) return;
-            convertBtn.disabled = true; convertBtn.textContent = '提取中...';
-            downloadArea.style.display = 'none'; logDiv.style.display = 'block'; logDiv.textContent = '';
-            statusDiv.textContent = '正在提取主旋律...';
+convertBtn.addEventListener('click', () => {
+    if (!currentMidiData) return;
+    convertBtn.disabled = true; convertBtn.textContent = '提取中...';
+    downloadArea.style.display = 'none'; logDiv.style.display = 'block'; logDiv.textContent = '';
+    statusDiv.textContent = '正在提取主旋律...';
 
-            setTimeout(() => {
-                try {
-                    const selectedValue = trackSelect.value;
-                    let rawNotes = [];
-                    let extractedCount = 0;
+    setTimeout(() => {
+        try {
+            const selectedValue = trackSelect.value;
+            let rawNotes = [];
+            let extractedCount = 0;
 
-                    let tracksToProcess = selectedValue === "all" 
-                        ? currentMidiData.tracks.filter((t, i) => i !== 9 && t.notes.length > 0) 
-                        : [currentMidiData.tracks[parseInt(selectedValue)]];
+            let tracksToProcess = selectedValue === "all" 
+                ? currentMidiData.tracks.filter((t, i) => i !== 9 && t.notes.length > 0) 
+                : [currentMidiData.tracks[parseInt(selectedValue)]];
 
-                    tracksToProcess.forEach(track => {
-                        track.notes.forEach(note => {
-                            extractedCount++;
-                            if (note.duration * 1000 < 35) return; 
-                            rawNotes.push({ midi: note.midi, time: note.time, velocity: note.velocity });
-                        });
-                    });
+            tracksToProcess.forEach(track => {
+                track.notes.forEach(note => {
+                    extractedCount++;
+                    if (note.duration * 1000 < 35) return; 
+                    rawNotes.push({ midi: note.midi, time: note.time, velocity: note.velocity });
+                });
+            });
 
-                    if (rawNotes.length === 0) throw new Error('无有效音符');
-                    const shift = calculateBestShift(rawNotes);
+            if (rawNotes.length === 0) throw new Error('无有效音符');
+            const shift = calculateBestShift(rawNotes);
 
-                    let mappedNotes = rawNotes.map(n => ({
-                        time: Math.round(n.time * 1000),
-                        key: mapPitchToSky(n.midi, shift),
-                        velocity: n.velocity,
-                        origMidi: n.midi
-                    })).sort((a, b) => a.time - b.time);
+            let mappedNotes = rawNotes.map(n => ({
+                time: Math.round(n.time * 1000),
+                key: mapPitchToSky(n.midi, shift),
+                velocity: n.velocity,
+                origMidi: n.midi
+            })).sort((a, b) => a.time - b.time);
 
-                    const GRID_STEP = 30, MIN_GAP = 55, MAX_CHORD_KEYS = 3, ARPEGGIO_OFFSET = 35;
+            const GRID_STEP = 30, MIN_GAP = 55, MAX_CHORD_KEYS = 3, ARPEGGIO_OFFSET = 35;
 
-                    let quantized = mappedNotes.map(n => { return { ...n, time: Math.round(n.time / GRID_STEP) * GRID_STEP }; });
-                    let grouped = [];
-                    quantized.forEach(note => {
-                        let existing = grouped.find(g => g.time === note.time);
-                        if (existing) existing.notes.push(note); else grouped.push({ time: note.time, notes: [note] });
-                    });
+            let quantized = mappedNotes.map(n => { return { ...n, time: Math.round(n.time / GRID_STEP) * GRID_STEP }; });
+            let grouped = [];
+            quantized.forEach(note => {
+                let existing = grouped.find(g => g.time === note.time);
+                if (existing) existing.notes.push(note); else grouped.push({ time: note.time, notes: [note] });
+            });
 
-                    grouped.forEach(g => {
-                        g.notes.sort((a, b) => (b.velocity * 100 + b.origMidi) - (a.velocity * 100 + a.origMidi));
-                        g.melody = g.notes[0];
-                        g.accompaniment = g.notes.slice(1);
-                    });
+            grouped.forEach(g => {
+                g.notes.sort((a, b) => (b.velocity * 100 + b.origMidi) - (a.velocity * 100 + a.origMidi));
+                g.melody = g.notes[0];
+                g.accompaniment = g.notes.slice(1);
+            });
 
-                    let deduplicated = [];
-                    grouped.forEach(g => {
-                        let prev = deduplicated[deduplicated.length - 1];
-                        if (prev && g.time - prev.time < 85) {
-                            if (g.melody.key === prev.melody.key) {
-                                g.accompaniment.forEach(acc => { if (!prev.accompaniment.find(a => a.key === acc.key)) prev.accompaniment.push(acc); });
-                                return;
-                            }
-                        }
-                        deduplicated.push(g);
-                    });
-
-                    let arpeggioPool = [];
-                    deduplicated.forEach(group => {
-                        let chordKeys = [group.melody, ...group.accompaniment];
-                        let uniqueKeys = [];
-                        chordKeys.forEach(k => { if (!uniqueKeys.find(u => u.key === k.key)) uniqueKeys.push(k); });
-                        if (uniqueKeys.length > MAX_CHORD_KEYS) {
-                            let extraKeys = uniqueKeys.splice(MAX_CHORD_KEYS);
-                            arpeggioPool.push({ time: group.time + ARPEGGIO_OFFSET, keys: extraKeys });
-                        }
-                        group.finalKeys = uniqueKeys;
-                    });
-
-                    arpeggioPool.forEach(arp => {
-                        let existing = deduplicated.find(g => g.time === arp.time);
-                        if (existing) arp.keys.forEach(k => { if(!existing.finalKeys.find(u=>u.key===k.key) && existing.finalKeys.length < MAX_CHORD_KEYS) existing.finalKeys.push(k); });
-                        else deduplicated.push({ time: arp.time, finalKeys: arp.keys, melody: null, accompaniment: [] });
-                    });
-                    deduplicated.sort((a, b) => a.time - b.time);
-
-                    let alignedGroups = [];
-                    let lastTime = -9999;
-                    deduplicated.forEach(group => {
-                        if (group.time - lastTime < MIN_GAP) {
-                            let prev = alignedGroups[alignedGroups.length - 1];
-                            group.finalKeys.forEach(k => {
-                                if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(k);
-                            });
-                        } else {
-                            alignedGroups.push(group);
-                            lastTime = group.time;
-                        }
-                    });
-
-                    let allNotes = [];
-                    alignedGroups.forEach(group => { group.finalKeys.forEach(k => { allNotes.push({ time: group.time, key: k.key }); }); });
-
-                    log(`=== 提取报告 ===\n识别音符: ${extractedCount} 个\n生成成品: ${allNotes.length} 个`);
-
-                    const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
-                    let studioSpeed = Math.round(originalBpm * (700 / 120));
-                    if (studioSpeed < 100) studioSpeed = 100; if (studioSpeed > 4000) studioSpeed = 4000;
-
-                    pendingTxtContent = JSON.stringify([{
-                        name: songNameInput.value.trim() || '未命名',
-                        author: authorInput.value.trim() || '未知作者',
-                        transcribedBy: transcriberInput.value.trim() || '光遇玩家',
-                        isComposed: false, bpm: studioSpeed, bitsPerPage: 16, pitchLevel: 0, isEncrypted: false, songNotes: allNotes
-                    }]);
-
-                    document.getElementById('stepFinalNotes').textContent = allNotes.length + ' 个';
-                    document.getElementById('outDuration').textContent = `${((allNotes[allNotes.length - 1].time - allNotes[0].time) / 1000).toFixed(1)} 秒`;
-                    document.getElementById('outSpeed').textContent = studioSpeed;
-                    document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
-                    document.getElementById('outBpm').textContent = studioSpeed;
-                    document.getElementById('outDataSize').textContent = (new Blob([pendingTxtContent]).size / 1024).toFixed(1) + ' KB';
-                    
-                    statusDiv.textContent = '✅ 转换完成';
-                    downloadArea.style.display = 'block';
-                    showToast('提取完成！', 'success');
-
-                    actionButtonsContainer.innerHTML = `
-                        <button id="btnSendApp" style="background: #6366f1; flex: 1;">🚀 发送至 App</button>
-                        <button id="btnSaveLocal" style="background: #10b981; flex: 1;">📁 保存至本地</button>
-                    `;
-
-                    document.getElementById('btnSendApp').onclick = () => {
-                        if (window.AndroidBridge) {
-                            const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
-                            const payload = { name: songNameInput.value.trim() || "未命名", author: authorInput.value.trim() || "未知作者", notes: rawNotesOnly };
-                            window.AndroidBridge.startPlay(JSON.stringify(payload));
-                            showToast('已发送至 App', 'success');
-                        } else {
-                            showToast('请在 App 内使用', 'error');
-                        }
-                    };
-
-                    document.getElementById('btnSaveLocal').onclick = () => {
-                        if (window.AndroidBridge) {
-                            const payload = { name: songNameInput.value.trim() || "未命名", author: authorInput.value.trim() || "未知作者", fullJson: pendingTxtContent, targetFolder: "LocalSheets" };
-                            window.AndroidBridge.saveLocal(JSON.stringify(payload));
-                            showToast('已保存至本地', 'success');
-                        } else {
-                            showToast('请在 App 内使用', 'error');
-                        }
-                    };
-
-                } catch (err) {
-                    statusDiv.textContent = '❌ 转换出错';
-                    log('错误: ' + err.message);
-                    showToast(err.message, 'error');
-                } finally {
-                    convertBtn.disabled = false;
-                    convertBtn.textContent = '✨ 开始智能转换';
+            let deduplicated = [];
+            grouped.forEach(g => {
+                let prev = deduplicated[deduplicated.length - 1];
+                if (prev && g.time - prev.time < 85) {
+                    if (g.melody.key === prev.melody.key) {
+                        g.accompaniment.forEach(acc => { if (!prev.accompaniment.find(a => a.key === acc.key)) prev.accompaniment.push(acc); });
+                        return;
+                    }
                 }
-            }, 50);
-        });
-    });
+                deduplicated.push(g);
+            });
+
+            let arpeggioPool = [];
+            deduplicated.forEach(group => {
+                let chordKeys = [group.melody, ...group.accompaniment];
+                let uniqueKeys = [];
+                chordKeys.forEach(k => { if (!uniqueKeys.find(u => u.key === k.key)) uniqueKeys.push(k); });
+                if (uniqueKeys.length > MAX_CHORD_KEYS) {
+                    let extraKeys = uniqueKeys.splice(MAX_CHORD_KEYS);
+                    arpeggioPool.push({ time: group.time + ARPEGGIO_OFFSET, keys: extraKeys });
+                }
+                group.finalKeys = uniqueKeys;
+            });
+
+            arpeggioPool.forEach(arp => {
+                let existing = deduplicated.find(g => g.time === arp.time);
+                if (existing) arp.keys.forEach(k => { if(!existing.finalKeys.find(u=>u.key===k.key) && existing.finalKeys.length < MAX_CHORD_KEYS) existing.finalKeys.push(k); });
+                else deduplicated.push({ time: arp.time, finalKeys: arp.keys, melody: null, accompaniment: [] });
+            });
+            deduplicated.sort((a, b) => a.time - b.time);
+
+            let alignedGroups = [];
+            let lastTime = -9999;
+            deduplicated.forEach(group => {
+                if (group.time - lastTime < MIN_GAP) {
+                    let prev = alignedGroups[alignedGroups.length - 1];
+                    group.finalKeys.forEach(k => {
+                        if (!prev.finalKeys.find(pk => pk.key === k.key) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(k);
+                    });
+                } else {
+                    alignedGroups.push(group);
+                    lastTime = group.time;
+                }
+            });
+
+            let allNotes = [];
+            alignedGroups.forEach(group => { group.finalKeys.forEach(k => { allNotes.push({ time: group.time, key: k.key }); }); });
+
+            log(`=== 提取报告 ===\n识别音符: ${extractedCount} 个\n生成成品: ${allNotes.length} 个`);
+
+            const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
+            let studioSpeed = Math.round(originalBpm * (700 / 120));
+            if (studioSpeed < 100) studioSpeed = 100; if (studioSpeed > 4000) studioSpeed = 4000;
+
+            pendingTxtContent = JSON.stringify([{
+                name: songNameInput.value.trim() || '未命名',
+                author: authorInput.value.trim() || '未知作者',
+                transcribedBy: transcriberInput.value.trim() || '光遇玩家',
+                isComposed: false, bpm: studioSpeed, bitsPerPage: 16, pitchLevel: 0, isEncrypted: false, songNotes: allNotes
+            }]);
+
+            document.getElementById('stepFinalNotes').textContent = allNotes.length + ' 个';
+            document.getElementById('outDuration').textContent = `${((allNotes[allNotes.length - 1].time - allNotes[0].time) / 1000).toFixed(1)} 秒`;
+            document.getElementById('outSpeed').textContent = studioSpeed;
+            document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
+            document.getElementById('outBpm').textContent = studioSpeed;
+            document.getElementById('outDataSize').textContent = (new Blob([pendingTxtContent]).size / 1024).toFixed(1) + ' KB';
+            
+            statusDiv.textContent = '✅ 转换完成';
+            downloadArea.style.display = 'block';
+            showToast('提取完成！', 'success');
+
+            actionButtonsContainer.innerHTML = `
+                <button id="btnSendApp" style="background: #6366f1; flex: 1;">🚀 发送至 App</button>
+                <button id="btnSaveLocal" style="background: #10b981; flex: 1;">📁 保存至本地</button>
+            `;
+
+            document.getElementById('btnSendApp').onclick = () => {
+                if (window.AndroidBridge) {
+                    const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
+                    const payload = { name: songNameInput.value.trim() || "未命名", author: authorInput.value.trim() || "未知作者", notes: rawNotesOnly };
+                    window.AndroidBridge.startPlay(JSON.stringify(payload));
+                    showToast('已发送至 App', 'success');
+                } else {
+                    showToast('请在 App 内使用', 'error');
+                }
+            };
+
+            document.getElementById('btnSaveLocal').onclick = () => {
+                if (window.AndroidBridge) {
+                    const payload = { name: songNameInput.value.trim() || "未命名", author: authorInput.value.trim() || "未知作者", fullJson: pendingTxtContent, targetFolder: "LocalSheets" };
+                    window.AndroidBridge.saveLocal(JSON.stringify(payload));
+                    showToast('已保存至本地', 'success');
+                } else {
+                    showToast('请在 App 内使用', 'error');
+                }
+            };
+
+        } catch (err) {
+            statusDiv.textContent = '❌ 转换出错';
+            log('错误: ' + err.message);
+            showToast(err.message, 'error');
+        } finally {
+            convertBtn.disabled = false;
+            convertBtn.textContent = '✨ 开始智能转换';
+        }
+    }, 50);
+});
 </script>
 </body>
 </html>
