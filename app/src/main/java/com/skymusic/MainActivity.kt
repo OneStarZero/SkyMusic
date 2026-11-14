@@ -9,10 +9,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
 import android.view.View
 import android.webkit.*
-import android.widget.FrameLayout
-import android.widget.Toast
+import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -22,9 +22,7 @@ import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
-    private lateinit var webView: WebView
 
-    // 处理网页端选择文件
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (filePathCallback == null) return@registerForActivityResult
         var results: Array<Uri>? = null
@@ -39,7 +37,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 申请存储权限
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
@@ -50,7 +47,7 @@ class MainActivity : AppCompatActivity() {
 
         val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
 
-        webView = WebView(this).apply {
+        val webView = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -66,7 +63,6 @@ class MainActivity : AppCompatActivity() {
                 displayZoomControls = false
             }
             
-            // 强制硬件加速
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
             }
@@ -76,37 +72,60 @@ class MainActivity : AppCompatActivity() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                     filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
-                    try {
-                        fileChooserLauncher.launch(params?.createIntent())
-                    } catch (e: Exception) {
-                        filePathCallback = null
-                        return false
-                    }
+                    try { fileChooserLauncher.launch(params?.createIntent()) } catch (e: Exception) { filePathCallback = null; return false }
                     return true
                 }
             }
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
         }
-
         rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
+
+        // ⚙️ 加回设置按钮
+        val btnSettings = TextView(this).apply {
+            text = "⚙️ 设置"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(30, 20, 30, 20)
+            setBackgroundColor(Color.parseColor("#CC000000"))
+            setOnClickListener { showSettingsDialog() }
+        }
+        val settingsParams = FrameLayout.LayoutParams(-2, -2).apply {
+            gravity = Gravity.TOP or Gravity.END
+            topMargin = 60
+            rightMargin = 20
+        }
+        rootLayout.addView(btnSettings, settingsParams)
         setContentView(rootLayout)
     }
 
-    // 网页交互接口
-    inner class WebAppInterface {
-        @JavascriptInterface
-        fun startPlay(jsonString: String) {
-            runOnUiThread { handlePayload(jsonString, false) }
-        }
-
-        @JavascriptInterface
-        fun saveLocal(jsonString: String) {
-            runOnUiThread { handlePayload(jsonString, true) }
-        }
+    private fun showSettingsDialog() {
+        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球")
+        AlertDialog.Builder(this)
+            .setTitle("SkyMusic 设置")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                    1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    2 -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                            Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
+                        } else {
+                            startService(Intent(this, FloatingWindowService::class.java))
+                            Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }.show()
     }
 
-    // 处理保存与播放
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun startPlay(jsonString: String) { runOnUiThread { handlePayload(jsonString, false) } }
+        @JavascriptInterface
+        fun saveLocal(jsonString: String) { runOnUiThread { handlePayload(jsonString, true) } }
+    }
+
     private fun handlePayload(payloadStr: String, isSaveAction: Boolean) {
         try {
             val payload = JSONObject(payloadStr)
@@ -123,19 +142,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (isSaveAction) {
-                // 保存逻辑：存入 LocalSheets
                 val fullJson = payload.optString("fullJson", payloadStr)
-                val targetFolder = "LocalSheets" 
-                val folder = File("/storage/emulated/0/SkyMusic-OneStar/$targetFolder/")
+                val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
                 if (!folder.exists()) folder.mkdirs()
-
                 val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
                 val targetFile = File(folder, fileName)
                 targetFile.writeText(fullJson, Charsets.UTF_8)
-                
                 Toast.makeText(this@MainActivity, "✅ 已保存至 LocalSheets", Toast.LENGTH_SHORT).show()
             } else {
-                // 播放逻辑
                 sendToPlayService(notesList, name, author)
                 Toast.makeText(this@MainActivity, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
             }
@@ -144,7 +158,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 检查无障碍并拉起悬浮窗
     private fun sendToPlayService(notesList: List<Pair<Long, Int>>, name: String, author: String) {
         if (SkyAccessibilityService.instance == null) {
             AlertDialog.Builder(this)
