@@ -1,25 +1,6 @@
-// js/main.js
 import { Midi } from '@tonejs/midi';
 
-// ==========================================
-// 🌟 核心：供原生 MidiPickerActivity 调用的全局函数
-// ==========================================
-window.onFileSelectedFromAndroid = function(base64Data, fileName) {
-    try {
-        const binaryString = atob(base64Data);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        // 直接复用解析逻辑
-        processMidiData(bytes.buffer, fileName);
-    } catch (err) {
-        console.error("原生文件解码失败", err);
-        showToast('文件读取失败，请重试', 'error');
-    }
-};
-
+// ==================== 基础工具 ====================
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
@@ -28,6 +9,28 @@ function showToast(message, type = 'info') {
     setTimeout(() => toast.remove(), 3000);
 }
 
+// ==================== 视图切换逻辑 ====================
+const tabMidi = document.getElementById('tabMidi');
+const tabOcr = document.getElementById('tabOcr');
+const viewMidi = document.getElementById('viewMidi');
+const viewOcr = document.getElementById('viewOcr');
+
+tabMidi.addEventListener('click', () => {
+    tabMidi.className = 'tab-btn active-midi';
+    tabOcr.className = 'tab-btn inactive';
+    viewMidi.style.display = 'block';
+    viewOcr.style.display = 'none';
+});
+
+tabOcr.addEventListener('click', () => {
+    tabOcr.className = 'tab-btn active-ocr';
+    tabMidi.className = 'tab-btn inactive';
+    viewMidi.style.display = 'none';
+    viewOcr.style.display = 'block';
+});
+
+
+// ==================== 视图 1：MIDI 逻辑 ====================
 const midiInput = document.getElementById('midiFile');
 const dropZone = document.getElementById('dropZone');
 const dropText = document.getElementById('dropText');
@@ -45,7 +48,21 @@ let pendingTxtContent = null;
 let selectedMode = 'fast';
 let selectedTrackIndices = new Set(); 
 
-// 模型切换
+const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
+const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
+
+function mapPitchToSky(midiPitch, shift = 0) {
+    let p = midiPitch + shift;
+    while (p < 60) p += 12;
+    while (p > 76) p -= 12;
+    let best = 60, minDist = 999;
+    for (const key of VALID_KEYS) {
+        const d = Math.abs(p - key);
+        if (d < minDist) { minDist = d; best = key; }
+    }
+    return KEY_MAP[best];
+}
+
 document.querySelectorAll('.model-card').forEach(card => {
     card.addEventListener('click', () => {
         if(card.classList.contains('active')) return;
@@ -54,17 +71,11 @@ document.querySelectorAll('.model-card').forEach(card => {
         selectedMode = card.getAttribute('data-mode');
         resultCard.style.display = 'none';
         logDiv.style.display = 'none';
-        setStatus('准备就绪');
+        statusDiv.textContent = '准备就绪';
     });
 });
 
-function log(msg) { logDiv.textContent += msg + '\n'; logDiv.scrollTop = logDiv.scrollHeight; }
-function setStatus(msg) { statusDiv.textContent = msg; }
-
-// 拖拽与点击上传监听
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
-['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
-['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
 dropZone.addEventListener('drop', (e) => { 
     if (e.dataTransfer.files.length) { 
         midiInput.files = e.dataTransfer.files; 
@@ -74,31 +85,15 @@ dropZone.addEventListener('drop', (e) => {
 
 midiInput.addEventListener('change', handleFileSelect);
 
-// ==========================================
-// 🌟 文件选择入口 (兼容 App 和 浏览器)
-// ==========================================
 async function handleFileSelect() {
-    // 如果是 App 环境，且原生成功接管了 <input> 的点击，这里其实不会触发
-    // 但为了浏览器端的兼容，保留读取逻辑
     const file = midiInput.files[0];
     if (!file) return;
     const arrayBuffer = await file.arrayBuffer();
     processMidiData(arrayBuffer, file.name);
 }
 
-// ==========================================
-// 🌟 核心解析逻辑（供原生和浏览器共用）
-// ==========================================
 async function processMidiData(arrayBuffer, fileName) {
-    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-        showToast('文件内容为空', 'error');
-        return;
-    }
-
-    if (!fileName.toLowerCase().endsWith('.mid') && !fileName.toLowerCase().endsWith('.midi')) {
-        showToast('请选择 .mid 或 .midi 文件！', 'error');
-        return;
-    }
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) { showToast('文件内容为空', 'error'); return; }
 
     dropZone.classList.add('has-file');
     dropText.innerHTML = `✅ 已选择：<br><span class="filename">${fileName}</span>`;
@@ -115,116 +110,58 @@ async function processMidiData(arrayBuffer, fileName) {
     document.getElementById('songNameInput').value = songTitle;
     document.getElementById('authorInput').value = originalAuthor; 
 
-    setStatus('正在读取文件...');
+    statusDiv.textContent = '正在读取文件...';
     configPanel.style.display = 'none';
     resultCard.style.display = 'none';
     logDiv.style.display = 'none';
     logDiv.textContent = '';
 
     try {
-        let midiData;
-        try {
-            midiData = new Midi(arrayBuffer);
-        } catch (midiErr) {
-            throw new Error('MIDI 解析失败，可能文件已损坏或不是标准格式');
-        }
-
+        let midiData = new Midi(arrayBuffer);
         if (!midiData || !midiData.tracks) throw new Error('无法读取音轨数据');
 
         currentMidiData = midiData;
-        
         trackListContainer.innerHTML = '';
         selectedTrackIndices.clear();
-        let totalNotes = 0;
-        let validTrackCount = 0;
+        let totalNotes = 0, validTrackCount = 0;
 
         currentMidiData.tracks.forEach((track, index) => {
             if (track.notes.length > 0) {
                 validTrackCount++;
                 totalNotes += track.notes.length;
                 let displayName = track.name && track.name.trim() !== "" ? track.name.trim() : `轨道 ${index + 1}`;
-                
-                if (index !== 9 && selectedTrackIndices.size < 2) {
-                    selectedTrackIndices.add(index);
-                }
+                if (index !== 9 && selectedTrackIndices.size < 2) selectedTrackIndices.add(index);
 
                 const item = document.createElement('div');
                 item.className = `track-item ${selectedTrackIndices.has(index) ? 'active' : ''}`;
-                item.dataset.index = index;
-                
-                item.innerHTML = `
-                    <div class="track-info">
-                        <span class="track-name" title="${displayName}">${displayName}</span>
-                        <span class="track-notes">${track.notes.length} 音符</span>
-                    </div>
-                    <div class="check-circle"></div>
-                `;
-                
+                item.innerHTML = `<div class="track-info"><span class="track-name">${displayName}</span><span class="track-notes">${track.notes.length} 音符</span></div><div class="check-circle"></div>`;
                 item.addEventListener('click', () => {
-                    if (selectedTrackIndices.has(index)) {
-                        selectedTrackIndices.delete(index);
-                        item.classList.remove('active');
-                    } else {
-                        selectedTrackIndices.add(index);
-                        item.classList.add('active');
-                    }
+                    if (selectedTrackIndices.has(index)) { selectedTrackIndices.delete(index); item.classList.remove('active'); } 
+                    else { selectedTrackIndices.add(index); item.classList.add('active'); }
                 });
-
                 trackListContainer.appendChild(item);
             }
         });
 
         document.getElementById('infoTracks').textContent = validTrackCount;
         document.getElementById('infoNotes').textContent = totalNotes;
-
         configPanel.style.display = 'block';
         convertBtn.disabled = false; 
-        setStatus('准备就绪');
-        
+        statusDiv.textContent = '准备就绪';
     } catch (err) {
-        console.error(err);
-        setStatus('❌ 解析失败');
+        statusDiv.textContent = '❌ 解析失败';
         showToast('解析失败: ' + err.message, 'error');
         dropZone.classList.remove('has-file'); 
         dropText.textContent = "点击选择或拖拽 MIDI 文件";
     }
 }
 
-// ==========================================
-// 🌟 提取转换逻辑
-// ==========================================
-const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
-const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
-
-function calculateBestShift(notes) {
-    if (notes.length === 0) return 0;
-    const pitches = notes.map(n => n.midi).sort((a, b) => a - b);
-    const medianPitch = pitches[Math.floor(pitches.length / 2)];
-    return Math.round((68 - medianPitch) / 12) * 12;
-}
-
-function mapPitchToSky(midiPitch, shift = 0) {
-    let p = midiPitch + shift;
-    while (p < 60) p += 12;
-    while (p > 76) p -= 12;
-    let best = 60, minDist = 999;
-    for (const key of VALID_KEYS) {
-        const d = Math.abs(p - key);
-        if (d < minDist) { minDist = d; best = key; }
-    }
-    return KEY_MAP[best];
-}
-
 convertBtn.addEventListener('click', async (e) => {
     e.preventDefault();
-    
     if (!currentMidiData) return;
     document.activeElement?.blur();
     
-    if (selectedTrackIndices.size === 0) {
-        showToast('请至少选择一个音轨！', 'error');
-        return;
-    }
+    if (selectedTrackIndices.size === 0) { showToast('请至少选择一个音轨！', 'error'); return; }
 
     convertBtn.disabled = true; 
     convertBtn.textContent = 'AI 正在提取中...';
@@ -233,59 +170,51 @@ convertBtn.addEventListener('click', async (e) => {
     logDiv.textContent = '';
     
     const isMelody = (selectedMode === 'fast');
-    setStatus(isMelody ? '正在加载 SkyFast...' : '正在加载 SkyPro...');
+    statusDiv.textContent = isMelody ? '正在加载 SkyFast...' : '正在加载 SkyPro...';
 
     setTimeout(async () => {
         try {
             let rawNotes = [];
-            let extractedCount = 0;
-            let longNoteCount = 0;
-
             const selectedArr = Array.from(selectedTrackIndices);
             let tracksToProcess = currentMidiData.tracks.filter((t, i) => selectedArr.includes(i));
 
             tracksToProcess.forEach(track => {
                 track.notes.forEach(note => {
-                    extractedCount++;
-                    if (note.duration * 1000 > 1000) {
-                        longNoteCount++;
-                        return;
-                    }
+                    if (note.duration * 1000 > 1000) return;
                     rawNotes.push({ time: Math.round(note.time * 1000), midi: note.midi, velocity: note.velocity });
                 });
             });
 
-            if (rawNotes.length === 0) throw new Error('无有效音符');
-
             rawNotes.sort((a, b) => a.time - b.time);
-            const shift = calculateBestShift(rawNotes);
             
+            // 音域平移
+            let pitches = rawNotes.map(n => n.midi).sort((a, b) => a - b);
+            let medianPitch = pitches[Math.floor(pitches.length / 2)];
+            const shift = Math.round((68 - medianPitch) / 12) * 12;
+
             let mappedNotes = rawNotes.map(n => ({
                 time: n.time, key: mapPitchToSky(n.midi, shift), velocity: n.velocity, origMidi: n.midi
             }));
 
-            log(`[1] 原始识别: ${extractedCount} 个`);
-            log(`[2] 剔除长音: -${longNoteCount} 个`);
+            logDiv.textContent += `[1] 原始识别: ${rawNotes.length} 个\n`;
 
             let processedNotes = [];
-
             if (isMelody) {
                 const module = await import('../OneStar_Models/OneStar-SkyFast.js');
-                processedNotes = module.process(mappedNotes, log);
+                processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
             } else if (selectedMode === 'fastpro') {
                 const module = await import('../OneStar_Models/OneStar-SkyFastPro.js');
-                processedNotes = module.process(mappedNotes, log);
+                processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
             } else {
                 const module = await import('../OneStar_Models/OneStar-SkyPro.js');
-                processedNotes = module.process(mappedNotes, log);
+                processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
             }
 
             let allNotes = [];
             if (selectedMode === 'fastpro') {
                 allNotes = processedNotes.map(n => ({ time: n.time, key: n.key }));
             } else {
-                let finalNotes = [];
-                let lastT = -9999;
+                let finalNotes = [], lastT = -9999;
                 processedNotes.forEach(n => {
                     if (n.time - lastT < 15) {
                          let prev = finalNotes[finalNotes.length - 1];
@@ -298,97 +227,55 @@ convertBtn.addEventListener('click', async (e) => {
                 finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
             }
 
-            log(`✅ 最终输出音符: ${allNotes.length} 个\n`);
-
-            let originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
-            let studioSpeed = Math.round(originalBpm * (700 / 120));
-            if (studioSpeed < 100) studioSpeed = 100;
-            if (studioSpeed > 4000) studioSpeed = 4000;
-
-            let modelName = "SkyPro";
-            if (isMelody) modelName = "SkyFast";
-            else if (selectedMode === 'fastpro') modelName = "SkyFastPro";
-
-            const baseSongName = document.getElementById('songNameInput').value.trim() || '未命名曲目';
+            let modelName = isMelody ? "SkyFast" : (selectedMode === 'fastpro' ? "SkyFastPro" : "SkyPro");
+            const baseSongName = document.getElementById('songNameInput').value.trim() || '未命名';
             const finalSongName = `${baseSongName} || ${modelName}`; 
-            
-            const finalOriginalAuthor = document.getElementById('authorInput').value.trim() || '未知作者';
+            const finalAuthor = document.getElementById('authorInput').value.trim() || '未知作者';
             const finalTranscriber = document.getElementById('transcriberInput').value.trim() || '_OneStar';
+            const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
+            const studioSpeed = Math.min(4000, Math.max(100, Math.round(originalBpm * (700 / 120))));
 
             const skyStudioData = [{
-                name: finalSongName,
-                author: finalOriginalAuthor,        
-                transcribedBy: finalTranscriber,    
-                isComposed: false,
-                bpm: studioSpeed,
-                bitsPerPage: 16,
-                pitchLevel: 0,
-                isEncrypted: false,
-                songNotes: allNotes,
-                model: modelName 
+                name: finalSongName, author: finalAuthor, transcribedBy: finalTranscriber,
+                isComposed: false, bpm: studioSpeed, bitsPerPage: 16, pitchLevel: 0, isEncrypted: false,
+                songNotes: allNotes, model: modelName 
             }];
 
             pendingTxtContent = JSON.stringify(skyStudioData);
 
-            const firstNoteTime = allNotes[0].time;
-            const lastNoteTime = allNotes[allNotes.length - 1].time;
-            const totalDurationSec = ((lastNoteTime - firstNoteTime) / 1000).toFixed(1);
-
             document.getElementById('stepFinalNotes').textContent = allNotes.length;
-            document.getElementById('outDuration').textContent = `${totalDurationSec}s`;
+            document.getElementById('outDuration').textContent = ((allNotes[allNotes.length-1].time - allNotes[0].time)/1000).toFixed(1)+'s';
             document.getElementById('outSpeed').textContent = studioSpeed;
             document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
             
             resultCard.style.display = 'block';
-            setStatus('✅ 提取完成！');
+            statusDiv.textContent = '✅ 提取完成！';
             
-            setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-
             const isApp = typeof window.AndroidBridge !== 'undefined';
             document.getElementById('appActions').style.display = isApp ? 'flex' : 'none';
             document.getElementById('browserActions').style.display = isApp ? 'none' : 'block';
 
             if (isApp) {
                 btnSendApp.onclick = () => {
-                    const rawNotesOnly = allNotes.map(n => ({ time: n.time, key: n.key }));
-                    const payload = {
-                        name: finalSongName,
-                        author: finalOriginalAuthor,
-                        transcriber: finalTranscriber,
-                        model: modelName,
-                        notes: rawNotesOnly,
-                        fullJson: pendingTxtContent,
-                        targetFolder: "AppSheets"
-                    };
+                    const payload = { name: finalSongName, author: finalAuthor, model: modelName, notes: allNotes, fullJson: pendingTxtContent, targetFolder: "AppSheets" };
                     window.AndroidBridge.startPlay(JSON.stringify(payload));
                 };
-
                 btnSaveLocal.onclick = () => {
-                    const payload = {
-                        name: finalSongName,
-                        author: finalOriginalAuthor,
-                        fullJson: pendingTxtContent,
-                        targetFolder: "LocalSheets"
-                    };
+                    const payload = { name: finalSongName, author: finalAuthor, fullJson: pendingTxtContent, targetFolder: "LocalSheets" };
                     window.AndroidBridge.saveLocal(JSON.stringify(payload));
                 };
             } else {
                 document.getElementById('btnDownload').onclick = () => {
                     const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `${finalSongName} - ${finalOriginalAuthor}.txt`;
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `${finalSongName} - ${finalAuthor}.txt`;
                     a.click();
-                    URL.revokeObjectURL(url);
-                    showToast('已触发浏览器下载', 'success');
                 };
             }
-
         } catch (err) {
-            console.error(err);
-            setStatus('❌ 转换出错');
-            log('错误: ' + err.message);
+            statusDiv.textContent = '❌ 转换出错';
+            logDiv.textContent += '错误: ' + err.message;
             showToast(err.message, 'error');
         } finally {
             convertBtn.disabled = false;
@@ -396,3 +283,73 @@ convertBtn.addEventListener('click', async (e) => {
         }
     }, 50);
 });
+
+
+// ==================== 视图 2：图片识谱逻辑 ====================
+document.getElementById('btnOcrPick').addEventListener('click', () => {
+    if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.openImagePicker) {
+        window.AndroidBridge.openImagePicker();
+    } else {
+        showToast('请在 App 内使用', 'error');
+    }
+});
+
+// 接收原生 OCR 识别结果
+window.onImageTextRecognized = function(text) {
+    const ocrStatus = document.getElementById('ocrStatus');
+    ocrStatus.textContent = "正在解析文本...";
+    
+    const cleanText = text.replace(/[^1-7\s']/g, '');
+    const regex = /([1-7])([']?)/g;
+    const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71 };
+    
+    let parsedNotes = [];
+    let currentTime = 0;
+    let match;
+    
+    while ((match = regex.exec(cleanText)) !== null) {
+        let midi = BASE_MIDI[match[1]];
+        if (match[2] === "'") midi += 12;
+        parsedNotes.push({ time: currentTime, midi: midi, velocity: 0.8 });
+        currentTime += 400;
+    }
+
+    if (parsedNotes.length === 0) {
+        ocrStatus.textContent = "❌ 未能识别出有效数字";
+        return;
+    }
+
+    ocrStatus.textContent = `✅ 识别到 ${parsedNotes.length} 个音符`;
+    document.getElementById('ocrNotesCount').textContent = parsedNotes.length;
+    document.getElementById('ocrResultCard').style.display = 'block';
+
+    document.getElementById('btnOcrConvert').onclick = async () => {
+        try {
+            // 🌟 调用独立的 OCR 模型文件夹
+            const module = await import('../OneStarModels_Ocr/OneStar-SkyOcr.js');
+            const processed = module.process(parsedNotes, console.log);
+
+            // 映射为光遇键位
+            const finalNotes = processed.map(n => ({
+                time: n.time,
+                key: mapPitchToSky(n.midi)
+            }));
+
+            const skyData = [{
+                name: "图片识谱 || SkyOcr", author: "OneStar", transcribedBy: "_OneStar",
+                bpm: 240, songNotes: finalNotes
+            }];
+
+            if (window.AndroidBridge && window.AndroidBridge.startPlay) {
+                const payload = {
+                    name: "图片识谱 || SkyOcr", author: "OneStar", model: "SkyOcr",
+                    notes: finalNotes, fullJson: JSON.stringify(skyData), targetFolder: "AppSheets"
+                };
+                window.AndroidBridge.startPlay(JSON.stringify(payload));
+                showToast('🚀 已发送至悬浮窗', 'success');
+            }
+        } catch (e) {
+            showToast('转换失败: ' + e.message, 'error');
+        }
+    };
+};

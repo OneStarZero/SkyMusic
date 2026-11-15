@@ -19,6 +19,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
@@ -26,13 +29,29 @@ import java.io.InputStream
 class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
 
-    // 🌟 终极方案：直接用 GetContent 获取文件
-    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) {
-            Toast.makeText(this, "已取消选择", Toast.LENGTH_SHORT).show()
-            return@registerForActivityResult
+    // 🌟 1. 图片选择器 (用于 OCR 识谱)
+    private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val image = InputImage.fromFilePath(this, uri)
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            
+            recognizer.process(image)
+                .addOnSuccessListener { visionText ->
+                    val safeText = visionText.text.replace("\\", "\\\\").replace("\n", "\\n").replace("'", "\\'")
+                    webViewInstance?.evaluateJavascript("window.onImageTextRecognized('$safeText');", null)
+                }
+                .addOnFailureListener { e ->
+                    Toast.makeText(this, "识别失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+        } catch (e: Exception) {
+            Toast.makeText(this, "读取图片失败", Toast.LENGTH_SHORT).show()
         }
+    }
 
+    // 🌟 2. 文件选择器 (用于读取 MIDI)
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
         try {
             var fileName = "未知文件.mid"
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -53,15 +72,11 @@ class MainActivity : AppCompatActivity() {
 
             if (bytes != null) {
                 val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                // 回传给网页
                 val jsCode = "window.onFileSelectedFromAndroid('$base64Data', '${fileName.replace("'", "\\'")}');"
                 webViewInstance?.evaluateJavascript(jsCode, null)
-                Toast.makeText(this, "读取成功", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "文件内容为空", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "读取文件异常: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "读取文件失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -92,9 +107,9 @@ class MainActivity : AppCompatActivity() {
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             webViewClient = WebViewClient()
             
+            // 拦截网页 <input> 调用
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    // 网页触发 <input> 时，直接调起原生
                     filePickerLauncher.launch("*/*")
                     return true
                 }
@@ -144,12 +159,21 @@ class MainActivity : AppCompatActivity() {
             }.show()
     }
 
+    // 🌟 3. 接口全部包在这里面
     inner class WebAppInterface {
         @JavascriptInterface
         fun startPlay(jsonString: String) = runOnUiThread { handleSendApp(jsonString) }
 
         @JavascriptInterface
         fun saveLocal(jsonString: String) = runOnUiThread { handleSaveLocal(jsonString) }
+
+        // 开放给 JS 调用的图片选择器接口
+        @JavascriptInterface
+        fun openImagePicker() {
+            runOnUiThread {
+                imagePickerLauncher.launch("image/*")
+            }
+        }
     }
 
     private fun handleSendApp(payloadStr: String) {
