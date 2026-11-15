@@ -5,13 +5,93 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
 import java.nio.ByteOrder
+import kotlin.concurrent.thread
+import kotlin.math.abs
+import kotlin.math.ln
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
-object OneStarAudioDecoder {
-    private const val TARGET_SAMPLE_RATE = 22050
+class OneStarAudioEngine(private val context: Context) {
+    private val TAG = "OneStarAudioEngine"
+    private val SAMPLE_RATE = 22050
 
-    fun decodeToFloatArray(context: Context, uri: Uri): FloatArray {
+    fun processAudio(uri: Uri, onResult: (String) -> Unit) {
+        thread {
+            try {
+                val floatSamples = decodeToFloatArray(context, uri)
+                if (floatSamples.isEmpty()) {
+                    onResult("[]")
+                    return@thread
+                }
+
+                // 🌟 纯数学自相关算法（提取频率）
+                val notesList = mutableListOf<JSONObject>()
+                val windowSize = 2048
+                var lastTime = -1L
+                
+                for (i in 0 until floatSamples.size - windowSize step windowSize / 2) {
+                    val window = floatSamples.copyOfRange(i, i + windowSize)
+                    val freq = detectPitch(window)
+                    
+                    if (freq > 50 && freq < 2000) {
+                        val timeMs = (i.toFloat() / SAMPLE_RATE * 1000).toLong()
+                        if (timeMs - lastTime > 100) { // 防止连击过快
+                            val midi = 69 + 12 * ln(freq / 440.0) / ln(2.0)
+                            val midiInt = midi.roundToInt()
+                            
+                            val note = JSONObject().apply {
+                                put("time", timeMs / 1000.0)
+                                put("midi", midiInt)
+                                put("velocity", 0.8)
+                            }
+                            notesList.add(note)
+                            lastTime = timeMs
+                        }
+                    }
+                }
+
+                onResult(JSONArray(notesList).toString())
+
+            } catch (e: Exception) {
+                Log.e(TAG, "处理失败: ${e.message}")
+                onResult("[]")
+            }
+        }
+    }
+
+    // 基于自相关的基频检测 (Autocorrelation)
+    private fun detectPitch(audioBuffer: FloatArray): Double {
+        val n = audioBuffer.size
+        var sum = 0.0
+        for (v in audioBuffer) sum += v * v
+        if (sum < 0.01) return 0.0 // 静音
+
+        var bestOffset = -1
+        var bestCorrelation = 0.0
+        val minOffset = SAMPLE_RATE / 2000 // 最高频率 2000Hz
+        val maxOffset = SAMPLE_RATE / 50   // 最低频率 50Hz
+
+        for (offset in minOffset until maxOffset) {
+            var correlation = 0.0
+            for (i in 0 until n - offset) {
+                correlation += audioBuffer[i] * audioBuffer[i + offset]
+            }
+            if (correlation > bestCorrelation) {
+                bestCorrelation = correlation
+                bestOffset = offset
+            }
+        }
+
+        if (bestOffset > 0) return SAMPLE_RATE.toDouble() / bestOffset
+        return 0.0
+    }
+
+    // 解码 MP3 到浮点数组
+    private fun decodeToFloatArray(context: Context, uri: Uri): FloatArray {
         val extractor = MediaExtractor()
         extractor.setDataSource(context, uri, null)
 
@@ -81,10 +161,10 @@ object OneStarAudioDecoder {
     }
 
     private fun resample(input: ShortArray, inputRate: Int): FloatArray {
-        if (inputRate == TARGET_SAMPLE_RATE) {
+        if (inputRate == SAMPLE_RATE) {
             return FloatArray(input.size) { input[it] / 32768.0f }
         }
-        val ratio = TARGET_SAMPLE_RATE.toFloat() / inputRate
+        val ratio = SAMPLE_RATE.toFloat() / inputRate
         val outputLength = (input.size * ratio).roundToInt()
         val output = FloatArray(outputLength)
         for (i in 0 until outputLength) {

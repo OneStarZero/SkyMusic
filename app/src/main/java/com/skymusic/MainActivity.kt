@@ -43,18 +43,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val audioPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        Toast.makeText(this, "开始底层解码与推理...", Toast.LENGTH_SHORT).show()
-        
-        val engine = OneStarMusicFastBasicEngine(this)
-        engine.processAudio(uri) { resultJson ->
-            runOnUiThread {
-                webViewInstance?.evaluateJavascript("window.onAudioTranscribed('${resultJson.replace("'", "\\'")}');", null)
-                Toast.makeText(this, "✅ AI 推理完成", Toast.LENGTH_SHORT).show()
-            }
+private val audioPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    if (uri == null) return@registerForActivityResult
+    Toast.makeText(this, "开始底层解码与频率提取...", Toast.LENGTH_SHORT).show()
+    
+    val engine = OneStarAudioEngine(this) // 修改这里
+    engine.processAudio(uri) { resultJson ->
+        runOnUiThread {
+            webViewInstance?.evaluateJavascript("window.onAudioTranscribed('${resultJson.replace("'", "\\'")}');", null)
+            Toast.makeText(this, "✅ 音频解析完成", Toast.LENGTH_SHORT).show()
         }
     }
+}
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
