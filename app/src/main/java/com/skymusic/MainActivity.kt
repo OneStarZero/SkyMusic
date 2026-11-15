@@ -31,11 +31,11 @@ class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    // 🌟 原生音频引擎
     private var soundPool: SoundPool? = null
     private val soundMap = mutableMapOf<Int, Int>()
     private val handler = Handler(Looper.getMainLooper())
 
+    // 🌟 接收文件结果
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (filePathCallback == null) return@registerForActivityResult
         var results: Array<Uri>? = null
@@ -80,11 +80,11 @@ class MainActivity : AppCompatActivity() {
                     filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
                     return try {
-                        val intent = params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                        // 🌟 修复：改用最稳定、兼容性最强的获取文件方式，不再依赖系统的 createIntent
+                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "audio/*"
+                            type = "*/*" // 允许所有，依靠前端 JS 的后缀来拦截
                         }
-                        intent.type = "audio/*"
                         fileChooserLauncher.launch(intent)
                         true
                     } catch (e: Exception) {
@@ -124,12 +124,11 @@ class MainActivity : AppCompatActivity() {
             .build()
         
         soundPool = SoundPool.Builder()
-            .setMaxStreams(50) // 最多同时播放 50 个音
+            .setMaxStreams(50) 
             .setAudioAttributes(audioAttributes)
             .build()
 
         try {
-            // 反射读取 res/raw 下 piano0~piano14
             val fields = R.raw::class.java.fields
             for (field in fields) {
                 val resName = field.name
@@ -245,7 +244,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 🌟 新增：原 MIDI 曲目试听（用 SoundPool 弹奏）
         @JavascriptInterface
         fun playRawMidiPreview(notesJsonStr: String) {
             runOnUiThread {
