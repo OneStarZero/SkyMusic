@@ -61,8 +61,10 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
-    // 🌟 Google LiteRT (原 TensorFlow Lite) 推理引擎
-    implementation("com.google.ai.edge.litert:litert:1.0.1")
+    
+// 🌟 Google LiteRT 推理引擎 (注意版本号)
+implementation("com.google.ai.edge.litert:litert:1.0.1") 
+    
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")

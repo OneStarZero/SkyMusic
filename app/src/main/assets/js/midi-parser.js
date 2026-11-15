@@ -17,6 +17,19 @@ export function mapPitchToSky(midiPitch, shift = 0) {
 }
 
 export function initMidi() {
+    // 🌟 自动排序机制
+    const container = document.getElementById('modelContainer');
+    if (container) {
+        const cards = Array.from(container.querySelectorAll('.model-card'));
+        cards.sort((a, b) => {
+            const orderA = parseInt(a.getAttribute('data-order') || "99");
+            const orderB = parseInt(b.getAttribute('data-order') || "99");
+            return orderA - orderB;
+        });
+        container.innerHTML = '';
+        cards.forEach(card => container.appendChild(card));
+    }
+
     const midiInput = document.getElementById('midiFile');
     const dropZone = document.getElementById('dropZone');
     const dropText = document.getElementById('dropText');
@@ -31,7 +44,11 @@ export function initMidi() {
 
     let currentMidiData = null;
     let pendingTxtContent = null;
-    let selectedMode = 'fast';
+    
+    // 🌟 核心修复：不写死 'fast'，而是根据 HTML 里哪个卡片有 'active' 类来动态初始化
+    const activeCard = document.querySelector('.model-card.active');
+    let selectedMode = activeCard ? activeCard.getAttribute('data-mode') : 'fastpro';
+    
     let selectedTrackIndices = new Set(); 
 
     document.querySelectorAll('.model-card').forEach(card => {
@@ -124,7 +141,8 @@ export function initMidi() {
                         if (n.time > maxTime) maxTime = n.time;
                     });
 
-                    if (index !== 9 && selectedTrackIndices.size < 2) selectedTrackIndices.add(index);
+                    // 默认全选
+                    if (index !== 9) selectedTrackIndices.add(index);
 
                     const item = document.createElement('div');
                     item.className = `track-item ${selectedTrackIndices.has(index) ? 'active' : ''}`;
@@ -173,7 +191,9 @@ export function initMidi() {
         logDiv.textContent = '';
         
         const isMelody = (selectedMode === 'fast');
-        statusDiv.textContent = isMelody ? '正在加载 SkyFast...' : '正在加载 SkyPro...';
+        const isFastPro = (selectedMode === 'fastpro');
+        
+        statusDiv.textContent = isMelody ? '正在加载 SkyFast...' : (isFastPro ? '正在加载 SkyFastPro...' : '正在加载 SkyPro...');
 
         setTimeout(async () => {
             try {
@@ -211,21 +231,32 @@ export function initMidi() {
                 logDiv.textContent += `[2] 剔除长音: -${longNoteCount} 个\n`;
 
                 let processedNotes = [];
-                // 确保在 convertBtn 的点击事件里：
-if (isMelody) {
-    const module = await import('../OneStar_Models/OneStar-SkyFast.js');
-    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
-} else if (selectedMode === 'fastpro') {
-    const module = await import('../OneStar_Models/OneStar-SkyFastPro.js');
-    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
-} else {
-    const module = await import('../OneStar_Models/OneStar-SkyPro.js');
-    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
-}
+                
+                if (isMelody) {
+                    const module = await import('../OneStarModels_MIDI/OneStar-SkyFast.js');
+                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+                } else if (isFastPro) {
+                    const module = await import('../OneStarModels_MIDI/OneStar-SkyFastPro.js');
+                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+                } else {
+                    const module = await import('../OneStarModels_MIDI/OneStar-SkyPro.js');
+                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+                }
 
                 let allNotes = [];
+                // 🌟 核心修复：FastPro 也会执行原有的合并逻辑，不再使用它自己吐出的重复 keys 数组
                 if (selectedMode === 'fastpro') {
-                    allNotes = processedNotes.map(n => ({ time: n.time, key: n.key }));
+                    let finalNotes = [], lastT = -9999;
+                    processedNotes.forEach(n => {
+                        if (n.time - lastT < 15) {
+                             let prev = finalNotes[finalNotes.length - 1];
+                             if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
+                        } else {
+                             finalNotes.push({ time: n.time, keys: [n.key] });
+                             lastT = n.time;
+                        }
+                    });
+                    finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
                 } else {
                     let finalNotes = [], lastT = -9999;
                     processedNotes.forEach(n => {
@@ -247,7 +278,7 @@ if (isMelody) {
                 if (studioSpeed < 100) studioSpeed = 100;
                 if (studioSpeed > 4000) studioSpeed = 4000;
 
-                let modelName = isMelody ? "SkyFast" : (selectedMode === 'fastpro' ? "SkyFastPro" : "SkyPro");
+                let modelName = isMelody ? "SkyFast" : (isFastPro ? "SkyFastPro" : "SkyPro");
                 const baseSongName = document.getElementById('songNameInput').value.trim() || '未命名曲目';
                 const finalSongName = `${baseSongName} || ${modelName}`; 
                 const finalAuthor = document.getElementById('authorInput').value.trim() || '未知作者';

@@ -17,17 +17,18 @@ export function initOcr() {
         
         img.onload = async () => {
             try {
-                // 策略 1：尝试色块网格扫描（图2那种）
                 const isGrid = await scanGrid(img, ocrStatus);
                 if (isGrid) return;
 
-                // 策略 2：如果不是色块图，走云端 OCR 解析数字简谱（图1那种）
                 ocrStatus.textContent = "正在通过云端 AI 解析简谱...";
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
+                const maxDim = 1200;
+                const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                canvas.width = img.width * scale;
+                canvas.height = img.height * scale;
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
                 const croppedBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
 
                 const formData = new FormData();
@@ -39,8 +40,7 @@ export function initOcr() {
                 const data = await res.json();
 
                 if (data && !data.IsErroredOnProcessing && data.ParsedResults && data.ParsedResults.length > 0) {
-                    const text = data.ParsedResults[0].ParsedText;
-                    processNumberScore(text);
+                    processNumberScore(data.ParsedResults[0].ParsedText);
                 } else {
                     ocrStatus.textContent = "❌ 云端识别失败";
                 }
@@ -52,7 +52,6 @@ export function initOcr() {
     };
 }
 
-// 🌟 优化后的色块扫描，精准度极大提升，不再生成固定数量的假音
 function scanGrid(img, ocrStatus) {
     return new Promise((resolve) => {
         const canvas = document.createElement('canvas');
@@ -71,7 +70,6 @@ function scanGrid(img, ocrStatus) {
                 const idx = (y * canvas.width + x) * 4;
                 const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2];
                 
-                // 剔除纯黑、纯白，只抓有颜色的方块
                 if ((r > 150 || g > 150 || b > 150) && !(r > 240 && g > 240 && b > 240)) {
                     let colIdx = Math.floor(x / colW);
                     let isDup = detectedBlocks.find(b => b.col === colIdx && Math.abs(b.y - y) < 20);

@@ -1,5 +1,4 @@
 import { showToast } from './ui.js';
-import { mapPitchToSky } from './midi-parser.js';
 
 export function initAudio() {
     const btnLocal = document.getElementById('btnLocalAudio');
@@ -23,7 +22,7 @@ export function initAudio() {
         });
     }
 
-    window.onAudioTranscribed = function(notesJsonStr) {
+    window.onAudioTranscribed = async function(notesJsonStr) {
         if (!status) return;
         status.textContent = "正在解析 AI 结果...";
         
@@ -35,18 +34,17 @@ export function initAudio() {
             }
 
             status.textContent = "正在生成光遇铺面...";
-            
-            const finalNotes = rawNotes.map(n => ({ 
-                time: Math.round(n.time * 1000), 
-                key: mapPitchToSky(n.midi) 
-            }));
+
+            // 🌟 路径更新为 OneStarModels_Media
+            const module = await import('../OneStarModels_Media/Sky-MusicFastBasic.js');
+            const finalNotes = module.process(rawNotes, console.log);
 
             const bpm = "120";
-            const skyData = [{ name: "音频扒谱 || Audio", author: "OneStar", bpm: bpm, songNotes: finalNotes }];
+            const skyData = [{ name: "音频扒谱 || Sky-MusicFastBasic", author: "OneStar", bpm: bpm, songNotes: finalNotes }];
             
             if (window.AndroidBridge && window.AndroidBridge.startPlay) {
                 const payload = {
-                    name: "音频扒谱 || Audio", author: "OneStar", model: "Audio",
+                    name: "音频扒谱 || Sky-MusicFastBasic", author: "OneStar", model: "Sky-MusicFastBasic",
                     bpm: bpm, notes: finalNotes, fullJson: JSON.stringify(skyData), targetFolder: "AppSheets"
                 };
                 window.AndroidBridge.startPlay(JSON.stringify(payload));
