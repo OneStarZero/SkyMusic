@@ -23,7 +23,6 @@ export function initAudio() {
         });
     }
 
-    // 🌟 原生 Basic Pitch 推理结果回调
     window.onAudioTranscribed = function(notesJsonStr) {
         if (!status) return;
         status.textContent = "正在解析 AI 结果...";
@@ -37,13 +36,12 @@ export function initAudio() {
 
             status.textContent = "正在生成光遇铺面...";
             
-            // 将原始 MIDI 音高映射为光遇键位
             const finalNotes = rawNotes.map(n => ({ 
                 time: Math.round(n.time * 1000), 
                 key: mapPitchToSky(n.midi) 
             }));
 
-            const bpm = "120"; // Basic Pitch 默认输出 120 BPM
+            const bpm = "120";
             const skyData = [{ name: "音频扒谱 || Audio", author: "OneStar", bpm: bpm, songNotes: finalNotes }];
             
             if (window.AndroidBridge && window.AndroidBridge.startPlay) {

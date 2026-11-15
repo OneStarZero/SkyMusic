@@ -34,7 +34,6 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 .section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.9rem; font-weight: 800; color: var(--primary); }
 .section-title::after { content: ''; flex: 1; height: 1px; background: rgba(56,189,248,0.2); }
 
-/* 完美恢复指标排版 */
 .metrics-flex { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
 .metric-row { display: flex; justify-content: space-between; align-items: center; background: rgba(0, 0, 0, 0.2); padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05); }
 .metric-label { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
@@ -52,7 +51,7 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 .track-name { font-size: 0.8rem; font-weight: bold; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-item.active .track-name { color: var(--primary); }
 .track-notes { font-size: 0.65rem; color: var(--text-muted); }
-.check-circle { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--text-muted); flex-shrink: 0;}
+.check-circle { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--text-muted); flex-shrink: 0; }
 .track-item.active .check-circle { border-color: var(--primary); background: var(--primary); }
 
 .model-card { border: 1px solid transparent; border-radius: var(--radius-item); padding: 12px; margin-bottom: 8px; cursor: pointer; background: rgba(0, 0, 0, 0.2); }
@@ -81,7 +80,7 @@ button.primary-btn:active { opacity: 0.8; }
 .toast.success { border-left-color: var(--success); }
 
 .tab-container { display: flex; gap: 8px; margin-bottom: 16px; }
-.tab-btn { flex: 1; padding: 10px; border-radius: var(--radius-item); font-weight: bold; cursor: pointer; text-align: center; border: 1px solid transparent; background: rgba(0, 0, 0, 0.3); color: var(--text-muted); transition: all 0.2s; }
+.tab-btn { flex: 1; padding: 10px; border-radius: var(--radius-item); font-weight: bold; cursor: pointer; text-align: center; border: 1px solid transparent; background: rgba(0, 0, 0, 0.3); color: var(--text-muted); }
 .tab-btn.active-midi { background: rgba(56, 189, 248, 0.15); border-color: var(--primary); color: var(--primary); }
 .tab-btn.active-ocr { background: rgba(168, 85, 247, 0.15); border-color: #a855f7; color: #a855f7; }
 .tab-btn.active-audio { background: rgba(244, 114, 182, 0.15); border-color: #f472b6; color: #f472b6; }
