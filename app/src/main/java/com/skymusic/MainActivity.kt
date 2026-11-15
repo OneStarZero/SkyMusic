@@ -9,7 +9,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Base64
 import android.view.Gravity
@@ -22,45 +21,24 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.io.File
-import java.io.InputStream
 
 class MainActivity : AppCompatActivity() {
     private var previewMediaPlayer: MediaPlayer? = null
     private var webViewInstance: WebView? = null
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    private val midiFileLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        
-        try {
-            var fileName = "未知文件.mid"
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1) fileName = cursor.getString(nameIndex)
-                }
+    // 🌟 接收原生选择器回来的数据
+    private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val base64Data = result.data?.getStringExtra("base64Data")
+            val fileName = result.data?.getStringExtra("fileName")
+            if (base64Data != null && fileName != null) {
+                val jsCode = "window.onFileSelectedFromAndroid('data:application/octet-stream;base64,$base64Data', '${fileName.replace("'", "\\'")}');"
+                webViewInstance?.evaluateJavascript(jsCode, null)
             }
-
-            // 🌟 修复：严格拦截，如果不是 mid 或 midi 结尾，绝不进行后续操作，防止 MP3 卡死
-            if (!fileName.lowercase().endsWith(".mid") && !fileName.lowercase().endsWith(".midi")) {
-                runOnUiThread { Toast.makeText(this, "请选择标准 MIDI 文件 (.mid / .midi)", Toast.LENGTH_SHORT).show() }
-                return@registerForActivityResult
-            }
-
-            val inputStream: InputStream? = contentResolver.openInputStream(uri)
-            val bytes = inputStream?.readBytes()
-            inputStream?.close()
-
-            if (bytes != null) {
-                val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                runOnUiThread {
-                    val jsCode = "window.onFileSelectedFromAndroid('data:application/octet-stream;base64,$base64Data', '${fileName.replace("'", "\\'")}');"
-                    webViewInstance?.evaluateJavascript(jsCode, null)
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            runOnUiThread { Toast.makeText(this, "读取文件失败: ${e.message}", Toast.LENGTH_SHORT).show() }
         }
+        filePathCallback?.onReceiveValue(null)
+        filePathCallback = null
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -92,8 +70,9 @@ class MainActivity : AppCompatActivity() {
             
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    // 直接调起原生选择器
-                    midiFileLauncher.launch("*/*")
+                    filePathCallback = cb
+                    // 🌟 跳转到独立的选择器 Activity
+                    midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java))
                     return true
                 }
             }
