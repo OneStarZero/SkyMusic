@@ -56,6 +56,7 @@ class FloatingWindowService : Service() {
     private lateinit var seekBar: SeekBar
     private lateinit var btnPlayPause: Button
     private lateinit var tvSpeed: TextView
+    private lateinit var tvInfo: TextView
 
     private val handler = Handler(Looper.getMainLooper())
     private var playRunnable: Runnable? = null
@@ -76,6 +77,9 @@ class FloatingWindowService : Service() {
     
     private val playBgDrawable = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 6f }
     private val pauseBgDrawable = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 6f }
+
+    private var calibrationViews = mutableListOf<TextView>()
+    private var calibrationSaveBtn: Button? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -123,14 +127,12 @@ class FloatingWindowService : Service() {
         val dm = resources.displayMetrics
         val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
         
-        // 🌟 修复：横屏限制面板 35%，竖屏 55%
         val panelWidthRatio = if (isLandscape) 0.35f else 0.55f
         val panelHeightRatio = if (isLandscape) 0.50f else 0.45f
 
         panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
         
-        // 🌟 修复：播放器横屏 30%，竖屏 45%
         playerParams.width = if (isLandscape) (dm.widthPixels * 0.30f).toInt() else (dm.widthPixels * 0.45f).toInt()
         if (playerParams.y > dm.heightPixels - 200) {
             playerParams.y = (dm.heightPixels * 0.7).toInt()
@@ -466,7 +468,6 @@ class FloatingWindowService : Service() {
             setOnClickListener { onClick() }
         }
         
-        // 标题渲染：歌曲名白色，模型名青色
         val titleTv = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = titleSize; setTypeface(null, android.graphics.Typeface.BOLD); 
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.END 
@@ -487,9 +488,6 @@ class FloatingWindowService : Service() {
         }
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        
-        // 🌟 修复：小字排版重构，分成两行显示，绝不挤压右侧按钮
-        // 第一行：作者 + 模型
         val line1 = TextView(this).apply {
             text = "作者: $author  ||  模型: ${if (model.isNotBlank()) model else "未知"}"
             setTextColor(Color.parseColor("#9CA3AF"))
@@ -498,10 +496,9 @@ class FloatingWindowService : Service() {
             ellipsize = TextUtils.TruncateAt.END
         }
         
-        // 第二行：音符 + BPM + 时长 + 倍速
         val line2 = TextView(this).apply {
             text = "音符:$notes  ||  BPM:$bpm  ||  时长:$duration  ||  倍速:$speedStr"
-            setTextColor(Color.parseColor("#6B7280")) // 颜色稍暗，拉开层级
+            setTextColor(Color.parseColor("#6B7280")) 
             textSize = (subSize - 1f)
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.END
@@ -509,7 +506,6 @@ class FloatingWindowService : Service() {
 
         subContainer.addView(line1)
         subContainer.addView(line2)
-
         textLayout.addView(subContainer)
         card.addView(textLayout)
 
@@ -594,7 +590,6 @@ class FloatingWindowService : Service() {
         }
         playerLayout.addView(titleTv)
         
-        // 🌟 修复：播放器排版分成两行，确保文字不被截断
         val line1 = TextView(this).apply {
             text = "作者:$currentAuthor  ||  模型:${if (currentModel.isNotBlank()) currentModel else "未知"}"
             setTextColor(Color.parseColor("#94A3B8")); textSize = 9f; 
@@ -912,58 +907,114 @@ class FloatingWindowService : Service() {
 
     private fun startCalibration() {
         val dm = resources.displayMetrics
-        val dotSize = (38 * density).toInt() 
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+        val density = resources.displayMetrics.density
+        val dotSize = (42 * density).toInt() 
         val halfSize = dotSize / 2
-        if (keyPositions.isEmpty() || keyPositions[0].first == -1f) {
-            for (i in 0 until 15) { keyPositions.add(Pair(dm.widthPixels * ((i % 5) + 1) / 6f, dm.heightPixels * ((i / 5) + 6) / 10f)) }
+
+        calibrationViews.forEach { try { windowManager.removeView(it) } catch (e: Exception) {} }
+        calibrationViews.clear()
+        calibrationSaveBtn?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
+        calibrationSaveBtn = null
+
+        // 计算完美的网格布局：5列 x 3行，铺满屏幕中下部
+        val startX = screenW * 0.15f
+        val endX = screenW * 0.85f
+        val gapX = (endX - startX) / 4f
+
+        val startY = screenH * 0.55f
+        val gapY = screenH * 0.12f
+
+        if (keyPositions.isEmpty() || keyPositions[0].first == -1f || keyPositions.size < 15) {
+            keyPositions.clear()
+            for (i in 0 until 15) {
+                val col = i % 5
+                val row = i / 5
+                val x = startX + col * gapX
+                val y = startY + row * gapY
+                keyPositions.add(Pair(x, y))
+            }
         }
-        val calibrateViews = mutableListOf<TextView>()
+
         for (i in 0 until 15) {
             val dot = TextView(this).apply { 
                 text = "${i + 1}"
                 setTextColor(Color.parseColor("#38BDF8"))
-                textSize = 14f
+                textSize = 16f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
-                
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#BB0F172A"))
+                    setColor(Color.parseColor("#CC0F172A"))
                     setStroke((2 * density).toInt(), Color.parseColor("#38BDF8"))
                 }
             }
-            val params = WindowManager.LayoutParams(dotSize, dotSize, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
+            
+            val params = WindowManager.LayoutParams(
+                dotSize, dotSize, 
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, 
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+            )
             params.gravity = Gravity.TOP or Gravity.START
-            params.x = keyPositions[i].first.toInt() - halfSize; params.y = keyPositions[i].second.toInt() - halfSize
+            params.x = keyPositions[i].first.toInt() - halfSize
+            params.y = keyPositions[i].second.toInt() - halfSize
 
             dot.setOnTouchListener(object : View.OnTouchListener {
-                private var initialX = 0; private var initialY = 0; private var initialTouchX = 0f; private var initialTouchY = 0f
+                private var initialX = 0
+                private var initialY = 0
+                private var initialTouchX = 0f
+                private var initialTouchY = 0f
                 override fun onTouch(v: View?, event: MotionEvent): Boolean {
                     when (event.action) {
-                        MotionEvent.ACTION_DOWN -> { initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; return true }
-                        MotionEvent.ACTION_MOVE -> { params.x = initialX + (event.rawX - initialTouchX).toInt(); params.y = initialY + (event.rawY - initialTouchY).toInt(); windowManager.updateViewLayout(dot, params); keyPositions[i] = Pair((params.x + halfSize).toFloat(), (params.y + halfSize).toFloat()); return true }
+                        MotionEvent.ACTION_DOWN -> { 
+                            initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; return true 
+                        }
+                        MotionEvent.ACTION_MOVE -> { 
+                            params.x = initialX + (event.rawX - initialTouchX).toInt()
+                            params.y = initialY + (event.rawY - initialTouchY).toInt()
+                            windowManager.updateViewLayout(dot, params)
+                            keyPositions[i] = Pair((params.x + halfSize).toFloat(), (params.y + halfSize).toFloat()) 
+                            return true 
+                        }
                     }
                     return false
                 }
             })
-            windowManager.addView(dot, params); calibrateViews.add(dot)
+            windowManager.addView(dot, params)
+            calibrationViews.add(dot)
         }
-        val saveBtn = Button(this).apply {
-            text = "✅ 保存键位"
+
+        calibrationSaveBtn = Button(this).apply {
+            text = "✅ 保存键位并退出"
             setTextColor(Color.WHITE)
             textSize = 14f
+            setPadding(40, 20, 40, 20)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#10B981"))
-                cornerRadius = 8f
+                cornerRadius = 12f
             }
             setOnClickListener {
-                saveKeyPositions(); calibrateViews.forEach { windowManager.removeView(it) }; windowManager.removeView(this)
-                Toast.makeText(this@FloatingWindowService, "键位已保存！", Toast.LENGTH_SHORT).show()
+                saveKeyPositions()
+                calibrationViews.forEach { windowManager.removeView(it) }
+                calibrationViews.clear()
+                try { windowManager.removeView(this) } catch (e: Exception) {}
+                calibrationSaveBtn = null
+                Toast.makeText(this@FloatingWindowService, "🎉 键位已保存！", Toast.LENGTH_SHORT).show()
             }
         }
-        val btnParams = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
-        btnParams.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; btnParams.y = 150
-        windowManager.addView(saveBtn, btnParams)
+        
+        val btnParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, 
+            WindowManager.LayoutParams.WRAP_CONTENT, 
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, 
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, 
+            PixelFormat.TRANSLUCENT
+        )
+        btnParams.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        btnParams.y = (100 * density).toInt()
+        
+        windowManager.addView(calibrationSaveBtn, btnParams)
     }
 
     private fun loadKeyPositions() {
