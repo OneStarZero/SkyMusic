@@ -8,6 +8,33 @@
 </head>
 <body>
 
+<!-- 🌟 沉浸式加载界面 -->
+<div id="loading-screen">
+    <div class="loader-container">
+        <!-- 多层星轨动画 -->
+        <div class="star-orbit">
+            <div class="ring ring-1"></div>
+            <div class="ring ring-2"></div>
+            <div class="ring ring-3"></div>
+            <div class="star-core">✨</div>
+        </div>
+        
+        <!-- 状态文字 -->
+        <div class="loading-title">SkyMusic 正在唤醒星灵</div>
+        <div class="loading-status" id="loadStatus">正在初始化核心模块...</div>
+        
+        <!-- 进度条 -->
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="loadProgressBar"></div>
+        </div>
+
+        <!-- 跳动的小星星 -->
+        <div class="loading-dots">
+            <span></span><span></span><span></span>
+        </div>
+    </div>
+</div>
+
 <!-- 柔和随机星光背景 Canvas -->
 <canvas id="bgCanvas"></canvas>
 

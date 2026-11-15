@@ -1,126 +1,205 @@
 export function initRandomBackground() {
     const canvas = document.getElementById('bgCanvas');
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     let width, height;
-    let glows = [];
-    let stars = [];
-    let currentTheme = null;
+    let animationId = null;
 
-    // 定义 4 种治愈系主题（底色渐变 + 高亮光晕）
-    const themes = [
-        { // 晨岛蓝
-            base: ['#0B1120', '#1E1B4B'], 
-            glows: ['rgba(125, 211, 252, 0.4)', 'rgba(56, 189, 248, 0.3)'] 
-        },
-        { // 星云紫
-            base: ['#0B0F19', '#2E1065'], 
-            glows: ['rgba(167, 139, 250, 0.45)', 'rgba(139, 92, 246, 0.3)'] 
-        },
-        { // 霞谷金
-            base: ['#0B1120', '#451A03'], 
-            glows: ['rgba(253, 224, 71, 0.3)', 'rgba(245, 158, 11, 0.2)'] 
-        },
-        { // 雨林绿
-            base: ['#08121A', '#064E3B'], 
-            glows: ['rgba(52, 211, 153, 0.35)', 'rgba(16, 185, 129, 0.25)'] 
-        }
-    ];
+    // 完全随机生成治愈系颜色
+    function generateRandomTheme() {
+        const baseHue = 180 + Math.random() * 160; 
+        return {
+            bgTop: `hsl(${baseHue}, 40%, 8%)`,
+            bgBottom: `hsl(${(baseHue + 20) % 360}, 50%, 15%)`,
+            nebulas: [
+                `hsla(${baseHue}, 80%, 60%, 0.25)`,
+                `hsla(${(baseHue + 40) % 360}, 85%, 65%, 0.2)`,
+                `hsla(${(baseHue - 30 + 360) % 360}, 80%, 60%, 0.15)`
+            ],
+            star: `hsl(${(baseHue + 180) % 360}, 100%, 90%)`,
+            particle: `hsl(${(baseHue + 60) % 360}, 100%, 70%)`,
+            aurora: `hsla(${(baseHue + 90) % 360}, 80%, 70%, 0.08)`
+        };
+    }
 
-    function resize() {
+    let theme = generateRandomTheme();
+    let bgGrad, nebulaCanvas;
+    let stars = [], particles = [], meteors = [], auroras = [];
+
+    function init() {
         width = canvas.width = window.innerWidth;
         height = canvas.height = window.innerHeight;
-        initElements();
-    }
 
-    function initElements() {
-        // 1. 每次刷新随机挑选一个主题
-        currentTheme = themes[Math.floor(Math.random() * themes.length)];
+        bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+        bgGrad.addColorStop(0, theme.bgTop);
+        bgGrad.addColorStop(1, theme.bgBottom);
 
-        glows = [];
-        // 2. 生成 3~4 个大光晕，位置和大小大幅随机
-        const glowCount = Math.floor(Math.random() * 2) + 3;
-        for (let i = 0; i < glowCount; i++) {
-            glows.push({
-                x: Math.random() * width,
-                y: Math.random() * height,
-                radius: Math.random() * 300 + 250, // 光晕更大更明显
-                color: currentTheme.glows[Math.floor(Math.random() * currentTheme.glows.length)],
-                vx: (Math.random() - 0.5) * 0.6, // 漂移速度稍快一点点
-                vy: (Math.random() - 0.5) * 0.6
-            });
+        // 🌟 离屏渲染星云，大大节省 CPU
+        nebulaCanvas = document.createElement('canvas');
+        nebulaCanvas.width = width;
+        nebulaCanvas.height = height;
+        const nCtx = nebulaCanvas.getContext('2d');
+        
+        for (let i = 0; i < 5; i++) {
+            const x = Math.random() * width;
+            const y = Math.random() * height;
+            const radius = Math.random() * 250 + 150;
+            const color = theme.nebulas[i % theme.nebulas.length];
+            
+            const radGrad = nCtx.createRadialGradient(x, y, 0, x, y, radius);
+            radGrad.addColorStop(0, color);
+            radGrad.addColorStop(1, 'transparent');
+            nCtx.fillStyle = radGrad;
+            nCtx.beginPath();
+            nCtx.arc(x, y, radius, 0, Math.PI * 2);
+            nCtx.fill();
         }
 
-        // 3. 生成星星
         stars = [];
-        const starCount = Math.floor((width * height) / 5000); 
+        const starCount = Math.floor((width * height) / 6000);
         for (let i = 0; i < starCount; i++) {
             stars.push({
-                x: Math.random() * width,
-                y: Math.random() * height,
-                size: Math.random() * 1.8 + 0.3,
-                alpha: Math.random(),
-                vAlpha: (Math.random() - 0.5) * 0.04 // 闪烁频率随机
+                x: Math.random() * width, y: Math.random() * height,
+                size: Math.random() * 1.5 + 0.5,
+                alpha: Math.random(), vAlpha: (Math.random() - 0.5) * 0.05,
+                isBig: Math.random() > 0.92
+            });
+        }
+
+        particles = [];
+        for (let i = 0; i < 20; i++) {
+            particles.push({
+                x: Math.random() * width, y: Math.random() * height,
+                size: Math.random() * 1.5 + 1,
+                vy: -(Math.random() * 0.3 + 0.1),
+                vx: (Math.random() - 0.5) * 0.2,
+                alpha: Math.random(), vAlpha: (Math.random() - 0.5) * 0.02
+            });
+        }
+
+        auroras = [];
+        for (let i = 0; i < 2; i++) {
+            auroras.push({
+                offset: Math.random() * 1000, speed: Math.random() * 0.002 + 0.001,
+                amplitude: Math.random() * 80 + 50, y: height * (Math.random() * 0.3 + 0.5),
+                color: theme.aurora
             });
         }
     }
 
-    function draw() {
-        // 1. 渲染随机主题的底色渐变
-        const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
-        bgGrad.addColorStop(0, currentTheme.base[0]);
-        bgGrad.addColorStop(1, currentTheme.base[1]);
+    // 限制 30 帧，肉眼看起来依然丝滑，但计算量减半
+    let lastTime = 0;
+    const interval = 1000 / 30;
+
+    function draw(time) {
+        animationId = requestAnimationFrame(draw);
+        
+        if (time - lastTime < interval) return;
+        lastTime = time;
+
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, width, height);
 
-        // 2. 渲染漂移光晕 (使用发光叠加模式)
+        // 铺离屏星云
         ctx.globalCompositeOperation = 'screen';
-        glows.forEach(g => {
-            const radGrad = ctx.createRadialGradient(g.x, g.y, 0, g.x, g.y, g.radius);
-            radGrad.addColorStop(0, g.color);
-            radGrad.addColorStop(1, 'transparent');
-            ctx.fillStyle = radGrad;
-            ctx.beginPath();
-            ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
-            ctx.fill();
+        ctx.drawImage(nebulaCanvas, 0, 0);
 
-            // 光晕移动逻辑
-            g.x += g.vx;
-            g.y += g.vy;
-            // 边界碰撞回弹
-            if (g.x < -g.radius || g.x > width + g.radius) g.vx *= -1;
-            if (g.y < -g.radius || g.y > height + g.radius) g.vy *= -1;
+        // 画极光
+        auroras.forEach(a => {
+            a.offset += a.speed;
+            ctx.beginPath();
+            ctx.moveTo(0, a.y);
+            for (let x = 0; x <= width; x += 30) {
+                let y = a.y + Math.sin(x * 0.004 + a.offset) * a.amplitude;
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(width, height);
+            ctx.lineTo(0, height);
+            ctx.closePath();
+            ctx.fillStyle = a.color;
+            ctx.fill();
         });
 
-        // 3. 渲染闪烁星星 + 大星星的星芒效果
+        // 画星星
         ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = theme.star;
         stars.forEach(s => {
             s.alpha += s.vAlpha;
-            if (s.alpha > 1 || s.alpha < 0.1) s.vAlpha *= -1; // 闪烁
+            if (s.alpha > 1 || s.alpha < 0.1) s.vAlpha *= -1;
+            ctx.globalAlpha = s.alpha;
             
-            ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+            ctx.fill();
             
-            // 大星星带星芒（十字交叉）
-            if (s.size > 1.2) {
-                ctx.beginPath();
-                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-                ctx.fill();
-                // 横向星芒
+            if (s.isBig) {
                 ctx.fillRect(s.x - s.size * 2.5, s.y - 0.5, s.size * 5, 1);
-                // 纵向星芒
                 ctx.fillRect(s.x - 0.5, s.y - s.size * 2.5, 1, s.size * 5);
-            } else {
-                // 小星星单纯圆点
-                ctx.beginPath();
-                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-                ctx.fill();
             }
         });
+        ctx.globalAlpha = 1.0;
 
-        requestAnimationFrame(draw);
+        // 画萤火光点
+        ctx.fillStyle = theme.particle;
+        particles.forEach(p => {
+            p.alpha += p.vAlpha;
+            if (p.alpha > 0.8 || p.alpha < 0.2) p.vAlpha *= -1;
+            p.y += p.vy; p.x += p.vx;
+            if (p.y < -10) { p.y = height + 10; p.x = Math.random() * width; }
+            
+            ctx.globalAlpha = p.alpha;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1.0;
+
+        // 🌟 流星修复：方向改为从右上往左下，产生自然的斜落
+        if (Math.random() < 0.015 && meteors.length < 2) {
+            meteors.push({
+                x: width + 50, 
+                y: Math.random() * height * 0.4, // 从上半部分出现
+                len: 150, 
+                speed: 15, 
+                angle: Math.PI / 4 + (Math.random() - 0.5) * 0.2, // 约 45 度偏左下
+                life: 1.0
+            });
+        }
+        
+        for (let i = meteors.length - 1; i >= 0; i--) {
+            const m = meteors[i];
+            ctx.globalAlpha = m.life;
+            const tx = m.x - Math.cos(m.angle) * m.len;
+            const ty = m.y + Math.sin(m.angle) * m.len; // y 是加号，向下落
+            
+            const grad = ctx.createLinearGradient(m.x, m.y, tx, ty);
+            grad.addColorStop(0, theme.star);
+            grad.addColorStop(1, 'transparent');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(m.x, m.y);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+
+            m.x -= Math.cos(m.angle) * m.speed;
+            m.y += Math.sin(m.angle) * m.speed; // y 增加，向下落
+            m.life -= 0.02;
+            if (m.life <= 0 || m.x < -100 || m.y > height + 100) meteors.splice(i, 1);
+        }
+        ctx.globalAlpha = 1.0;
     }
 
-    window.addEventListener('resize', resize);
-    resize();
-    draw();
+    window.addEventListener('resize', init);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            if (animationId) cancelAnimationFrame(animationId);
+        } else {
+            lastTime = performance.now();
+            animationId = requestAnimationFrame(draw);
+        }
+    });
+
+    init();
+    animationId = requestAnimationFrame(draw);
 }
