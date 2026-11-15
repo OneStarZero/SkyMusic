@@ -10,17 +10,24 @@ export function initOcr() {
         }
     });
 
-    // 接收原生的图片 Base64
-    window.onImageBase64Received = async function(imageBase64) {
+    // 🌟 接收原生的图片临时文件路径
+    window.onImagePathReceived = async function(imagePath) {
         const ocrStatus = document.getElementById('ocrStatus');
         ocrStatus.textContent = "正在通过云端 AI 识别(需联网)...";
 
         try {
+            // WebView 没有权限直接 fetch 本地 file，必须用 XHR 读成 Blob
+            const base64Image = await readLocalFileAsBase64(imagePath);
+
+            if (!base64Image) {
+                ocrStatus.textContent = "❌ 本地图片读取失败";
+                return;
+            }
+
             const formData = new FormData();
-            formData.append("base64Image", "data:image/jpeg;base64," + imageBase64);
-            formData.append("language", "chs"); // 中文简体
+            formData.append("base64Image", "data:image/jpeg;base64," + base64Image);
+            formData.append("language", "chs"); 
             formData.append("isOverlayRequired", "false");
-            // 使用 apikey: helloworld 作为公共测试密钥
             formData.append("apikey", "helloworld"); 
 
             const res = await fetch('https://api.ocr.space/parse/image', {
@@ -33,13 +40,36 @@ export function initOcr() {
                 const text = data.ParsedResults[0].ParsedText;
                 processOcrText(text);
             } else {
-                ocrStatus.textContent = "❌ 云端识别失败: " + (data.ErrorMessage ? data.ErrorMessage[0] : "未知错误");
+                ocrStatus.textContent = "❌ 云端识别失败，请重试";
             }
         } catch (err) {
             console.error(err);
-            ocrStatus.textContent = "❌ 网络请求异常，请检查网络连接";
+            ocrStatus.textContent = "❌ 网络请求异常";
         }
     };
+}
+
+// 用 XHR 读取本地文件并转 Base64
+function readLocalFileAsBase64(path) {
+    return new Promise((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', 'file://' + path, true);
+        xhr.responseType = 'blob';
+        xhr.onload = () => {
+            if (xhr.status === 200 || xhr.status === 0) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64data = reader.result.split(',')[1];
+                    resolve(base64data);
+                };
+                reader.readAsDataURL(xhr.response);
+            } else {
+                resolve(null);
+            }
+        };
+        xhr.onerror = () => resolve(null);
+        xhr.send();
+    });
 }
 
 function processOcrText(text) {
@@ -56,11 +86,11 @@ function processOcrText(text) {
     }
 
     if (parsedNotes.length === 0) {
-        ocrStatus.textContent = "❌ 未能识别出数字简谱";
+        ocrStatus.textContent = "❌ 未能识别出有效数字";
         return;
     }
 
-    ocrStatus.textContent = `✅ 识别成功，共 ${parsedNotes.length} 个数字`;
+    ocrStatus.textContent = `✅ 识别成功，共 ${parsedNotes.length} 个音符`;
     showOcrResult(parsedNotes);
 }
 

@@ -23,7 +23,6 @@ import java.io.File
 class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
 
-    // 接收独立的 MIDI 选择器结果
     private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             val base64Data = result.data?.getStringExtra("base64Data")
@@ -35,13 +34,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 接收独立的 图片选择器结果
     private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            val imageBase64 = result.data?.getStringExtra("imageBase64")
-            if (imageBase64 != null) {
-                // 把 Base64 传给网页，触发在线 OCR
-                webViewInstance?.evaluateJavascript("window.onImageBase64Received('$imageBase64');", null)
+            // 🌟 接的是路径
+            val imagePath = result.data?.getStringExtra("imagePath")
+            if (imagePath != null) {
+                webViewInstance?.evaluateJavascript("window.onImagePathReceived('$imagePath');", null)
             }
         }
     }
@@ -74,7 +72,6 @@ class MainActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    // 🌟 通知网页加载完毕，可以隐藏遮罩了
                     view?.evaluateJavascript("window.onAppReady();", null)
                 }
             }
