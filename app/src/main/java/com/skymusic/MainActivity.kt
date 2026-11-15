@@ -35,7 +35,6 @@ class MainActivity : AppCompatActivity() {
     private val soundMap = mutableMapOf<Int, Int>()
     private val handler = Handler(Looper.getMainLooper())
 
-    // 🌟 接收文件结果
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (filePathCallback == null) return@registerForActivityResult
         var results: Array<Uri>? = null
@@ -80,10 +79,9 @@ class MainActivity : AppCompatActivity() {
                     filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
                     return try {
-                        // 🌟 修复：改用最稳定、兼容性最强的获取文件方式，不再依赖系统的 createIntent
                         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "*/*" // 允许所有，依靠前端 JS 的后缀来拦截
+                            type = "*/*"
                         }
                         fileChooserLauncher.launch(intent)
                         true

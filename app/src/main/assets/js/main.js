@@ -1,6 +1,6 @@
 // js/main.js
 import { Midi } from '@tonejs/midi';
-import { stopAudio } from './audio-player.js'; // 不再需要 playMidiNotes，但仍需要 stopAudio 兜底
+import { stopAudio } from './audio-player.js';
 
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
@@ -63,6 +63,7 @@ async function handleFileSelect() {
         if (window.AndroidBridge.stopSheetPreview) window.AndroidBridge.stopSheetPreview();
     }
     stopAudio();
+    
     btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
     if (previewSheetBtn) previewSheetBtn.style.display = 'none';
     isPreviewingSheet = false;
@@ -169,7 +170,7 @@ async function handleFileSelect() {
     }
 }
 
-// 🌟 原曲试听（完全使用原生 SoundPool）
+// 原曲试听
 btnPreviewOriginal.addEventListener('click', () => {
     if (btnPreviewOriginal.textContent.includes('停止')) {
         btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
@@ -184,12 +185,16 @@ btnPreviewOriginal.addEventListener('click', () => {
         return;
     }
 
+    if (typeof window.AndroidBridge === 'undefined') {
+        showToast('浏览器暂不支持原声试听，请下载 App', 'error');
+        return;
+    }
+
     btnPreviewOriginal.textContent = '⏹ 停止试听原声';
     
     let rawNotesToPlay = [];
     const selectedArr = Array.from(selectedTrackIndices);
     
-    // 收集选中的音符，并转换成原生格式
     currentMidiData.tracks.forEach((track, idx) => {
         if (selectedArr.includes(idx) && idx !== 9) {
             rawNotesToPlay.push(...track.notes);
@@ -202,44 +207,29 @@ btnPreviewOriginal.addEventListener('click', () => {
         return;
     }
 
-    if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.playRawMidiPreview) {
-        // 映射 MIDI 音高到 0~14 的键位
-        const playPayload = rawNotesToPlay.map(n => {
-            let pitch = n.midi;
-            while (pitch < 60) pitch += 12;
-            while (pitch > 76) pitch -= 12;
+    const playPayload = rawNotesToPlay.map(n => {
+        let pitch = n.midi;
+        while (pitch < 60) pitch += 12;
+        while (pitch > 76) pitch -= 12;
 
-            const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
-            let bestKeyIdx = 0;
-            let minDist = 999;
-            
-            for (let i = 0; i < VALID_KEYS.length; i++) {
-                let dist = Math.abs(pitch - VALID_KEYS[i]);
-                if (dist < minDist) { minDist = dist; bestKeyIdx = i; }
-            }
-            
-            let keyIndex = bestKeyIdx;
-            if (pitch > 76) {
-                keyIndex = Math.min(14, bestKeyIdx + 5);
-            }
+        const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
+        let bestKeyIdx = 0;
+        let minDist = 999;
+        
+        for (let i = 0; i < VALID_KEYS.length; i++) {
+            let dist = Math.abs(pitch - VALID_KEYS[i]);
+            if (dist < minDist) { minDist = dist; bestKeyIdx = i; }
+        }
+        
+        let keyIndex = bestKeyIdx;
+        if (pitch > 76) keyIndex = Math.min(14, bestKeyIdx + 5);
 
-            return {
-                time: Math.round(n.time * 1000), // 毫秒
-                keyIndex: keyIndex
-            };
-        });
+        return { time: Math.round(n.time * 1000), keyIndex: keyIndex };
+    });
 
-        // 按时间排序（原生延时器需要）
-        playPayload.sort((a, b) => a.time - b.time);
-
-        window.AndroidBridge.playRawMidiPreview(JSON.stringify(playPayload));
-    } else {
-        showToast('浏览器环境暂不支持原曲试听，请在 App 内使用', 'error');
-        btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
-        return;
-    }
+    playPayload.sort((a, b) => a.time - b.time);
+    window.AndroidBridge.playRawMidiPreview(JSON.stringify(playPayload));
     
-    // 自动恢复按钮
     const maxEndTime = Math.max(...rawNotesToPlay.map(n => n.time + n.duration));
     setTimeout(() => {
         if (btnPreviewOriginal.textContent.includes('停止')) {
@@ -428,7 +418,7 @@ convertBtn.addEventListener('click', async (e) => {
                             });
                             window.AndroidBridge.playSheetPreview(JSON.stringify(payload));
                         } else {
-                            alert("浏览器环境暂不支持多轨试听");
+                            alert("浏览器环境暂不支持多轨试听，请在 App 内使用");
                             return;
                         }
                         
