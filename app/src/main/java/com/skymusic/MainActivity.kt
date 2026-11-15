@@ -66,8 +66,17 @@ class MainActivity : AppCompatActivity() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                     filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
-                    try { fileChooserLauncher.launch(params?.createIntent()) } catch (e: Exception) { filePathCallback = null; return false }
-                    return true
+                    return try {
+                        val intent = params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*" // 兜底允许所有，但下面会加过滤
+                        }
+                        fileChooserLauncher.launch(intent)
+                        true
+                    } catch (e: Exception) {
+                        filePathCallback = null
+                        false
+                    }
                 }
             }
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
