@@ -43,11 +43,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 这里是音频选择器，后续接入 Basic Pitch 时使用
+    // 🌟 音频选择器接入 Basic Pitch AI
     private val audioPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@registerForActivityResult
-        // 占位：此处需调用 Basic Pitch 推理
-        Toast.makeText(this, "音频已选择，待 Basic Pitch 引擎处理...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "音频已选择，正在运行 AI 扒谱...", Toast.LENGTH_SHORT).show()
+        
+        // 启动 Basic Pitch 推理
+        val helper = BasicPitchHelper(this)
+        helper.processAudio(uri) { resultJson ->
+            runOnUiThread {
+                webViewInstance?.evaluateJavascript("window.onAudioTranscribed('${resultJson.replace("'", "\\'")}');", null)
+                Toast.makeText(this, "✅ 音频解析完成", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -166,7 +174,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_name", payload.optString("name", "未命名"))
             intent.putExtra("song_author", payload.optString("author", "未知作者"))
             intent.putExtra("song_model", payload.optString("model", ""))
-            intent.putExtra("song_bpm", payload.optString("bpm", "0")) // 保证 BPM 能够被读取
+            intent.putExtra("song_bpm", payload.optString("bpm", "0")) 
             startService(intent)
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
