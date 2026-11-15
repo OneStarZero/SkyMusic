@@ -5,9 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.util.Base64
 import android.widget.Toast
-import java.io.InputStream
+import java.io.File
 
 class MidiPickerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -16,7 +15,12 @@ class MidiPickerActivity : Activity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*" 
         }
-        try { startActivityForResult(intent, 1001) } catch (e: Exception) { finish() }
+        try {
+            startActivityForResult(intent, 1001)
+        } catch (e: Exception) {
+            Toast.makeText(this, "无法打开文件管理器", Toast.LENGTH_SHORT).show()
+            finish()
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -32,22 +36,26 @@ class MidiPickerActivity : Activity() {
                             if (nameIndex != -1) fileName = cursor.getString(nameIndex)
                         }
                     }
+
                     if (!fileName.lowercase().endsWith(".mid") && !fileName.lowercase().endsWith(".midi")) {
                         Toast.makeText(this, "请选择 .mid 或 .midi 文件！", Toast.LENGTH_SHORT).show()
                         finish()
                         return
                     }
-                    val inputStream: InputStream? = contentResolver.openInputStream(uri)
-                    val bytes = inputStream?.readBytes()
-                    inputStream?.close()
-                    if (bytes != null) {
-                        val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        val resultIntent = Intent().apply {
-                            putExtra("base64Data", base64Data)
-                            putExtra("fileName", fileName)
+
+                    // 🌟 核心修改：直接拷贝到内部缓存目录，极大节省内存
+                    val cacheFile = File(cacheDir, "temp_midi.mid")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        cacheFile.outputStream().use { output ->
+                            input.copyTo(output)
                         }
-                        setResult(Activity.RESULT_OK, resultIntent)
                     }
+
+                    val resultIntent = Intent().apply {
+                        putExtra("midiPath", cacheFile.absolutePath)
+                        putExtra("fileName", fileName)
+                    }
+                    setResult(Activity.RESULT_OK, resultIntent)
                 } catch (e: Exception) {
                     Toast.makeText(this, "读取失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }

@@ -17,7 +17,7 @@ export function mapPitchToSky(midiPitch, shift = 0) {
 }
 
 export function initMidi() {
-    // 🌟 自动排序机制
+    // 自动排序机制
     const container = document.getElementById('modelContainer');
     if (container) {
         const cards = Array.from(container.querySelectorAll('.model-card'));
@@ -44,11 +44,8 @@ export function initMidi() {
 
     let currentMidiData = null;
     let pendingTxtContent = null;
-    
-    // 🌟 核心修复：不写死 'fast'，而是根据 HTML 里哪个卡片有 'active' 类来动态初始化
     const activeCard = document.querySelector('.model-card.active');
     let selectedMode = activeCard ? activeCard.getAttribute('data-mode') : 'fastpro';
-    
     let selectedTrackIndices = new Set(); 
 
     document.querySelectorAll('.model-card').forEach(card => {
@@ -77,18 +74,22 @@ export function initMidi() {
         processMidiData(arrayBuffer, file.name);
     });
 
-    window.onFileSelectedFromAndroid = function(base64Data, fileName) {
-        try {
-            const binaryString = atob(base64Data);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+    // 🌟 接收本地路径的全局函数
+    window.onMidiPathReceived = function(midiPath, fileName) {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', 'file://' + midiPath, true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onload = function() {
+            if (xhr.status === 200 || xhr.status === 0) {
+                processMidiData(xhr.response, fileName);
+            } else {
+                showToast('MIDI 文件读取失败', 'error');
             }
-            processMidiData(bytes.buffer, fileName);
-        } catch (err) {
-            showToast('文件读取失败，请重试', 'error');
-        }
+        };
+        xhr.onerror = function() {
+            showToast('MIDI 文件网络读取异常', 'error');
+        };
+        xhr.send();
     };
 
     async function processMidiData(arrayBuffer, fileName) {
@@ -141,7 +142,6 @@ export function initMidi() {
                         if (n.time > maxTime) maxTime = n.time;
                     });
 
-                    // 默认全选
                     if (index !== 9) selectedTrackIndices.add(index);
 
                     const item = document.createElement('div');
@@ -244,32 +244,17 @@ export function initMidi() {
                 }
 
                 let allNotes = [];
-                // 🌟 核心修复：FastPro 也会执行原有的合并逻辑，不再使用它自己吐出的重复 keys 数组
-                if (selectedMode === 'fastpro') {
-                    let finalNotes = [], lastT = -9999;
-                    processedNotes.forEach(n => {
-                        if (n.time - lastT < 15) {
-                             let prev = finalNotes[finalNotes.length - 1];
-                             if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
-                        } else {
-                             finalNotes.push({ time: n.time, keys: [n.key] });
-                             lastT = n.time;
-                        }
-                    });
-                    finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
-                } else {
-                    let finalNotes = [], lastT = -9999;
-                    processedNotes.forEach(n => {
-                        if (n.time - lastT < 15) {
-                             let prev = finalNotes[finalNotes.length - 1];
-                             if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
-                        } else {
-                             finalNotes.push({ time: n.time, keys: [n.key] });
-                             lastT = n.time;
-                        }
-                    });
-                    finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
-                }
+                let finalNotes = [], lastT = -9999;
+                processedNotes.forEach(n => {
+                    if (n.time - lastT < 15) {
+                         let prev = finalNotes[finalNotes.length - 1];
+                         if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
+                    } else {
+                         finalNotes.push({ time: n.time, keys: [n.key] });
+                         lastT = n.time;
+                    }
+                });
+                finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
 
                 logDiv.textContent += `✅ 最终输出音符: ${allNotes.length} 个\n`;
 
