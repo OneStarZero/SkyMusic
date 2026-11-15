@@ -9,13 +9,12 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/app_icon"
-        android:label="SkyMusic-Alpha"
+        android:label="SkyMusic"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
-        <!-- 主界面 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -25,20 +24,10 @@
             </intent-filter>
         </activity>
 
-        <!-- 🌟 独立出来的 MIDI 文件选择器 -->
-        <activity
-            android:name=".MidiPickerActivity"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity android:name=".MidiPickerActivity" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
-        <!-- 🌟 独立出来的 OCR 图片选择器 -->
-        <activity
-            android:name=".ImagePickerActivity"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
-
-        <!-- 悬浮窗服务 -->
         <service android:name=".FloatingWindowService" />
 
-        <!-- 无障碍服务 -->
         <service
             android:name=".SkyAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -51,5 +40,4 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
     </application>
-
 </manifest>

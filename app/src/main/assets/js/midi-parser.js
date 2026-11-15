@@ -1,6 +1,10 @@
 import { Midi } from '@tonejs/midi';
 import { showToast } from './ui.js';
 
+import { process as processFast } from '../OneStarModels_MIDI/OneStar-SkyFast.js';
+import { process as processPro } from '../OneStarModels_MIDI/OneStar-SkyPro.js';
+import { process as processFastPro } from '../OneStarModels_MIDI/OneStar-SkyFastPro.js';
+
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
 const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
 
@@ -17,15 +21,10 @@ export function mapPitchToSky(midiPitch, shift = 0) {
 }
 
 export function initMidi() {
-    // 自动排序机制
     const container = document.getElementById('modelContainer');
     if (container) {
         const cards = Array.from(container.querySelectorAll('.model-card'));
-        cards.sort((a, b) => {
-            const orderA = parseInt(a.getAttribute('data-order') || "99");
-            const orderB = parseInt(b.getAttribute('data-order') || "99");
-            return orderA - orderB;
-        });
+        cards.sort((a, b) => parseInt(a.getAttribute('data-order') || "99") - parseInt(b.getAttribute('data-order') || "99"));
         container.innerHTML = '';
         cards.forEach(card => container.appendChild(card));
     }
@@ -39,24 +38,35 @@ export function initMidi() {
     const statusDiv = document.getElementById('status');
     const logDiv = document.getElementById('log');
     const resultCard = document.getElementById('resultCard');
-    const btnSendApp = document.getElementById('btnSendApp');
-    const btnSaveLocal = document.getElementById('btnSaveLocal');
 
     let currentMidiData = null;
     let pendingTxtContent = null;
-    const activeCard = document.querySelector('.model-card.active');
-    let selectedMode = activeCard ? activeCard.getAttribute('data-mode') : 'fastpro';
     let selectedTrackIndices = new Set(); 
+    let hideResultTimeout = null; // 🌟 新增：用于清理卡片消失的定时器
+
+    // 🌟 修复：平滑隐藏卡片的函数（改用 setTimeout，彻底根除过渡事件冲突）
+    function hideResultSmoothly() {
+        if (resultCard.style.display === 'none') return;
+        resultCard.classList.remove('fade-in');
+        resultCard.classList.add('fade-out');
+        
+        clearTimeout(hideResultTimeout);
+        hideResultTimeout = setTimeout(() => {
+            resultCard.style.display = 'none';
+            resultCard.classList.remove('fade-out');
+        }, 300); // 与 CSS 中 .fade-out 的动画时长一致
+    }
 
     document.querySelectorAll('.model-card').forEach(card => {
         card.addEventListener('click', () => {
             if(card.classList.contains('active')) return;
             document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
             card.classList.add('active');
-            selectedMode = card.getAttribute('data-mode');
-            resultCard.style.display = 'none';
+            
+            // 切换模型时，平滑隐藏上一次的结果
+            hideResultSmoothly();
             logDiv.style.display = 'none';
-            statusDiv.textContent = '准备就绪';
+            statusDiv.textContent = '已切换提取模型，准备就绪';
         });
     });
 
@@ -74,7 +84,6 @@ export function initMidi() {
         processMidiData(arrayBuffer, file.name);
     });
 
-    // 🌟 接收本地路径的全局函数
     window.onMidiPathReceived = function(midiPath, fileName) {
         const xhr = new XMLHttpRequest();
         xhr.open('GET', 'file://' + midiPath, true);
@@ -112,7 +121,7 @@ export function initMidi() {
 
         statusDiv.textContent = '正在读取文件...';
         configPanel.style.display = 'none';
-        resultCard.style.display = 'none';
+        hideResultSmoothly();
         logDiv.style.display = 'none';
         logDiv.textContent = '';
 
@@ -178,24 +187,28 @@ export function initMidi() {
         }
     }
 
-    convertBtn.addEventListener('click', async (e) => {
+    convertBtn.addEventListener('click', (e) => {
         e.preventDefault();
         if (!currentMidiData) return;
         
         if (selectedTrackIndices.size === 0) { showToast('请至少选择一个音轨！', 'error'); return; }
 
+        // 🌟 修复：实时获取当前选中的模型，防止闭包串号
+        const activeCard = document.querySelector('.model-card.active');
+        const currentMode = activeCard ? activeCard.getAttribute('data-mode') : 'fastpro';
+        const isMelody = (currentMode === 'fast');
+        const isFastPro = (currentMode === 'fastpro');
+
         convertBtn.disabled = true; 
-        convertBtn.textContent = 'AI 正在提取中...';
-        resultCard.style.display = 'none';
+        convertBtn.querySelector('.btn-text').textContent = '正在提取中...';
+        
+        hideResultSmoothly();
         logDiv.style.display = 'block'; 
         logDiv.textContent = '';
         
-        const isMelody = (selectedMode === 'fast');
-        const isFastPro = (selectedMode === 'fastpro');
-        
         statusDiv.textContent = isMelody ? '正在加载 SkyFast...' : (isFastPro ? '正在加载 SkyFastPro...' : '正在加载 SkyPro...');
 
-        setTimeout(async () => {
+        setTimeout(() => {
             try {
                 let rawNotes = [];
                 let extractedCount = 0;
@@ -231,16 +244,14 @@ export function initMidi() {
                 logDiv.textContent += `[2] 剔除长音: -${longNoteCount} 个\n`;
 
                 let processedNotes = [];
+                const logger = (msg) => logDiv.textContent += msg + '\n';
                 
                 if (isMelody) {
-                    const module = await import('../OneStarModels_MIDI/OneStar-SkyFast.js');
-                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+                    processedNotes = processFast(mappedNotes, logger);
                 } else if (isFastPro) {
-                    const module = await import('../OneStarModels_MIDI/OneStar-SkyFastPro.js');
-                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+                    processedNotes = processFastPro(mappedNotes, logger);
                 } else {
-                    const module = await import('../OneStarModels_MIDI/OneStar-SkyPro.js');
-                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+                    processedNotes = processPro(mappedNotes, logger);
                 }
 
                 let allNotes = [];
@@ -286,7 +297,18 @@ export function initMidi() {
                 document.getElementById('outSpeed').textContent = studioSpeed;
                 document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
                 
+                document.getElementById('outSongName').textContent = finalSongName;
+                document.getElementById('outAuthor').textContent = finalAuthor;
+                document.getElementById('outModel').textContent = modelName;
+                document.getElementById('outTranscriber').textContent = finalTranscriber;
+
+                // 🌟 修复：平滑显示卡片（清除隐藏定时器，移除 fade-out 防止冲突）
+                clearTimeout(hideResultTimeout);
                 resultCard.style.display = 'block';
+                resultCard.classList.remove('fade-out');
+                resultCard.classList.add('fade-in');
+                setTimeout(() => resultCard.classList.remove('fade-in'), 500);
+                
                 statusDiv.textContent = '✅ 提取完成！';
                 
                 setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
@@ -296,11 +318,11 @@ export function initMidi() {
                 document.getElementById('browserActions').style.display = isApp ? 'none' : 'block';
 
                 if (isApp) {
-                    btnSendApp.onclick = () => {
+                    document.getElementById('btnSendApp').onclick = () => {
                         const payload = { name: finalSongName, author: finalAuthor, model: modelName, bpm: studioSpeed, notes: allNotes, fullJson: pendingTxtContent, targetFolder: "AppSheets" };
                         window.AndroidBridge.startPlay(JSON.stringify(payload));
                     };
-                    btnSaveLocal.onclick = () => {
+                    document.getElementById('btnSaveLocal').onclick = () => {
                         const payload = { name: finalSongName, author: finalAuthor, fullJson: pendingTxtContent, targetFolder: "LocalSheets" };
                         window.AndroidBridge.saveLocal(JSON.stringify(payload));
                     };
@@ -320,7 +342,7 @@ export function initMidi() {
                 showToast(err.message, 'error');
             } finally {
                 convertBtn.disabled = false;
-                convertBtn.textContent = '✨ 启动 AI 深度提取';
+                convertBtn.querySelector('.btn-text').textContent = '✨ 开始提取';
             }
         }, 50);
     });

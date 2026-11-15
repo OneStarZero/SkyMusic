@@ -1,10 +1,10 @@
 <resources>
     <!-- App 桌面名称 -->
-    <string name="app_name">SkyMusic-Alpha</string>
+    <string name="app_name">SkyMusic</string>
     
-    <!-- 无障碍列表显示的名称（带 Emoji） -->
-    <string name="accessibility_service_name">✨SkyMusic-Alpha演奏助手</string>
+    <!-- 无障碍列表显示的名称 -->
+    <string name="accessibility_service_name">###SkyMusic自动演奏服务</string>
     
-    <!-- 极客风无障碍描述（保持不变） -->
-    <string name="accessibility_service_description">🎹 SkyMusic-Alpha 智能演奏服务已激活 (๑•̀ㅂ•́)و✧\n开启此服务后，App 将在光遇中化身你的专属琴师 🎵，精准识别琴键并模拟多指物理点击 👆✨。请放心，该服务仅用于自动弹琴，绝不收集您的任何隐私数据。(¯▽¯)👍</string>
+    <!-- 无障碍详细描述（包含 AI 提示） -->
+    <string name="accessibility_service_description">🎹 ###SkyMusic自动演奏服务已启动 (๑•̀ㅂ•́)و✧\n\n本服务旨在为您提供极致的《光遇》自动弹琴体验。开启后，App 将在游戏内精准模拟多指物理点击，完美还原各种复杂和弦。\n\n⚠️ 提示：本软件的核心算法与全部代码均由 AI 辅助编写而成。服务仅用于模拟按键，绝不收集您的任何隐私数据，请放心使用。(¯▽¯)👍 同时请注意此软件并不会导致您的光遇账号被封禁❗️此软件不会进行修改光遇游戏数据等违规操作，使用无障碍权限进行自动演奏是被允许的✅</string>
 </resources>

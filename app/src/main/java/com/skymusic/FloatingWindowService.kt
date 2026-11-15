@@ -56,7 +56,6 @@ class FloatingWindowService : Service() {
     private lateinit var seekBar: SeekBar
     private lateinit var btnPlayPause: Button
     private lateinit var tvSpeed: TextView
-    private lateinit var tvInfo: TextView
 
     private val handler = Handler(Looper.getMainLooper())
     private var playRunnable: Runnable? = null
@@ -468,9 +467,15 @@ class FloatingWindowService : Service() {
             setOnClickListener { onClick() }
         }
         
+        // 🌟 核心优化：标题支持跑马灯循环滚动
         val titleTv = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = titleSize; setTypeface(null, android.graphics.Typeface.BOLD); 
-            setSingleLine(true); ellipsize = TextUtils.TruncateAt.END 
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true // 必须选中才能滚动
+            isFocusable = true
+            isFocusableInTouchMode = true
         }
         if (songName.contains(" || ")) {
             val spannable = SpannableString(songName)
@@ -586,7 +591,9 @@ class FloatingWindowService : Service() {
         val titleTv = TextView(this).apply {
             text = "《$currentSongName》"
             setTextColor(Color.WHITE); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD)
-            setSingleLine(true); ellipsize = TextUtils.TruncateAt.END
+            setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
         }
         playerLayout.addView(titleTv)
         
@@ -918,7 +925,7 @@ class FloatingWindowService : Service() {
         calibrationSaveBtn?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
         calibrationSaveBtn = null
 
-        // 计算完美的网格布局：5列 x 3行，铺满屏幕中下部
+        // 🌟 完美 5x3 网格比例：左右各留 15%，第一排距离顶部 55%
         val startX = screenW * 0.15f
         val endX = screenW * 0.85f
         val gapX = (endX - startX) / 4f

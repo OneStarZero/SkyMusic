@@ -29,30 +29,7 @@ class MainActivity : AppCompatActivity() {
             val fileName = result.data?.getStringExtra("fileName")
             if (midiPath != null && fileName != null) {
                 val safeName = fileName.replace("'", "\\'")
-                // 🌟 调用网页的 onMidiPathReceived
                 webViewInstance?.evaluateJavascript("window.onMidiPathReceived('$midiPath', '$safeName');", null)
-            }
-        }
-    }
-
-    private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            val imagePath = result.data?.getStringExtra("imagePath")
-            if (imagePath != null) {
-                webViewInstance?.evaluateJavascript("window.onImagePathReceived('$imagePath');", null)
-            }
-        }
-    }
-
-    private val audioPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        Toast.makeText(this, "开始底层解码与推理...", Toast.LENGTH_SHORT).show()
-        
-        val engine = OneStarAudioEngine(this)
-        engine.processAudio(uri) { resultJson ->
-            runOnUiThread {
-                webViewInstance?.evaluateJavascript("window.onAudioTranscribed('${resultJson.replace("'", "\\'")}');", null)
-                Toast.makeText(this, "✅ AI 推理完成", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -82,12 +59,7 @@ class MainActivity : AppCompatActivity() {
                 cacheMode = WebSettings.LOAD_NO_CACHE
             }
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    view?.evaluateJavascript("window.onAppReady();", null)
-                }
-            }
+            webViewClient = WebViewClient()
             
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
@@ -143,16 +115,6 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openMidiPicker() {
             runOnUiThread { midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java)) }
-        }
-
-        @JavascriptInterface
-        fun openImagePicker() {
-            runOnUiThread { imagePickerLauncher.launch(Intent(this@MainActivity, ImagePickerActivity::class.java)) }
-        }
-
-        @JavascriptInterface
-        fun openAudioPicker() {
-            runOnUiThread { audioPickerLauncher.launch("audio/*") }
         }
     }
 

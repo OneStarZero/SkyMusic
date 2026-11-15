@@ -3,132 +3,147 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SkyMusic-Alpha</title>
+    <title>SkyMusic 0.0.7</title>
     <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
 
-<!-- 加载遮罩 -->
-<div id="app-loader" style="position: fixed; inset: 0; background: var(--sky-bg); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s;">
-    <div style="width: 30px; height: 30px; border: 3px solid rgba(56, 189, 248, 0.3); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-    <p style="margin-top: 12px; color: var(--primary); font-size: 0.85rem; font-weight: 600;">SkyMusic 引擎启动中...</p>
-</div>
-<style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+<!-- 柔和随机星光背景 Canvas -->
+<canvas id="bgCanvas"></canvas>
 
 <div class="content-wrapper">
     <div id="toast-container"></div>
-    <h1>光遇 MIDI <span>✨OneStar</span></h1>
+    
+    <header class="app-header fade-in-up" style="animation-delay: 0.05s;">
+        <h1>光遇 MIDI <span>✨OneStar</span></h1>
+        <p class="subtitle">愿星光指引你，SkyMusic 0.0.7</p>
+    </header>
 
-    <div class="tab-container">
-        <button id="tabMidi" class="tab-btn active-midi">🎵 MIDI 转谱</button>
-        <button id="tabOcr" class="tab-btn inactive">🖼️ 图片识谱</button>
-        <button id="tabAudio" class="tab-btn inactive">🎤 音频转谱</button>
-    </div>
-
-    <!-- 视图 1：MIDI -->
     <div id="viewMidi">
-        <div class="glass-card" style="padding: 12px;">
-            <div class="drop-zone" id="dropZone">
-                <span class="icon">🎵</span>
+        <!-- 拖拽上传区 -->
+        <div class="glass-card upload-card fade-in-up" style="animation-delay: 0.1s;">
+            <div class="drop-zone breathing-border" id="dropZone">
+                <div class="upload-icon soft-float">🎵</div>
                 <p id="dropText">点击选择或拖拽 MIDI 文件</p>
+                <span class="file-hint">支持 .mid / .midi</span>
                 <input type="file" id="midiFile" accept=".mid, .midi, audio/midi">
             </div>
         </div>
 
+        <!-- 配置与指标区 -->
         <div class="glass-card" id="configPanel" style="display: none;">
-            <div class="section-title">📊 原始指标</div>
-            <div class="metrics-flex">
-                <div class="metric-row"><span class="metric-label">包含轨道 / 有效</span><span class="metric-value"><span id="infoTotalTracks">-</span> / <span id="infoValidTracks">-</span></span></div>
-                <div class="metric-row"><span class="metric-label">包含乐器</span><span class="metric-value" id="infoInstruments" style="font-size: 0.8rem;">-</span></div>
-                <div class="metric-row"><span class="metric-label">原曲 BPM</span><span class="metric-value" id="infoBpm">-</span></div>
-                <div class="metric-row"><span class="metric-label">原曲时长</span><span class="metric-value" id="infoDuration">-</span></div>
-                <div class="metric-row"><span class="metric-label">音高范围</span><span class="metric-value" id="infoPitchRange">-</span></div>
-                <div class="metric-row"><span class="metric-label">总音符量</span><span class="metric-value" id="infoTotalNotes">-</span></div>
+            <div class="section-title">
+                <span class="icon">✨</span> 歌曲信息
+            </div>
+            <div class="info-list">
+                <div class="info-row"><span class="info-label">包含轨道 / 有效</span><span class="info-val"><span id="infoTotalTracks">-</span> / <span id="infoValidTracks">-</span></span></div>
+                <div class="info-row"><span class="info-label">包含乐器</span><span class="info-val wrap-text" id="infoInstruments">-</span></div>
+                <div class="info-row"><span class="info-label">原曲 BPM</span><span class="info-val" id="infoBpm">-</span></div>
+                <div class="info-row"><span class="info-label">原曲时长</span><span class="info-val" id="infoDuration">-</span></div>
+                <div class="info-row"><span class="info-label">音高范围</span><span class="info-val" id="infoPitchRange">-</span></div>
+                <div class="info-row"><span class="info-label">总音符量</span><span class="info-val" id="infoTotalNotes">-</span></div>
             </div>
 
-            <div class="section-title" style="margin-top: 20px;">⚙️ 提取目标音轨 (点击选中)</div>
+            <div class="section-title" style="margin-top: 24px;">
+                <span class="icon">🎹</span> 提取音轨
+            </div>
             <div class="track-list custom-scrollbar" id="trackListContainer"></div>
 
-            <div class="grid-2" style="margin-top: 16px;">
-                <div class="form-group"><label>歌曲名称</label><input type="text" id="songNameInput" placeholder="未命名"></div>
-                <div class="form-group"><label>原曲作者</label><input type="text" id="authorInput" placeholder="未知作者"></div>
+            <div class="section-title" style="margin-top: 24px;">
+                <span class="icon">✏️</span> 谱面信息
             </div>
-            <div class="form-group">
-                <label>改编者 / 谱师</label>
-                <input type="text" id="transcriberInput" placeholder="填你自己" value="_OneStar">
+            <div class="meta-grid">
+                <div class="input-group">
+                    <label>歌曲名称</label>
+                    <input type="text" id="songNameInput" placeholder="未命名曲目">
+                </div>
+                <div class="input-group">
+                    <label>原曲作者</label>
+                    <input type="text" id="authorInput" placeholder="未知作者">
+                </div>
+                <div class="input-group">
+                    <label>改编者 / 谱师</label>
+                    <input type="text" id="transcriberInput" value="_OneStar">
+                </div>
             </div>
 
-            <div class="section-title" style="margin-top: 20px;">🧠 核心提取模型</div>
-            
-            <div id="modelContainer">
-                <!-- 1. 还原度最高 -->
+            <div class="section-title" style="margin-top: 24px;">
+                <span class="icon">🌌</span> 提取模式
+            </div>
+            <div id="modelContainer" class="model-grid">
                 <div class="model-card active" data-mode="fastpro" data-order="1">
-                    <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyFastPro</div></div>
-                    <div class="model-desc">【100% 原轨直出】强行保留你选中的所有音符，绝不剔除任何伴奏与细节，最大程度追求原曲听感。</div>
+                    <div class="model-content">
+                        <div class="model-name">OneStar-SkyFastPro</div>
+                        <div class="model-desc">原轨直出。保留所有音符与伴奏细节，最大程度追求原曲听感。</div>
+                    </div>
+                    <div class="model-indicator"></div>
                 </div>
-                <!-- 2. 还原度中等 -->
                 <div class="model-card" data-mode="pro" data-order="2">
-                    <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyPro</div></div>
-                    <div class="model-desc">【极致全景还原】智能提取主旋律，同时将复杂的和弦自动拆分为琶音，保留丰富的伴奏细节，适合进阶听感。</div>
+                    <div class="model-content">
+                        <div class="model-name">OneStar-SkyPro</div>
+                        <div class="model-desc">全景还原。提取主旋律，智能拆分和弦为琶音，保留丰富听感。</div>
+                    </div>
+                    <div class="model-indicator"></div>
                 </div>
-                <!-- 3. 还原度最低 -->
                 <div class="model-card" data-mode="fast" data-order="3">
-                    <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyFast</div></div>
-                    <div class="model-desc">【极简纯单音】残酷剔除所有和弦与伴奏，只保留最高音主线，专为手残党与新手准备的防打结单音谱。</div>
+                    <div class="model-content">
+                        <div class="model-name">OneStar-SkyFast</div>
+                        <div class="model-desc">极简单音。剔除伴奏，只保留最高音主线，适合手动弹奏。</div>
+                    </div>
+                    <div class="model-indicator"></div>
                 </div>
             </div>
 
-            <button id="convertBtn" class="primary-btn">✨ 启动 AI 深度提取</button>
+            <button id="convertBtn" class="primary-btn">
+                <span class="btn-text">✨ 开始提取</span>
+            </button>
             <div id="status">准备就绪</div>
         </div>
 
         <div id="log" class="custom-scrollbar"></div>
 
-        <div class="glass-card" id="resultCard">
-            <div class="section-title" style="color: var(--success);">✅ 提取完成</div>
-            <div class="res-metrics">
-                <div class="res-item"><div class="res-label">输出音符数</div><div class="res-value" id="stepFinalNotes">-</div></div>
-                <div class="res-item"><div class="res-label">时间跨度</div><div class="res-value" id="outDuration">-</div></div>
-                <div class="res-item"><div class="res-label">Studio 速度</div><div class="res-value" id="outSpeed">-</div></div>
-                <div class="res-item"><div class="res-label">音域平移</div><div class="res-value" id="outShift">-</div></div>
+        <!-- 结果展示区 -->
+        <div class="glass-card result-card" id="resultCard">
+            <div class="success-header">
+                <div class="success-icon">✨</div>
+                <div class="success-title">生成完成</div>
             </div>
+            
+            <div class="res-metrics">
+                <div class="res-item">
+                    <div class="res-label">输出音符数</div>
+                    <div class="res-value" id="stepFinalNotes">-</div>
+                </div>
+                <div class="res-item">
+                    <div class="res-label">时间跨度</div>
+                    <div class="res-value" id="outDuration">-</div>
+                </div>
+                <div class="res-item">
+                    <div class="res-label">Studio 速度</div>
+                    <div class="res-value" id="outSpeed">-</div>
+                </div>
+                <div class="res-item">
+                    <div class="res-label">音域平移</div>
+                    <div class="res-value" id="outShift">-</div>
+                </div>
+            </div>
+
+            <div class="info-list result-details">
+                <div class="info-row"><span class="info-label">最终谱名</span><span class="info-val wrap-text highlight-text" id="outSongName">-</span></div>
+                <div class="info-row"><span class="info-label">原曲作者</span><span class="info-val" id="outAuthor">-</span></div>
+                <div class="info-row"><span class="info-label">提取模型</span><span class="info-val" id="outModel">-</span></div>
+                <div class="info-row"><span class="info-label">改编谱师</span><span class="info-val" id="outTranscriber">-</span></div>
+            </div>
+            
             <div class="action-row" id="actionRow">
                 <div class="btn-group" id="appActions" style="display: none;">
-                    <button id="btnSendApp" style="background: #0ea5e9;">🚀 发送至 App</button>
-                    <button id="btnSaveLocal" style="background: #10b981;">📁 保存至本地</button>
+                    <button id="btnSendApp" class="action-btn btn-send">🚀 发送至 App</button>
+                    <button id="btnSaveLocal" class="action-btn btn-save">📁 保存至本地</button>
                 </div>
                 <div id="browserActions" style="display: none;">
-                    <button id="btnDownload" style="background: #f59e0b; width: 100%;">⬇️ 浏览器直接下载 .txt</button>
+                    <button id="btnDownload" class="action-btn btn-download">⬇️ 浏览器直接下载</button>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- 视图 2：图片识谱 -->
-    <div id="viewOcr" style="display: none;">
-        <div class="glass-card" style="padding: 24px; text-align: center;">
-            <span class="icon" style="font-size: 3rem; display: block; margin-bottom: 10px;">🖼️</span>
-            <p style="color: var(--text-muted); margin-bottom: 20px;">上传简谱或色块图，自动提取铺面</p>
-            <button id="btnOcrPick" class="primary-btn" style="background: #a855f7;">📂 选择图片</button>
-            <div id="ocrStatus" style="margin-top: 16px; font-size: 0.85rem; color: var(--accent);">等待上传...</div>
-        </div>
-        <div class="glass-card" id="ocrResultCard" style="display: none;">
-            <div class="section-title" style="color: var(--success);">✅ 识谱完成</div>
-            <div class="res-metrics"><div class="res-item"><div class="res-label">识别音符数</div><div class="res-value" id="ocrNotesCount">-</div></div></div>
-            <button id="btnOcrConvert" class="primary-btn" style="background: #10b981;">✨ 发送至悬浮窗</button>
-        </div>
-    </div>
-
-    <!-- 视图 3：音频转谱 -->
-    <div id="viewAudio" style="display: none;">
-        <div class="glass-card" style="padding: 24px; text-align: center;">
-            <span class="icon" style="font-size: 3rem; display: block; margin-bottom: 10px;">🎤</span>
-            <p style="color: var(--text-muted); margin-bottom: 20px;">选择音频文件，提取旋律</p>
-            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
-                <button id="btnLocalAudio" class="primary-btn" style="flex: 1; min-width: 140px; background: #10b981;">⚡ 本地极速</button>
-                <button id="btnCloudAudio" class="primary-btn" style="flex: 1; min-width: 140px; background: #a855f7;">☁️ 云端满血</button>
-            </div>
-            <div id="audioStatus" style="margin-top: 16px; font-size: 0.85rem; color: var(--accent);">等待上传...</div>
         </div>
     </div>
 </div>
