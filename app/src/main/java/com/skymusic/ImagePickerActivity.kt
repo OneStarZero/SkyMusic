@@ -28,19 +28,26 @@ class ImagePickerActivity : Activity() {
             if (uri != null) {
                 try {
                     val inputStream: InputStream? = contentResolver.openInputStream(uri)
-                    val bitmap = BitmapFactory.decodeStream(inputStream)
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeStream(inputStream, null, options)
                     inputStream?.close()
 
-                    if (bitmap != null) {
-                        // 压缩图片，防止 Base64 过大导致传输卡死（限制最大宽度 1080）
-                        val maxWidth = 1080
-                        val scaledBitmap = if (bitmap.width > maxWidth) {
-                            val ratio = maxWidth.toFloat() / bitmap.width
-                            Bitmap.createScaledBitmap(bitmap, maxWidth, (bitmap.height * ratio).toInt(), true)
-                        } else bitmap
+                    // 计算缩放比例，防止 OOM 闪退
+                    val maxWidth = 800
+                    var scale = 1
+                    if (options.outWidth > maxWidth) {
+                        scale = options.outWidth / maxWidth
+                    }
 
+                    val inputStream2: InputStream? = contentResolver.openInputStream(uri)
+                    val bmpOptions = BitmapFactory.Options().apply { inSampleSize = scale }
+                    val bitmap = BitmapFactory.decodeStream(inputStream2, null, bmpOptions)
+                    inputStream2?.close()
+
+                    if (bitmap != null) {
                         val outputStream = ByteArrayOutputStream()
-                        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                        // 极限压缩质量，解决闪退
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
                         val bytes = outputStream.toByteArray()
                         val base64Image = Base64.encodeToString(bytes, Base64.NO_WRAP)
 

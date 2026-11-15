@@ -13,29 +13,31 @@ export function initOcr() {
     // 接收原生的图片 Base64
     window.onImageBase64Received = async function(imageBase64) {
         const ocrStatus = document.getElementById('ocrStatus');
-        ocrStatus.textContent = "正在通过云端 AI 识别...";
+        ocrStatus.textContent = "正在通过云端 AI 识别(需联网)...";
 
         try {
-            const formData = new URLSearchParams();
-            formData.append("image", imageBase64);
-            formData.append("lang", "zh");
+            const formData = new FormData();
+            formData.append("base64Image", "data:image/jpeg;base64," + imageBase64);
+            formData.append("language", "chs"); // 中文简体
+            formData.append("isOverlayRequired", "false");
+            // 使用 apikey: helloworld 作为公共测试密钥
+            formData.append("apikey", "helloworld"); 
 
-            // 使用无需 key 的在线 OCR 接口
-            const res = await fetch('https://music.163.com/api/third/ocr', {
+            const res = await fetch('https://api.ocr.space/parse/image', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formData.toString()
+                body: formData
             });
             const data = await res.json();
 
-            if (data && data.code === 200 && data.data && data.data.text) {
-                processOcrText(data.data.text);
+            if (data && !data.IsErroredOnProcessing && data.ParsedResults && data.ParsedResults.length > 0) {
+                const text = data.ParsedResults[0].ParsedText;
+                processOcrText(text);
             } else {
-                ocrStatus.textContent = "❌ 云端识别失败，请重试";
+                ocrStatus.textContent = "❌ 云端识别失败: " + (data.ErrorMessage ? data.ErrorMessage[0] : "未知错误");
             }
         } catch (err) {
             console.error(err);
-            ocrStatus.textContent = "❌ 网络请求异常";
+            ocrStatus.textContent = "❌ 网络请求异常，请检查网络连接";
         }
     };
 }
