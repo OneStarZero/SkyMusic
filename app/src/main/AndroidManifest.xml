@@ -9,7 +9,7 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/app_icon"
-        android:label="✨SkyMusic-Alpha"
+        android:label="SkyMusic-Alpha"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"

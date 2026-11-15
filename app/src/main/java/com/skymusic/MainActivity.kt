@@ -36,7 +36,6 @@ class MainActivity : AppCompatActivity() {
 
     private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            // 🌟 接收本地路径，而不是 Base64
             val imagePath = result.data?.getStringExtra("imagePath")
             if (imagePath != null) {
                 webViewInstance?.evaluateJavascript("window.onImagePathReceived('$imagePath');", null)
@@ -155,6 +154,10 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_name", payload.optString("name", "未命名"))
             intent.putExtra("song_author", payload.optString("author", "未知作者"))
             intent.putExtra("song_model", payload.optString("model", ""))
+            // 🌟 安全读取 BPM，防止 Null 或格式错误
+            val bpmStr = payload.optString("bpm", "0")
+            intent.putExtra("song_bpm", bpmStr) 
+            
             startService(intent)
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {

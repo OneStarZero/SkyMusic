@@ -10,186 +10,102 @@ export function initOcr() {
         }
     });
 
-    // 🌟 接收原生传回的文件路径，而不是庞大的 Base64 字符串
+    // 接收原生传回的本地文件路径
     window.onImagePathReceived = async function(imagePath) {
         const ocrStatus = document.getElementById('ocrStatus');
-        ocrStatus.textContent = "正在分析图片结构并自动裁剪...";
+        ocrStatus.textContent = "正在上传图片进行深度解析...";
 
-        const img = new Image();
-        // WebView 允许直接读取本地 file:// 路径
-        img.src = 'file://' + imagePath;
-        
-        img.onload = async () => {
-            try {
-                // 1. 自动裁剪核心铺面区域
-                const croppedCanvas = autoCropScore(img);
-                
-                // 2. 分析铺面类型
-                const scoreType = detectScoreType(croppedCanvas);
-
-                if (scoreType === 'block') {
-                    ocrStatus.textContent = "检测到色块矩阵谱，正在逐格解析...";
-                    parseBlockScore(croppedCanvas);
-                } else if (scoreType === 'number') {
-                    ocrStatus.textContent = "检测到数字简谱，正在请求云端 AI...";
-                    // 数字谱必须走云端，这里临时转一下（因为已经压缩且裁剪，不会闪退）
-                    const croppedBase64 = croppedCanvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-                    await requestCloudOcr(croppedBase64, ocrStatus);
-                } else {
-                    ocrStatus.textContent = "⚠️ 无法识别谱面类型";
-                }
-            } catch (err) {
-                console.error(err);
-                ocrStatus.textContent = "❌ 处理图片时出错";
+        try {
+            // 通过 XHR 读取本地图片
+            const base64Image = await readLocalFileAsBase64(imagePath);
+            if (!base64Image) {
+                ocrStatus.textContent = "❌ 本地图片读取失败";
+                return;
             }
-        };
 
-        img.onerror = () => {
-            ocrStatus.textContent = "❌ 无法读取本地图片文件";
-        };
+            // 发送到高精度的 OCR 接口
+            const formData = new FormData();
+            formData.append("base64Image", "data:image/jpeg;base64," + base64Image);
+            formData.append("language", "chs"); // 中文/简体
+            formData.append("isOverlayRequired", "false"); // 直接要纯文本，我们自己用正则拆
+            formData.append("apikey", "helloworld"); 
+
+            const res = await fetch('https://api.ocr.space/parse/image', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            if (data && !data.IsErroredOnProcessing && data.ParsedResults && data.ParsedResults.length > 0) {
+                const text = data.ParsedResults[0].ParsedText;
+                processOcrText(text);
+            } else {
+                ocrStatus.textContent = "❌ 云端识别失败，可能是图片太模糊或格式不支持";
+            }
+        } catch (err) {
+            console.error(err);
+            ocrStatus.textContent = "❌ 网络请求异常，请检查网络";
+        }
     };
 }
 
-// ================= 核心 1：智能自动裁剪 =================
-function autoCropScore(img) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    ctx.drawImage(img, 0, 0);
-
-    // 剔除顶部 10% 和底部 5%（通常是标题和作者）
-    const cropY = img.height * 0.10;
-    const cropH = img.height * 0.85;
-    const cropX = img.width * 0.05;
-    const cropW = img.width * 0.90;
-
-    const cropCanvas = document.createElement('canvas');
-    cropCanvas.width = cropW;
-    cropCanvas.height = cropH;
-    const cropCtx = cropCanvas.getContext('2d');
-    cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-    
-    return cropCanvas;
-}
-
-// ================= 核心 2：判断谱面类型 =================
-function detectScoreType(canvas) {
-    const ctx = canvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let darkPixels = 0;
-    let colorfulPixels = 0;
-    
-    for (let i = 0; i < imgData.length; i += 40) {
-        const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
-        
-        if (r < 100 && g < 100 && b < 100) darkPixels++;
-        if ((r > 150 && g < 100 && b < 100) || (b > 150 && r < 100 && g < 100)) colorfulPixels++;
-    }
-
-    if (colorfulPixels > 50 || darkPixels > imgData.length / 80) return 'block';
-    return 'number';
-}
-
-// ================= 核心 3：方块矩阵解析 =================
-function parseBlockScore(canvas) {
-    const ctx = canvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    
-    const cols = 5;
-    const colW = canvas.width / cols;
-    
-    let detectedBlocks = []; 
-
-    for (let y = 0; y < canvas.height; y += 2) {
-        for (let x = 0; x < canvas.width; x += 2) {
-            const idx = (y * canvas.width + x) * 4;
-            const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2];
-
-            const isWhite = r > 240 && g > 240 && b > 240;
-            const isBlack = r < 30 && g < 30 && b < 30;
-            
-            if (!isWhite && (!isBlack || (r < 100 && g < 100 && b < 100))) {
-                const colIdx = Math.floor(x / colW);
-                
-                let isDuplicate = detectedBlocks.find(block => 
-                    block.col === colIdx && Math.abs(block.y - y) < 30
-                );
-
-                if (!isDuplicate) detectedBlocks.push({ col: colIdx, y: y });
+// 🌟 辅助函数：从本地路径读取文件并转为 Base64
+function readLocalFileAsBase64(path) {
+    return new Promise((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', 'file://' + path, true);
+        xhr.responseType = 'blob';
+        xhr.onload = () => {
+            if (xhr.status === 200 || xhr.status === 0) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    resolve(reader.result.split(',')[1]);
+                };
+                reader.readAsDataURL(xhr.response);
+            } else {
+                resolve(null);
             }
-        }
-    }
-
-    detectedBlocks.sort((a, b) => a.y - b.y);
-
-    let notes = [];
-    let maxY = canvas.height;
-    
-    detectedBlocks.forEach((block, index) => {
-        let row = Math.floor((block.y / maxY) * 3); 
-        row = Math.min(2, Math.max(0, row));
-        let keyIndex = (2 - row) * 5 + block.col;
-        notes.push({ time: index * 180, key: `1Key${keyIndex}` });
+        };
+        xhr.onerror = () => resolve(null);
+        xhr.send();
     });
-
-    if (notes.length > 0) {
-        document.getElementById('ocrStatus').textContent = `✅ 矩阵解析完成，共 ${notes.length} 个音符`;
-        sendOcrToApp(notes);
-    } else {
-        document.getElementById('ocrStatus').textContent = "❌ 未能解析出有效色块";
-    }
 }
 
-// ================= 核心 4：云端数字谱解析 =================
-async function requestCloudOcr(croppedBase64, ocrStatus) {
-    try {
-        const formData = new FormData();
-        formData.append("base64Image", "data:image/jpeg;base64," + croppedBase64);
-        formData.append("language", "chs");
-        formData.append("isOverlayRequired", "false");
-        formData.append("apikey", "helloworld");
-
-        const res = await fetch('https://api.ocr.space/parse/image', {
-            method: 'POST',
-            body: formData
-        });
-        const data = await res.json();
-
-        if (data && !data.IsErroredOnProcessing && data.ParsedResults && data.ParsedResults.length > 0) {
-            const text = data.ParsedResults[0].ParsedText;
-            processNumberScore(text);
-        } else {
-            ocrStatus.textContent = "❌ 云端识别失败";
-        }
-    } catch (err) {
-        console.error(err);
-        ocrStatus.textContent = "❌ 网络请求异常";
-    }
-}
-
-function processNumberScore(text) {
+// 🌟 解析云端返回的纯文本
+function processOcrText(text) {
     const ocrStatus = document.getElementById('ocrStatus');
+    
+    // 打印一下看看云端的原始识别结果，方便排查
+    console.log("【云端原始文本】:", text);
+
+    // 简化处理：保留 1-7 以及可能代表高音的数字/符号
+    // 注意：五线谱形式的简谱，可能有数字上下的点，我们可以将其转换为高音。
+    // 在这里，最简单稳妥的做法就是：提取所有连续的 1-7 序列。
     const cleanText = text.replace(/[^1-7]/g, '');
+    
+    // 基础 MIDI 映射
     const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71 };
     
     let parsedNotes = [];
     let currentTime = 0;
+    const TIME_STEP = 350; // 每个音符间隔 350 毫秒
 
+    // 将字符串转换为音符
     for (let char of cleanText) {
         let midi = BASE_MIDI[char];
         if (midi) {
             parsedNotes.push({ time: currentTime, midi: midi, velocity: 0.8 });
-            currentTime += 350; 
+            currentTime += TIME_STEP;
         }
     }
 
-    if (parsedNotes.length === 0) {
-        ocrStatus.textContent = "❌ 未能识别出有效数字";
+    // 防呆机制：如果识别出来的音符数量小于 10，大概是因为识别失败（全是噪声）。
+    if (parsedNotes.length < 10) {
+        ocrStatus.textContent = "❌ 未识别到足够的数字简谱（请确保上传的是清晰的数字谱）";
         return;
     }
 
-    ocrStatus.textContent = `✅ 数字谱解析成功，共 ${parsedNotes.length} 个音符`;
+    ocrStatus.textContent = `✅ 识别成功，共 ${parsedNotes.length} 个音符`;
     showOcrResult(parsedNotes);
 }
 
@@ -210,14 +126,23 @@ function showOcrResult(parsedNotes) {
 }
 
 function sendOcrToApp(notes) {
+    // 构造符合 SkyStudio 格式的 JSON
     const skyData = [{
         name: "图片识谱 || SkyOcr", author: "OneStar", transcribedBy: "_OneStar",
-        bpm: 240, songNotes: notes
+        bpm: 240, 
+        songNotes: notes
     }];
+    
+    // 传给原生
     if (window.AndroidBridge && window.AndroidBridge.startPlay) {
         const payload = {
-            name: "图片识谱 || SkyOcr", author: "OneStar", model: "SkyOcr",
-            notes: notes, fullJson: JSON.stringify(skyData), targetFolder: "AppSheets"
+            name: "图片识谱 || SkyOcr", 
+            author: "OneStar", 
+            model: "SkyOcr",
+            bpm: "240", // 🌟 修复：明确传入 bpm 字符串
+            notes: notes, 
+            fullJson: JSON.stringify(skyData), 
+            targetFolder: "AppSheets"
         };
         window.AndroidBridge.startPlay(JSON.stringify(payload));
         showToast('🚀 已发送至悬浮窗', 'success');
