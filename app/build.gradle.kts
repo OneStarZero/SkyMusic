@@ -8,7 +8,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.skymusic"
+        applicationId = "com.skymusic.mp3"
         minSdk = 24
         targetSdk = 34
         versionCode = 7
