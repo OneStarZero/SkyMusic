@@ -77,14 +77,16 @@ document.addEventListener('DOMContentLoaded', () => {
         btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
         
         const file = midiInput.files[0];
-        console.log("【调试】获取到的文件对象：", file);
-        
-        if (!file) {
-            console.log("【调试】文件对象为空，退出");
-            return;
-        }
-        
-        dropZone.classList.add('has-file');
+if (!file) return;
+
+// 🌟 新增：如果是 MP3 等其他文件，直接弹窗拒绝，绝不解析
+if (!file.name.toLowerCase().endsWith('.mid') && !file.name.toLowerCase().endsWith('.midi')) {
+    showToast('请选择 .mid 或 .midi 文件！', 'error');
+    midiInput.value = ''; // 清空选择
+    return;
+}
+
+dropZone.classList.add('has-file');
         dropText.innerHTML = `✅ 已选择：<br><span class="filename">${file.name}</span>`;
         
         let rawName = file.name.replace(/\.[^.]+$/, '');

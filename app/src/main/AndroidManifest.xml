@@ -15,12 +15,6 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
-        <!-- 独立出来的文件选择器 -->
-        <activity
-            android:name=".MidiPickerActivity"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
-
-        <!-- 主界面 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -30,10 +24,8 @@
             </intent-filter>
         </activity>
 
-        <!-- 悬浮窗服务 -->
         <service android:name=".FloatingWindowService" />
 
-        <!-- 无障碍服务 -->
         <service
             android:name=".SkyAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

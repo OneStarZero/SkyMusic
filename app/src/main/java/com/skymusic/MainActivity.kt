@@ -27,17 +27,14 @@ class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    // 接收 MidiPickerActivity 传回来的结果
-    private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+    // 回滚到最原始的 WebView 接管文件选择
+    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (filePathCallback == null) return@registerForActivityResult
+        var results: Array<Uri>? = null
         if (result.resultCode == RESULT_OK && result.data != null) {
-            val base64Data = result.data?.getStringExtra("base64Data")
-            val fileName = result.data?.getStringExtra("fileName")
-            if (base64Data != null && fileName != null) {
-                val jsCode = "window.onFileSelectedFromAndroid('data:application/octet-stream;base64,$base64Data', '${fileName.replace("'", "\\'")}');"
-                webViewInstance?.evaluateJavascript(jsCode, null)
-            }
+            result.data?.dataString?.let { results = arrayOf(Uri.parse(it)) }
         }
-        filePathCallback?.onReceiveValue(null)
+        filePathCallback?.onReceiveValue(results)
         filePathCallback = null
     }
 
@@ -70,10 +67,22 @@ class MainActivity : AppCompatActivity() {
             
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
+                    filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
-                    // 拦截网页的文件选择，直接跳到我们自己的纯净选择器
-                    midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java))
-                    return true
+                    return try {
+                        // 🌟 核心修复：严格指定 MIME 类型，虽然有些机型还是会列 MP3，但已经排除了绝大多数
+                        val intent = params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "audio/midi"
+                        }
+                        // 如果系统不支持 audio/midi，给一个通用的拦截兜底
+                        intent.type = "audio/*"
+                        fileChooserLauncher.launch(intent)
+                        true
+                    } catch (e: Exception) {
+                        filePathCallback = null
+                        false
+                    }
                 }
             }
             
