@@ -11,8 +11,8 @@ android {
         applicationId = "com.skymusic"
         minSdk = 24
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.0.6"
+        versionCode = 7
+        versionName = "0.0.7"
 
         // 【体积压缩】只保留中英文
         resourceConfigurations += listOf("zh", "en")

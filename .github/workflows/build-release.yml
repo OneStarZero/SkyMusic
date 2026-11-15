@@ -2,8 +2,11 @@ name: SkyMusic Release Build
 
 on:
   push:
-    branches: [ "main", "master" ] # 只要推送到 main 或 master 就自动触发
-  workflow_dispatch: # 允许你手动点击触发构建
+    branches:
+      - main
+      - mp3-support  # 🌟 新增这一行
+  workflow_dispatch:
+ 
 
 jobs:
   build:
