@@ -1,6 +1,25 @@
 // js/main.js
 import { Midi } from '@tonejs/midi';
 
+// ==========================================
+// 🌟 核心：供原生 MidiPickerActivity 调用的全局函数
+// ==========================================
+window.onFileSelectedFromAndroid = function(base64Data, fileName) {
+    try {
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        // 直接复用解析逻辑
+        processMidiData(bytes.buffer, fileName);
+    } catch (err) {
+        console.error("原生文件解码失败", err);
+        showToast('文件读取失败，请重试', 'error');
+    }
+};
+
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
@@ -25,25 +44,6 @@ let currentMidiData = null;
 let pendingTxtContent = null;
 let selectedMode = 'fast';
 let selectedTrackIndices = new Set(); 
-
-// ==========================================
-// 🌟 核心：供原生 MidiPickerActivity 调用的全局函数
-// ==========================================
-window.onFileSelectedFromAndroid = function(base64Data, fileName) {
-    try {
-        const binaryString = atob(base64Data);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-        // 直接复用解析逻辑
-        processMidiData(bytes.buffer, fileName);
-    } catch (err) {
-        console.error("原生文件解码失败", err);
-        showToast('文件解析失败，请重试', 'error');
-    }
-};
 
 // 模型切换
 document.querySelectorAll('.model-card').forEach(card => {
@@ -75,11 +75,11 @@ dropZone.addEventListener('drop', (e) => {
 midiInput.addEventListener('change', handleFileSelect);
 
 // ==========================================
-// 🌟 文件选择入口
+// 🌟 文件选择入口 (兼容 App 和 浏览器)
 // ==========================================
 async function handleFileSelect() {
-    // 如果在 App 内，由于原生拦截了 input 的 click 事件，其实不会走到这里
-    // 这里主要保留给浏览器环境使用
+    // 如果是 App 环境，且原生成功接管了 <input> 的点击，这里其实不会触发
+    // 但为了浏览器端的兼容，保留读取逻辑
     const file = midiInput.files[0];
     if (!file) return;
     const arrayBuffer = await file.arrayBuffer();

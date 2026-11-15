@@ -8,7 +8,9 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.provider.Settings
+import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.webkit.*
@@ -19,24 +21,48 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
 
 class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    // 🌟 专门接收独立选择器传回来的结果
-    private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            val base64Data = result.data?.getStringExtra("base64Data")
-            val fileName = result.data?.getStringExtra("fileName")
-            if (base64Data != null && fileName != null) {
-                // 直接通过 JS 接口塞给网页
+    // 🌟 终极方案：直接用 GetContent 获取文件
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) {
+            Toast.makeText(this, "已取消选择", Toast.LENGTH_SHORT).show()
+            return@registerForActivityResult
+        }
+
+        try {
+            var fileName = "未知文件.mid"
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1) fileName = cursor.getString(nameIndex)
+                }
+            }
+
+            if (!fileName.lowercase().endsWith(".mid") && !fileName.lowercase().endsWith(".midi")) {
+                Toast.makeText(this, "请选择 .mid 或 .midi 文件！", Toast.LENGTH_SHORT).show()
+                return@registerForActivityResult
+            }
+
+            val inputStream: InputStream? = contentResolver.openInputStream(uri)
+            val bytes = inputStream?.readBytes()
+            inputStream?.close()
+
+            if (bytes != null) {
+                val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                // 回传给网页
                 val jsCode = "window.onFileSelectedFromAndroid('$base64Data', '${fileName.replace("'", "\\'")}');"
                 webViewInstance?.evaluateJavascript(jsCode, null)
+                Toast.makeText(this, "读取成功", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "文件内容为空", Toast.LENGTH_SHORT).show()
             }
+        } catch (e: Exception) {
+            Toast.makeText(this, "读取文件异常: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-        filePathCallback?.onReceiveValue(null)
-        filePathCallback = null
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -68,9 +94,8 @@ class MainActivity : AppCompatActivity() {
             
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    filePathCallback = cb
-                    // 🌟 拦截网页请求，强行打开我们独立的选择器
-                    midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java))
+                    // 网页触发 <input> 时，直接调起原生
+                    filePickerLauncher.launch("*/*")
                     return true
                 }
             }
