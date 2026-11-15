@@ -6,9 +6,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.util.Base64
 import android.widget.Toast
-import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 
 class ImagePickerActivity : Activity() {
@@ -27,55 +27,53 @@ class ImagePickerActivity : Activity() {
             val uri: Uri? = data?.data
             if (uri != null) {
                 try {
-                    // 1. 第一遍：只读边界，不加载像素
+                    // 1. 读取边界
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     var inputStream = contentResolver.openInputStream(uri)
                     BitmapFactory.decodeStream(inputStream, null, options)
                     inputStream?.close()
 
-                    // 2. 计算安全压缩比 (目标最大宽度 800px，防止 Base64 过大导致 OOM)
+                    // 2. 计算压缩比 (最大宽度 1200)
                     var scale = 1
-                    val maxWidth = 800
-                    if (options.outWidth > maxWidth) {
-                        scale = options.outWidth / maxWidth
-                    }
+                    val maxDimension = 1200
+                    val maxSide = Math.max(options.outWidth, options.outHeight)
+                    if (maxSide > maxDimension) scale = maxSide / maxDimension
 
-                    // 3. 第二遍：读取像素并压缩
-                    val bmpOptions = BitmapFactory.Options().apply { inSampleSize = scale }
+                    // 3. 读取像素 (RGB_565 省一半内存)
+                    val bmpOptions = BitmapFactory.Options().apply { 
+                        inSampleSize = scale
+                        inPreferredConfig = Bitmap.Config.RGB_565 
+                    }
                     inputStream = contentResolver.openInputStream(uri)
                     var bitmap = BitmapFactory.decodeStream(inputStream, null, bmpOptions)
                     inputStream?.close()
 
                     if (bitmap != null) {
-                        if (bitmap.width > maxWidth) {
-                            val ratio = maxWidth.toFloat() / bitmap.width
-                            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, maxWidth, (bitmap.height * ratio).toInt(), true)
+                        if (Math.max(bitmap.width, bitmap.height) > maxDimension) {
+                            val ratio = maxDimension.toFloat() / Math.max(bitmap.width, bitmap.height)
+                            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true)
                             if (scaledBitmap != bitmap) {
                                 bitmap.recycle()
                                 bitmap = scaledBitmap
                             }
                         }
 
-                        // 4. 压缩为 JPEG 并转 Base64
-                        val outputStream = ByteArrayOutputStream()
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
-                        val bytes = outputStream.toByteArray()
-                        val base64Image = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        
+                        // 🌟 4. 不转 Base64，直接存入 App 缓存目录
+                        val cacheFile = File(cacheDir, "ocr_temp_${System.currentTimeMillis()}.jpg")
+                        val outputStream = FileOutputStream(cacheFile)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+                        outputStream.flush()
+                        outputStream.close()
                         bitmap.recycle()
 
-                        // 5. 回传 Base64
+                        // 🌟 5. 把文件绝对路径传回给网页
                         val resultIntent = Intent().apply {
-                            putExtra("imageBase64", base64Image)
+                            putExtra("imagePath", cacheFile.absolutePath)
                         }
                         setResult(Activity.RESULT_OK, resultIntent)
-                    } else {
-                        Toast.makeText(this, "图片解码失败", Toast.LENGTH_SHORT).show()
                     }
-                } catch (e: OutOfMemoryError) {
-                    Toast.makeText(this, "图片太大，手机内存不足", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
-                    Toast.makeText(this, "读取图片异常: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "读取失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
