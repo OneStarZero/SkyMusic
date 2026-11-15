@@ -1,4 +1,3 @@
-// js/ocr-parser.js
 import { showToast } from './ui.js';
 import { mapPitchToSky } from './midi-parser.js';
 
@@ -11,102 +10,56 @@ export function initOcr() {
         }
     });
 
-    // 接收带坐标的 OCR 数据
-    window.onImageWordsReceived = function(jsonString) {
+    // 接收原生的图片 Base64
+    window.onImageBase64Received = async function(imageBase64) {
         const ocrStatus = document.getElementById('ocrStatus');
-        ocrStatus.textContent = "正在解析版面坐标...";
+        ocrStatus.textContent = "正在通过云端 AI 识别...";
 
         try {
-            const words = JSON.parse(jsonString);
-            
-            let validNotes = [];
-            
-            words.forEach(w => {
-                if (w.text.includes("作者") || w.text.includes("改编") || w.text.includes("B=")) return;
-                
-                let cleanText = w.text.replace(/i/g, "1'"); 
-                const matches = cleanText.match(/[1-7]/g);
-                if (matches) {
-                    matches.forEach((num) => {
-                        let isHigh = cleanText.includes("'") || cleanText.includes(".");
-                        validNotes.push({ num: num, isHigh: isHigh, x: w.x, y: w.y });
-                    });
-                }
+            const formData = new URLSearchParams();
+            formData.append("image", imageBase64);
+            formData.append("lang", "zh");
+
+            // 使用无需 key 的在线 OCR 接口
+            const res = await fetch('https://music.163.com/api/third/ocr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData.toString()
             });
+            const data = await res.json();
 
-            if (validNotes.length === 0) {
-                ocrStatus.textContent = "❌ 未检测到简谱数字";
-                return;
+            if (data && data.code === 200 && data.data && data.data.text) {
+                processOcrText(data.data.text);
+            } else {
+                ocrStatus.textContent = "❌ 云端识别失败，请重试";
             }
-
-            validNotes.sort((a, b) => a.x - b.x);
-            const X_THRESHOLD = 40; 
-            let groupedChords = [];
-            let currentGroup = [validNotes[0]];
-
-            for (let i = 1; i < validNotes.length; i++) {
-                let note = validNotes[i];
-                let lastNote = currentGroup[currentGroup.length - 1];
-
-                if (Math.abs(note.x - lastNote.x) <= X_THRESHOLD) {
-                    currentGroup.push(note);
-                } else {
-                    groupedChords.push({ notes: currentGroup, x: lastNote.x });
-                    currentGroup = [note];
-                }
-            }
-            if (currentGroup.length > 0) {
-                groupedChords.push({ notes: currentGroup, x: currentGroup[currentGroup.length - 1].x });
-            }
-
-            const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71 };
-            let parsedNotes = [];
-            let currentTime = 0;
-            
-            let totalDistance = groupedChords[groupedChords.length - 1].x - groupedChords[0].x;
-            let avgGap = totalDistance / groupedChords.length;
-            const LONG_NOTE_FACTOR = 1.5; 
-
-            for (let i = 0; i < groupedChords.length; i++) {
-                let group = groupedChords[i];
-                let currentX = group.x;
-                let nextX = (i < groupedChords.length - 1) ? groupedChords[i + 1].x : currentX + avgGap;
-                
-                let timeStep = 350; 
-                let gapRatio = (nextX - currentX) / avgGap;
-                
-                let isLong = gapRatio >= LONG_NOTE_FACTOR;
-                
-                let seen = new Set();
-                group.notes.forEach(n => {
-                    let midi = BASE_MIDI[n.num];
-                    if (n.isHigh) midi += 12; 
-
-                    if (!seen.has(midi)) {
-                        seen.add(midi);
-                        
-                        if (isLong) {
-                            let holdBeats = Math.min(8, Math.floor(gapRatio)); 
-                            for (let h = 0; h < holdBeats; h++) {
-                                parsedNotes.push({ time: currentTime + (h * 80), midi: midi, velocity: 0.8 });
-                            }
-                        } else {
-                            parsedNotes.push({ time: currentTime, midi: midi, velocity: 0.8 });
-                        }
-                    }
-                });
-
-                currentTime += timeStep * gapRatio; 
-            }
-
-            ocrStatus.textContent = `✅ 识别完成，提取出 ${groupedChords.length} 个节拍，共 ${parsedNotes.length} 个音`;
-            showOcrResult(parsedNotes);
-
         } catch (err) {
             console.error(err);
-            ocrStatus.textContent = "❌ 解析异常: " + err.message;
+            ocrStatus.textContent = "❌ 网络请求异常";
         }
     };
+}
+
+function processOcrText(text) {
+    const ocrStatus = document.getElementById('ocrStatus');
+    const cleanText = text.replace(/[^1-7]/g, '');
+    const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71 };
+    
+    let parsedNotes = [];
+    let currentTime = 0;
+
+    for (let char of cleanText) {
+        parsedNotes.push({ time: currentTime, midi: BASE_MIDI[char], velocity: 0.8 });
+        currentTime += 350; 
+    }
+
+    if (parsedNotes.length === 0) {
+        ocrStatus.textContent = "❌ 未能识别出数字简谱";
+        return;
+    }
+
+    ocrStatus.textContent = `✅ 识别成功，共 ${parsedNotes.length} 个数字`;
+    showOcrResult(parsedNotes);
 }
 
 function showOcrResult(parsedNotes) {

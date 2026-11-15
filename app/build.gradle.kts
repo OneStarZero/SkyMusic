@@ -68,9 +68,7 @@ dependencies {
     // WebView 壳子必须的核心库
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
-    // 🌟 Google ML Kit 离线文字识别
-implementation("com.google.mlkit:text-recognition:16.0.0")
-    
+ 
     // 🚨 注意：你的 MainActivity 是纯代码写的 FrameLayout，没有用到 XML 布局
     // 所以 constraintlayout 完全不需要，删掉可以再省几百 KB
     // implementation("androidx.constraintlayout:constraintlayout:2.1.4")

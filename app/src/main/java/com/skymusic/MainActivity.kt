@@ -38,9 +38,10 @@ class MainActivity : AppCompatActivity() {
     // 接收独立的 图片选择器结果
     private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            val ocrText = result.data?.getStringExtra("ocrText")
-            if (ocrText != null) {
-                webViewInstance?.evaluateJavascript("window.onImageTextRecognized('$ocrText');", null)
+            val imageBase64 = result.data?.getStringExtra("imageBase64")
+            if (imageBase64 != null) {
+                // 把 Base64 传给网页，触发在线 OCR
+                webViewInstance?.evaluateJavascript("window.onImageBase64Received('$imageBase64');", null)
             }
         }
     }
@@ -70,7 +71,13 @@ class MainActivity : AppCompatActivity() {
                 cacheMode = WebSettings.LOAD_NO_CACHE
             }
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    // 🌟 通知网页加载完毕，可以隐藏遮罩了
+                    view?.evaluateJavascript("window.onAppReady();", null)
+                }
+            }
             
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")

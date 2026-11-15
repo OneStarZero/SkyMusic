@@ -1,4 +1,3 @@
-// js/midi-parser.js
 import { Midi } from '@tonejs/midi';
 import { showToast } from './ui.js';
 
