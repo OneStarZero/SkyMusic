@@ -24,13 +24,18 @@ class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (filePathCallback == null) return@registerForActivityResult
-        var results: Array<Uri>? = null
+    // 🌟 专门接收独立选择器传回来的结果
+    private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            result.data?.dataString?.let { results = arrayOf(Uri.parse(it)) }
+            val base64Data = result.data?.getStringExtra("base64Data")
+            val fileName = result.data?.getStringExtra("fileName")
+            if (base64Data != null && fileName != null) {
+                // 直接通过 JS 接口塞给网页
+                val jsCode = "window.onFileSelectedFromAndroid('$base64Data', '${fileName.replace("'", "\\'")}');"
+                webViewInstance?.evaluateJavascript(jsCode, null)
+            }
         }
-        filePathCallback?.onReceiveValue(results)
+        filePathCallback?.onReceiveValue(null)
         filePathCallback = null
     }
 
@@ -63,19 +68,10 @@ class MainActivity : AppCompatActivity() {
             
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
-                    return try {
-                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "*/*"
-                        }
-                        fileChooserLauncher.launch(intent)
-                        true
-                    } catch (e: Exception) {
-                        filePathCallback = null
-                        false
-                    }
+                    // 🌟 拦截网页请求，强行打开我们独立的选择器
+                    midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java))
+                    return true
                 }
             }
             

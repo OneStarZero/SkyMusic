@@ -15,6 +15,7 @@
         android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
+        <!-- 🌟 修复：MainActivity 独立闭合，不能被嵌套 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -24,8 +25,15 @@
             </intent-filter>
         </activity>
 
+        <!-- 🌟 修复：MidiPickerActivity 必须和 MainActivity 平级 -->
+        <activity
+            android:name=".MidiPickerActivity"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- 悬浮窗服务 -->
         <service android:name=".FloatingWindowService" />
 
+        <!-- 无障碍服务 -->
         <service
             android:name=".SkyAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

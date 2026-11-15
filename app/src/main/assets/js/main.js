@@ -26,6 +26,26 @@ let pendingTxtContent = null;
 let selectedMode = 'fast';
 let selectedTrackIndices = new Set(); 
 
+// ==========================================
+// 🌟 核心：供原生 MidiPickerActivity 调用的全局函数
+// ==========================================
+window.onFileSelectedFromAndroid = function(base64Data, fileName) {
+    try {
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        // 直接复用解析逻辑
+        processMidiData(bytes.buffer, fileName);
+    } catch (err) {
+        console.error("原生文件解码失败", err);
+        showToast('文件解析失败，请重试', 'error');
+    }
+};
+
+// 模型切换
 document.querySelectorAll('.model-card').forEach(card => {
     card.addEventListener('click', () => {
         if(card.classList.contains('active')) return;
@@ -41,6 +61,7 @@ document.querySelectorAll('.model-card').forEach(card => {
 function log(msg) { logDiv.textContent += msg + '\n'; logDiv.scrollTop = logDiv.scrollHeight; }
 function setStatus(msg) { statusDiv.textContent = msg; }
 
+// 拖拽与点击上传监听
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
 ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
 ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
@@ -53,22 +74,36 @@ dropZone.addEventListener('drop', (e) => {
 
 midiInput.addEventListener('change', handleFileSelect);
 
+// ==========================================
+// 🌟 文件选择入口
+// ==========================================
 async function handleFileSelect() {
-    if (previewSheetBtn) previewSheetBtn.style.display = 'none';
-    
+    // 如果在 App 内，由于原生拦截了 input 的 click 事件，其实不会走到这里
+    // 这里主要保留给浏览器环境使用
     const file = midiInput.files[0];
     if (!file) return;
-    
-    if (!file.name.toLowerCase().endsWith('.mid') && !file.name.toLowerCase().endsWith('.midi')) {
+    const arrayBuffer = await file.arrayBuffer();
+    processMidiData(arrayBuffer, file.name);
+}
+
+// ==========================================
+// 🌟 核心解析逻辑（供原生和浏览器共用）
+// ==========================================
+async function processMidiData(arrayBuffer, fileName) {
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        showToast('文件内容为空', 'error');
+        return;
+    }
+
+    if (!fileName.toLowerCase().endsWith('.mid') && !fileName.toLowerCase().endsWith('.midi')) {
         showToast('请选择 .mid 或 .midi 文件！', 'error');
-        midiInput.value = ''; 
         return;
     }
 
     dropZone.classList.add('has-file');
-    dropText.innerHTML = `✅ 已选择：<br><span class="filename">${file.name}</span>`;
+    dropText.innerHTML = `✅ 已选择：<br><span class="filename">${fileName}</span>`;
     
-    let rawName = file.name.replace(/\.[^.]+$/, '');
+    let rawName = fileName.replace(/\.[^.]+$/, '');
     let songTitle = rawName, originalAuthor = '';
     const separators = [' - ', ' -', '- ', '-', '_', '—'];
     for (let sep of separators) {
@@ -87,9 +122,6 @@ async function handleFileSelect() {
     logDiv.textContent = '';
 
     try {
-        const arrayBuffer = await file.arrayBuffer();
-        if (!arrayBuffer || arrayBuffer.byteLength === 0) throw new Error('文件内容为空');
-
         let midiData;
         try {
             midiData = new Midi(arrayBuffer);
@@ -158,6 +190,9 @@ async function handleFileSelect() {
     }
 }
 
+// ==========================================
+// 🌟 提取转换逻辑
+// ==========================================
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
 const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
 
