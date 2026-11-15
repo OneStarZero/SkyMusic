@@ -13,7 +13,10 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.text.Spannable
+import android.text.SpannableString
 import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
 import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.MotionEvent
@@ -41,7 +44,7 @@ class FloatingWindowService : Service() {
     private var currentDuration = "0:00"
     private var currentNotesCount = 0
     private var currentBpm = "0" 
-    private var currentModel = "" // 🌟 新增记录模型名
+    private var currentModel = ""
 
     private var isMiniMode = true 
     private var isPlayerMode = false 
@@ -52,7 +55,7 @@ class FloatingWindowService : Service() {
     private lateinit var seekBar: SeekBar
     private lateinit var btnPlayPause: Button
     private lateinit var tvSpeed: TextView
-    private lateinit var tvInfo: TextView // 🌟 播放器新增信息栏
+    private lateinit var tvInfo: TextView
 
     private val handler = Handler(Looper.getMainLooper())
     private var playRunnable: Runnable? = null
@@ -94,7 +97,7 @@ class FloatingWindowService : Service() {
                     currentIndex = 0
                     currentSongName = intent.getStringExtra("song_name") ?: "App 发送谱面"
                     currentAuthor = intent.getStringExtra("song_author") ?: "未知作者"
-                    currentModel = intent.getStringExtra("song_model") ?: "" // 🌟 接收模型
+                    currentModel = intent.getStringExtra("song_model") ?: ""
                     currentNotesCount = songData.size
                     currentDuration = calculateDuration(songData)
                     currentBpm = intent.getStringExtra("song_bpm") ?: "0"
@@ -434,12 +437,10 @@ class FloatingWindowService : Service() {
             return
         }
         for ((file, info, _) in songInfoList) {
-            // 🌟 这里把 info[6] 传进去（模型名）
             addSongToList(info[0], info[1], info[2], info[3].toInt(), info[5], info[6], file) { directLoadLocalFile(file) }
         }
     }
 
-    // 🌟 修改了参数，增加 model 字段
     private fun addSongToList(songName: String, author: String, duration: String, notes: Int, bpm: String, model: String, file: File?, onClick: () -> Unit) {
         if (!this::listContainer.isInitialized) return
 
@@ -469,9 +470,9 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.END 
         }
         if (songName.contains(" || ")) {
-            val spannable = android.text.SpannableString(songName)
+            val spannable = SpannableString(songName)
             val splitIndex = songName.indexOf(" || ")
-            spannable.setSpan(android.text.style.ForegroundColorSpan(Color.parseColor("#38BDF8")), splitIndex, songName.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            spannable.setSpan(ForegroundColorSpan(Color.parseColor("#38BDF8")), splitIndex, songName.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
             titleTv.text = spannable
         } else {
             titleTv.text = songName
@@ -484,7 +485,7 @@ class FloatingWindowService : Service() {
         }
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        // 🌟 小字信息：用 || 分隔，并带上模型名（如果有的话）
+        // 🌟 小字信息：用 || 分隔，并带上模型名
         val items = mutableListOf(
             "作者:$author", "音符:$notes", "BPM:$bpm", "时长:$duration", "倍速:$speedStr"
         )
@@ -816,7 +817,6 @@ class FloatingWindowService : Service() {
         }
     }
 
-    // 🌟 修改了返回值，增加了 [6] 模型名
     private fun readLocalFileInfo(file: File): List<String> {
         try {
             var text = file.readText(Charsets.UTF_8)
@@ -826,14 +826,13 @@ class FloatingWindowService : Service() {
             val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"")
             val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"")
             val bpmRegex = Regex("\"bpm\"\\s*:\\s*(\\d+)")
-            val modelRegex = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"") // 🌟 新增读取 model
+            val modelRegex = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"")
             
             var songName = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
             var displayAuthor = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
             var bpm = bpmRegex.find(content)?.groupValues?.getOrNull(1) ?: "0"
-            var model = modelRegex.find(content)?.groupValues?.getOrNull(1) ?: "" // 🌟 读取模型名
+            var model = modelRegex.find(content)?.groupValues?.getOrNull(1) ?: ""
             
-            // 如果是旧版文件没有模型名，从文件名推断
             if (model.isBlank() && songName.contains(" || ")) {
                 model = songName.substringAfter(" || ")
             }
@@ -848,7 +847,6 @@ class FloatingWindowService : Service() {
                  String.format(Locale.getDefault(), "%d:%02d", totalSec / 60, totalSec % 60)
             } else "0:00"
 
-            // 返回 7 个元素，最后一个是模型名
             return listOf(songName, displayAuthor, duration, notesCount.toString(), "", bpm, model)
         } catch (e: Exception) {
             return listOf(file.nameWithoutExtension, "未知作者", "0:00", "0", "", "0", "")
@@ -873,7 +871,7 @@ class FloatingWindowService : Service() {
                 val authorRegex = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"")
                 val nameRegex = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"")
                 val bpmRegex = Regex("\"bpm\"\\s*:\\s*(\\d+)")
-                val modelRegex = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"") // 🌟 新增
+                val modelRegex = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"")
                 
                 val timeMatches = timeRegex.findAll(content).map { it.groupValues[1].toLong() }.toList()
                 val keyMatches = keyRegex.findAll(content).map { it.groupValues[1].toInt() }.toList()
@@ -881,7 +879,7 @@ class FloatingWindowService : Service() {
                 var nameMatch = nameRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
                 var authorMatch = authorRegex.find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
                 var bpmMatch = bpmRegex.find(content)?.groupValues?.getOrNull(1) ?: "0"
-                var modelMatch = modelRegex.find(content)?.groupValues?.getOrNull(1) ?: "" // 🌟 读取
+                var modelMatch = modelRegex.find(content)?.groupValues?.getOrNull(1) ?: ""
                 
                 if (modelMatch.isBlank() && nameMatch.contains(" || ")) {
                     modelMatch = nameMatch.substringAfter(" || ")
@@ -906,7 +904,7 @@ class FloatingWindowService : Service() {
                     currentSongName = nameMatch
                     currentAuthor = authorMatch
                     currentBpm = bpmMatch
-                    currentModel = modelMatch // 🌟 写入模型名
+                    currentModel = modelMatch
                     currentNotesCount = songData.size
                     currentDuration = calculateDuration(songData)
                     preparePlay()
