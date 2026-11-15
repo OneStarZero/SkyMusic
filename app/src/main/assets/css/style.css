@@ -83,3 +83,38 @@ button.primary-btn:disabled { opacity: 0.5; pointer-events: none; }
 .toast.error { border-left-color: var(--danger); }
 .toast.success { border-left-color: var(--success); }
 @keyframes dropDown { from { opacity: 0; transform: translate(-50%, -20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ==================== Tab 切换样式 ==================== */
+.tab-container { 
+    display: flex; 
+    gap: 10px; 
+    margin-bottom: 16px; 
+}
+
+.tab-btn { 
+    flex: 1; 
+    padding: 12px; 
+    border-radius: var(--radius-item); 
+    font-weight: bold; 
+    cursor: pointer; 
+    transition: all 0.2s; 
+    text-align: center; 
+    border: 1px solid transparent; 
+}
+
+.tab-btn.active-midi { 
+    background: rgba(56, 189, 248, 0.2); 
+    border-color: var(--primary); 
+    color: var(--primary); 
+}
+
+.tab-btn.active-ocr { 
+    background: rgba(168, 85, 247, 0.2); 
+    border-color: #a855f7; 
+    color: #a855f7; 
+}
+
+.tab-btn.inactive { 
+    background: rgba(0, 0, 0, 0.3); 
+    color: var(--text-muted); 
+}
