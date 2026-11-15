@@ -75,22 +75,46 @@ document.querySelectorAll('.model-card').forEach(card => {
     });
 });
 
-['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
+// 🌟 拖拽逻辑（浏览器）
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); });
 dropZone.addEventListener('drop', (e) => { 
+    e.preventDefault();
     if (e.dataTransfer.files.length) { 
-        midiInput.files = e.dataTransfer.files; 
-        handleFileSelect(); 
+        const file = e.dataTransfer.files[0];
+        file.arrayBuffer().then(buf => processMidiData(buf, file.name));
     } 
 });
 
-midiInput.addEventListener('change', handleFileSelect);
+// 🌟 MIDI 点击逻辑（调起原生独立 Activity）
+dropZone.addEventListener('click', (e) => {
+    // 如果点到的是 input，或者原生环境
+    if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.openMidiPicker) {
+        e.preventDefault(); // 阻止触发 input
+        window.AndroidBridge.openMidiPicker();
+    }
+});
 
-async function handleFileSelect() {
+midiInput.addEventListener('change', async () => {
     const file = midiInput.files[0];
     if (!file) return;
     const arrayBuffer = await file.arrayBuffer();
     processMidiData(arrayBuffer, file.name);
-}
+});
+
+// 🌟 接收原生传回的 MIDI 数据
+window.onFileSelectedFromAndroid = function(base64Data, fileName) {
+    try {
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        processMidiData(bytes.buffer, fileName);
+    } catch (err) {
+        showToast('文件读取失败，请重试', 'error');
+    }
+};
 
 async function processMidiData(arrayBuffer, fileName) {
     if (!arrayBuffer || arrayBuffer.byteLength === 0) { showToast('文件内容为空', 'error'); return; }
@@ -187,7 +211,6 @@ convertBtn.addEventListener('click', async (e) => {
 
             rawNotes.sort((a, b) => a.time - b.time);
             
-            // 音域平移
             let pitches = rawNotes.map(n => n.midi).sort((a, b) => a - b);
             let medianPitch = pitches[Math.floor(pitches.length / 2)];
             const shift = Math.round((68 - medianPitch) / 12) * 12;
@@ -286,6 +309,7 @@ convertBtn.addEventListener('click', async (e) => {
 
 
 // ==================== 视图 2：图片识谱逻辑 ====================
+// 🌟 原生图片选择器调用
 document.getElementById('btnOcrPick').addEventListener('click', () => {
     if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.openImagePicker) {
         window.AndroidBridge.openImagePicker();
@@ -294,7 +318,7 @@ document.getElementById('btnOcrPick').addEventListener('click', () => {
     }
 });
 
-// 接收原生 OCR 识别结果
+// 🌟 接收原生的 OCR 识别结果
 window.onImageTextRecognized = function(text) {
     const ocrStatus = document.getElementById('ocrStatus');
     ocrStatus.textContent = "正在解析文本...";
@@ -325,11 +349,9 @@ window.onImageTextRecognized = function(text) {
 
     document.getElementById('btnOcrConvert').onclick = async () => {
         try {
-            // 🌟 调用独立的 OCR 模型文件夹
             const module = await import('../OneStarModels_Ocr/OneStar-SkyOcr.js');
             const processed = module.process(parsedNotes, console.log);
 
-            // 映射为光遇键位
             const finalNotes = processed.map(n => ({
                 time: n.time,
                 key: mapPitchToSky(n.midi)

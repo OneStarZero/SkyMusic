@@ -8,9 +8,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.provider.Settings
-import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.webkit.*
@@ -19,64 +17,31 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONObject
 import java.io.File
-import java.io.InputStream
 
 class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
 
-    // 🌟 1. 图片选择器 (用于 OCR 识谱)
-    private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        try {
-            val image = InputImage.fromFilePath(this, uri)
-            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-            
-            recognizer.process(image)
-                .addOnSuccessListener { visionText ->
-                    val safeText = visionText.text.replace("\\", "\\\\").replace("\n", "\\n").replace("'", "\\'")
-                    webViewInstance?.evaluateJavascript("window.onImageTextRecognized('$safeText');", null)
-                }
-                .addOnFailureListener { e ->
-                    Toast.makeText(this, "识别失败: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-        } catch (e: Exception) {
-            Toast.makeText(this, "读取图片失败", Toast.LENGTH_SHORT).show()
+    // 接收独立的 MIDI 选择器结果
+    private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val base64Data = result.data?.getStringExtra("base64Data")
+            val fileName = result.data?.getStringExtra("fileName")
+            if (base64Data != null && fileName != null) {
+                val safeName = fileName.replace("'", "\\'")
+                webViewInstance?.evaluateJavascript("window.onFileSelectedFromAndroid('$base64Data', '$safeName');", null)
+            }
         }
     }
 
-    // 🌟 2. 文件选择器 (用于读取 MIDI)
-    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        try {
-            var fileName = "未知文件.mid"
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (nameIndex != -1) fileName = cursor.getString(nameIndex)
-                }
+    // 接收独立的 图片选择器结果
+    private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            val ocrText = result.data?.getStringExtra("ocrText")
+            if (ocrText != null) {
+                webViewInstance?.evaluateJavascript("window.onImageTextRecognized('$ocrText');", null)
             }
-
-            if (!fileName.lowercase().endsWith(".mid") && !fileName.lowercase().endsWith(".midi")) {
-                Toast.makeText(this, "请选择 .mid 或 .midi 文件！", Toast.LENGTH_SHORT).show()
-                return@registerForActivityResult
-            }
-
-            val inputStream: InputStream? = contentResolver.openInputStream(uri)
-            val bytes = inputStream?.readBytes()
-            inputStream?.close()
-
-            if (bytes != null) {
-                val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val jsCode = "window.onFileSelectedFromAndroid('$base64Data', '${fileName.replace("'", "\\'")}');"
-                webViewInstance?.evaluateJavascript(jsCode, null)
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "读取文件失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -106,14 +71,6 @@ class MainActivity : AppCompatActivity() {
             }
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             webViewClient = WebViewClient()
-            
-            // 拦截网页 <input> 调用
-            webChromeClient = object : WebChromeClient() {
-                override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    filePickerLauncher.launch("*/*")
-                    return true
-                }
-            }
             
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
@@ -159,7 +116,6 @@ class MainActivity : AppCompatActivity() {
             }.show()
     }
 
-    // 🌟 3. 接口全部包在这里面
     inner class WebAppInterface {
         @JavascriptInterface
         fun startPlay(jsonString: String) = runOnUiThread { handleSendApp(jsonString) }
@@ -167,12 +123,14 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun saveLocal(jsonString: String) = runOnUiThread { handleSaveLocal(jsonString) }
 
-        // 开放给 JS 调用的图片选择器接口
+        @JavascriptInterface
+        fun openMidiPicker() {
+            runOnUiThread { midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java)) }
+        }
+
         @JavascriptInterface
         fun openImagePicker() {
-            runOnUiThread {
-                imagePickerLauncher.launch("image/*")
-            }
+            runOnUiThread { imagePickerLauncher.launch(Intent(this@MainActivity, ImagePickerActivity::class.java)) }
         }
     }
 
