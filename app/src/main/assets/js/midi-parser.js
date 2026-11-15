@@ -46,15 +46,6 @@ export function initMidi() {
         });
     });
 
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); });
-    dropZone.addEventListener('drop', (e) => { 
-        e.preventDefault();
-        if (e.dataTransfer.files.length) { 
-            const file = e.dataTransfer.files[0];
-            file.arrayBuffer().then(buf => processMidiData(buf, file.name));
-        } 
-    });
-
     dropZone.addEventListener('click', (e) => {
         if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.openMidiPicker) {
             e.preventDefault(); 
@@ -115,17 +106,29 @@ export function initMidi() {
             trackListContainer.innerHTML = '';
             selectedTrackIndices.clear();
             let totalNotes = 0, validTrackCount = 0;
+            let instrumentsSet = new Set();
+            let minMidi = 127, maxMidi = 0, maxTime = 0;
 
             currentMidiData.tracks.forEach((track, index) => {
                 if (track.notes.length > 0) {
                     validTrackCount++;
                     totalNotes += track.notes.length;
+                    const instName = track.instrument.name || '未知乐器';
+                    instrumentsSet.add(instName);
+                    
                     let displayName = track.name && track.name.trim() !== "" ? track.name.trim() : `轨道 ${index + 1}`;
+
+                    track.notes.forEach(n => {
+                        if (n.midi < minMidi) minMidi = n.midi;
+                        if (n.midi > maxMidi) maxMidi = n.midi;
+                        if (n.time > maxTime) maxTime = n.time;
+                    });
+
                     if (index !== 9 && selectedTrackIndices.size < 2) selectedTrackIndices.add(index);
 
                     const item = document.createElement('div');
                     item.className = `track-item ${selectedTrackIndices.has(index) ? 'active' : ''}`;
-                    item.innerHTML = `<div class="track-info"><span class="track-name">${displayName}</span><span class="track-notes">${track.notes.length} 音符</span></div><div class="check-circle"></div>`;
+                    item.innerHTML = `<div class="track-info"><span class="track-name">${displayName}</span><span class="track-notes">${track.notes.length} 音符 - ${instName}</span></div><div class="check-circle"></div>`;
                     item.addEventListener('click', () => {
                         if (selectedTrackIndices.has(index)) { selectedTrackIndices.delete(index); item.classList.remove('active'); } 
                         else { selectedTrackIndices.add(index); item.classList.add('active'); }
@@ -134,8 +137,18 @@ export function initMidi() {
                 }
             });
 
-            document.getElementById('infoTracks').textContent = validTrackCount;
-            document.getElementById('infoNotes').textContent = totalNotes;
+            const totalSeconds = Math.floor(maxTime);
+            const mins = Math.floor(totalSeconds / 60), secs = totalSeconds % 60;
+            let bpmVal = currentMidiData.header.tempos.length > 0 ? Math.round(currentMidiData.header.tempos[0].bpm) : 120;
+
+            document.getElementById('infoTotalTracks').textContent = currentMidiData.tracks.length;
+            document.getElementById('infoValidTracks').textContent = validTrackCount;
+            document.getElementById('infoInstruments').textContent = Array.from(instrumentsSet).join(', ') || '无';
+            document.getElementById('infoBpm').textContent = bpmVal;
+            document.getElementById('infoDuration').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+            document.getElementById('infoPitchRange').textContent = `${minMidi} ~ ${maxMidi}`;
+            document.getElementById('infoTotalNotes').textContent = totalNotes;
+
             configPanel.style.display = 'block';
             convertBtn.disabled = false; 
             statusDiv.textContent = '准备就绪';
@@ -150,7 +163,6 @@ export function initMidi() {
     convertBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         if (!currentMidiData) return;
-        document.activeElement?.blur();
         
         if (selectedTrackIndices.size === 0) { showToast('请至少选择一个音轨！', 'error'); return; }
 
@@ -166,15 +178,24 @@ export function initMidi() {
         setTimeout(async () => {
             try {
                 let rawNotes = [];
+                let extractedCount = 0;
+                let longNoteCount = 0;
+
                 const selectedArr = Array.from(selectedTrackIndices);
                 let tracksToProcess = currentMidiData.tracks.filter((t, i) => selectedArr.includes(i));
 
                 tracksToProcess.forEach(track => {
                     track.notes.forEach(note => {
-                        if (note.duration * 1000 > 1000) return;
+                        extractedCount++;
+                        if (note.duration * 1000 > 1000) {
+                            longNoteCount++;
+                            return;
+                        }
                         rawNotes.push({ time: Math.round(note.time * 1000), midi: note.midi, velocity: note.velocity });
                     });
                 });
+
+                if (rawNotes.length === 0) throw new Error('无有效音符');
 
                 rawNotes.sort((a, b) => a.time - b.time);
                 
@@ -186,19 +207,21 @@ export function initMidi() {
                     time: n.time, key: mapPitchToSky(n.midi, shift), velocity: n.velocity, origMidi: n.midi
                 }));
 
-                logDiv.textContent += `[1] 原始识别: ${rawNotes.length} 个\n`;
+                logDiv.textContent += `[1] 原始识别: ${extractedCount} 个\n`;
+                logDiv.textContent += `[2] 剔除长音: -${longNoteCount} 个\n`;
 
                 let processedNotes = [];
-                if (isMelody) {
-                    const module = await import('../OneStar_Models/OneStar-SkyFast.js');
-                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
-                } else if (selectedMode === 'fastpro') {
-                    const module = await import('../OneStar_Models/OneStar-SkyFastPro.js');
-                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
-                } else {
-                    const module = await import('../OneStar_Models/OneStar-SkyPro.js');
-                    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
-                }
+                // 确保在 convertBtn 的点击事件里：
+if (isMelody) {
+    const module = await import('../OneStar_Models/OneStar-SkyFast.js');
+    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+} else if (selectedMode === 'fastpro') {
+    const module = await import('../OneStar_Models/OneStar-SkyFastPro.js');
+    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+} else {
+    const module = await import('../OneStar_Models/OneStar-SkyPro.js');
+    processedNotes = module.process(mappedNotes, (msg) => logDiv.textContent += msg + '\n');
+}
 
                 let allNotes = [];
                 if (selectedMode === 'fastpro') {
@@ -217,13 +240,18 @@ export function initMidi() {
                     finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
                 }
 
+                logDiv.textContent += `✅ 最终输出音符: ${allNotes.length} 个\n`;
+
+                let originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
+                let studioSpeed = Math.round(originalBpm * (700 / 120));
+                if (studioSpeed < 100) studioSpeed = 100;
+                if (studioSpeed > 4000) studioSpeed = 4000;
+
                 let modelName = isMelody ? "SkyFast" : (selectedMode === 'fastpro' ? "SkyFastPro" : "SkyPro");
-                const baseSongName = document.getElementById('songNameInput').value.trim() || '未命名';
+                const baseSongName = document.getElementById('songNameInput').value.trim() || '未命名曲目';
                 const finalSongName = `${baseSongName} || ${modelName}`; 
                 const finalAuthor = document.getElementById('authorInput').value.trim() || '未知作者';
                 const finalTranscriber = document.getElementById('transcriberInput').value.trim() || '_OneStar';
-                const originalBpm = currentMidiData.header.tempos.length > 0 ? currentMidiData.header.tempos[0].bpm : 120;
-                const studioSpeed = Math.min(4000, Math.max(100, Math.round(originalBpm * (700 / 120))));
 
                 const skyStudioData = [{
                     name: finalSongName, author: finalAuthor, transcribedBy: finalTranscriber,
@@ -233,21 +261,27 @@ export function initMidi() {
 
                 pendingTxtContent = JSON.stringify(skyStudioData);
 
+                const firstNoteTime = allNotes[0].time;
+                const lastNoteTime = allNotes[allNotes.length - 1].time;
+                const totalDurationSec = ((lastNoteTime - firstNoteTime) / 1000).toFixed(1);
+
                 document.getElementById('stepFinalNotes').textContent = allNotes.length;
-                document.getElementById('outDuration').textContent = ((allNotes[allNotes.length-1].time - allNotes[0].time)/1000).toFixed(1)+'s';
+                document.getElementById('outDuration').textContent = `${totalDurationSec}s`;
                 document.getElementById('outSpeed').textContent = studioSpeed;
                 document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
                 
                 resultCard.style.display = 'block';
                 statusDiv.textContent = '✅ 提取完成！';
                 
+                setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+
                 const isApp = typeof window.AndroidBridge !== 'undefined';
                 document.getElementById('appActions').style.display = isApp ? 'flex' : 'none';
                 document.getElementById('browserActions').style.display = isApp ? 'none' : 'block';
 
                 if (isApp) {
                     btnSendApp.onclick = () => {
-                        const payload = { name: finalSongName, author: finalAuthor, model: modelName, notes: allNotes, fullJson: pendingTxtContent, targetFolder: "AppSheets" };
+                        const payload = { name: finalSongName, author: finalAuthor, model: modelName, bpm: studioSpeed, notes: allNotes, fullJson: pendingTxtContent, targetFolder: "AppSheets" };
                         window.AndroidBridge.startPlay(JSON.stringify(payload));
                     };
                     btnSaveLocal.onclick = () => {
@@ -263,6 +297,7 @@ export function initMidi() {
                         a.click();
                     };
                 }
+
             } catch (err) {
                 statusDiv.textContent = '❌ 转换出错';
                 logDiv.textContent += '错误: ' + err.message;

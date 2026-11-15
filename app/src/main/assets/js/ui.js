@@ -7,27 +7,27 @@ export function showToast(message, type = 'info') {
 }
 
 export function initTabs() {
-    const tabMidi = document.getElementById('tabMidi');
-    const tabOcr = document.getElementById('tabOcr');
-    const viewMidi = document.getElementById('viewMidi');
-    const viewOcr = document.getElementById('viewOcr');
+    const tabs = [
+        { btn: document.getElementById('tabMidi'), view: document.getElementById('viewMidi'), cls: 'active-midi' },
+        { btn: document.getElementById('tabOcr'), view: document.getElementById('viewOcr'), cls: 'active-ocr' },
+        { btn: document.getElementById('tabAudio'), view: document.getElementById('viewAudio'), cls: 'active-audio' }
+    ];
 
-    tabMidi.addEventListener('click', () => {
-        tabMidi.className = 'tab-btn active-midi';
-        tabOcr.className = 'tab-btn inactive';
-        viewMidi.style.display = 'block';
-        viewOcr.style.display = 'none';
-    });
+    const setActive = (activeIdx) => {
+        tabs.forEach((t, i) => {
+            if (i === activeIdx) {
+                t.btn.className = `tab-btn ${t.cls}`;
+                t.view.style.display = 'block';
+            } else {
+                t.btn.className = 'tab-btn inactive';
+                t.view.style.display = 'none';
+            }
+        });
+    };
 
-    tabOcr.addEventListener('click', () => {
-        tabOcr.className = 'tab-btn active-ocr';
-        tabMidi.className = 'tab-btn inactive';
-        viewMidi.style.display = 'none';
-        viewOcr.style.display = 'block';
-    });
+    tabs.forEach((t, i) => t.btn.addEventListener('click', () => setActive(i)));
 }
 
-// 🌟 供原生调用，隐藏加载遮罩
 window.onAppReady = function() {
     const loader = document.getElementById('app-loader');
     if (loader) {
@@ -35,8 +35,4 @@ window.onAppReady = function() {
         setTimeout(() => loader.remove(), 300);
     }
 };
-
-// 浏览器本地测试兜底，1.5秒后自动关闭
-setTimeout(() => {
-    if(window.onAppReady) window.onAppReady();
-}, 1500);
+setTimeout(() => { if(window.onAppReady) window.onAppReady(); }, 1500);

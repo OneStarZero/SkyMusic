@@ -1,40 +1,102 @@
-// OneStar_Models/OneStar-SkyPro.js
 export function process(mappedNotes, logFn) {
-    logFn(`[3] 执行 OneStar-SkyPro 极致全景还原...`);
+    logFn(`[3] 执行 OneStar-SkyPro 全景智能还原...`);
     
-    // 仅保留最基础的时间对齐，不做任何阉割
-    const GRID_STEP = 15; // 更精细的 15ms 网格
+    const GRID_STEP = 20;           
+    const MIN_GAP = 45;             
+    const SAFE_PLAY_GAP = 75;       
+    const MAX_CHORD_KEYS = 4;       
+    const MIN_VELOCITY = 0.2;       
 
     let processedNotes = [];
 
-    // 1. 按时间排序并剔除极弱噪声
-    let sortedNotes = [...mappedNotes]
-        .filter(n => n.velocity >= 0.1) 
+    let rawNotes = mappedNotes
+        .filter(n => n.velocity >= MIN_VELOCITY) 
         .sort((a, b) => a.time - b.time);
 
-    // 2. 仅做微小的网格对齐（把 1ms 内的偏差对齐到一起，防止因为微小误差导致本该同时按的键被拆开）
+    let quantized = rawNotes.map(n => ({ ...n, time: Math.round(n.time / GRID_STEP) * GRID_STEP }));
+    
     let grouped = [];
-    sortedNotes.forEach(note => {
-        let qTime = Math.round(note.time / GRID_STEP) * GRID_STEP;
-        let existing = grouped.find(g => Math.abs(g.time - qTime) <= GRID_STEP);
-        if (existing) {
-            // 绝对不去重，哪怕是同键也塞进去（交给原生端处理）
-            existing.notes.push(note);
-        } else {
-            grouped.push({ time: qTime, notes: [note] });
+    quantized.forEach(note => {
+        let existing = grouped.find(g => g.time === note.time);
+        if (existing) existing.notes.push(note); else grouped.push({ time: note.time, notes: [note] });
+    });
+
+    grouped.forEach(g => {
+        g.notes.sort((a, b) => b.origMidi - a.origMidi);
+        g.melody = g.notes[0];
+        g.accompaniment = g.notes.slice(1);
+        g.finalKeys = [g.melody.key];
+        let usedKeys = new Set([g.melody.key]);
+        
+        for (let acc of g.accompaniment) {
+            if (g.finalKeys.length >= MAX_CHORD_KEYS) break;
+            if (usedKeys.has(acc.key)) continue; 
+            if (Math.abs(g.melody.origMidi - acc.origMidi) <= 24) {
+                g.finalKeys.push(acc.key);
+                usedKeys.add(acc.key);
+            }
         }
     });
 
-    // 3. 展平，不做任何和弦数量限制
+    let deduplicated = [];
     grouped.forEach(g => {
-        g.notes.forEach(n => {
-            processedNotes.push({ time: g.time, key: n.key, origMidi: n.origMidi });
-        });
+        let prev = deduplicated[deduplicated.length - 1];
+        if (prev && g.time - prev.time < 50) {
+            if (g.melody.key === prev.melody.key) {
+                g.accompaniment.forEach(acc => {
+                    if (!prev.finalKeys.includes(acc.key) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(acc.key);
+                });
+                return; 
+            }
+        }
+        deduplicated.push(g);
     });
 
-    // 4. 最后再做一次排序，确保时间轴绝对准确
-    processedNotes.sort((a, b) => a.time - b.time);
+    let arpeggioPool = [];
+    deduplicated.forEach(group => {
+        if (group.finalKeys.length > MAX_CHORD_KEYS) {
+            let extra = group.finalKeys.splice(MAX_CHORD_KEYS);
+            extra.forEach((key, i) => arpeggioPool.push({ time: group.time + (i + 1) * GRID_STEP, key: key }));
+        }
+    });
 
-    logFn(`✅ Pro 提取完成，保留全部伴奏细节。`);
+    arpeggioPool.forEach(arp => {
+        let existing = deduplicated.find(g => g.time === arp.time);
+        if (existing) {
+            if (!existing.finalKeys.includes(arp.key) && existing.finalKeys.length < MAX_CHORD_KEYS) existing.finalKeys.push(arp.key);
+        } else {
+            deduplicated.push({ time: arp.time, finalKeys: [arp.key] });
+        }
+    });
+
+    deduplicated.sort((a, b) => a.time - b.time);
+
+    let alignedGroups = [];
+    let lastTime = -9999;
+
+    deduplicated.forEach(group => {
+        let currentTime = group.time;
+        let timeDiff = currentTime - lastTime;
+
+        if (timeDiff < MIN_GAP) {
+            if (timeDiff <= 35) currentTime = lastTime + SAFE_PLAY_GAP;
+        }
+
+        let prev = alignedGroups[alignedGroups.length - 1];
+        if (prev && currentTime - prev.time < 50) {
+            group.finalKeys.forEach(k => {
+                if (!prev.finalKeys.includes(k) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(k);
+            });
+            prev.time = Math.max(prev.time, currentTime); 
+        } else {
+            alignedGroups.push({ time: currentTime, finalKeys: [...group.finalKeys] });
+            lastTime = currentTime;
+        }
+    });
+
+    alignedGroups.forEach(group => {
+        group.finalKeys.forEach(k => processedNotes.push({ time: group.time, key: k }));
+    });
+
     return processedNotes;
 }
