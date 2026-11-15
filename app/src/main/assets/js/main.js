@@ -1,6 +1,6 @@
 // js/main.js
 import { Midi } from '@tonejs/midi';
-import { playMidiNotes, stopAudio } from './audio-player.js';
+import { stopAudio } from './audio-player.js'; // 不再需要 playMidiNotes，但仍需要 stopAudio 兜底
 
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
@@ -22,11 +22,13 @@ const resultCard = document.getElementById('resultCard');
 const btnPreviewOriginal = document.getElementById('btnPreviewOriginal');
 const btnSendApp = document.getElementById('btnSendApp');
 const btnSaveLocal = document.getElementById('btnSaveLocal');
+const previewSheetBtn = document.getElementById('previewSheetBtn');
 
 let currentMidiData = null;
 let pendingTxtContent = null;
 let selectedMode = 'fast';
 let selectedTrackIndices = new Set(); 
+let isPreviewingSheet = false;
 
 document.querySelectorAll('.model-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -43,7 +45,6 @@ document.querySelectorAll('.model-card').forEach(card => {
 function log(msg) { logDiv.textContent += msg + '\n'; logDiv.scrollTop = logDiv.scrollHeight; }
 function setStatus(msg) { statusDiv.textContent = msg; }
 
-// 拖拽与点击上传
 ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false));
 ['dragenter', 'dragover'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false));
 ['dragleave', 'drop'].forEach(eventName => dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false));
@@ -54,20 +55,21 @@ dropZone.addEventListener('drop', (e) => {
     } 
 });
 
-midiInput.addEventListener('change', () => {
-    console.log("【调试】change 触发");
-    handleFileSelect();
-});
+midiInput.addEventListener('change', handleFileSelect);
 
-// 🌟 核心解析逻辑
 async function handleFileSelect() {
+    if (typeof window.AndroidBridge !== 'undefined') {
+        if (window.AndroidBridge.stopRawMidiPreview) window.AndroidBridge.stopRawMidiPreview();
+        if (window.AndroidBridge.stopSheetPreview) window.AndroidBridge.stopSheetPreview();
+    }
     stopAudio();
     btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
+    if (previewSheetBtn) previewSheetBtn.style.display = 'none';
+    isPreviewingSheet = false;
     
     const file = midiInput.files[0];
     if (!file) return;
     
-    // 🌟 终极防线：哪怕是系统列出来的 MP3，只要选了直接拦截并清空，绝不卡死
     if (!file.name.toLowerCase().endsWith('.mid') && !file.name.toLowerCase().endsWith('.midi')) {
         showToast('请选择 .mid 或 .midi 文件！', 'error');
         midiInput.value = ''; 
@@ -121,7 +123,6 @@ async function handleFileSelect() {
                 totalNotes += track.notes.length;
                 let displayName = track.name && track.name.trim() !== "" ? track.name.trim() : `轨道 ${index + 1}`;
                 
-                // 默认选中前 2 个非打击乐轨道
                 if (index !== 9 && selectedTrackIndices.size < 2) {
                     selectedTrackIndices.add(index);
                 }
@@ -168,11 +169,13 @@ async function handleFileSelect() {
     }
 }
 
-// 试听原曲
+// 🌟 原曲试听（完全使用原生 SoundPool）
 btnPreviewOriginal.addEventListener('click', () => {
     if (btnPreviewOriginal.textContent.includes('停止')) {
         btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
-        stopAudio();
+        if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.stopRawMidiPreview) {
+            window.AndroidBridge.stopRawMidiPreview();
+        }
         return;
     }
 
@@ -186,6 +189,7 @@ btnPreviewOriginal.addEventListener('click', () => {
     let rawNotesToPlay = [];
     const selectedArr = Array.from(selectedTrackIndices);
     
+    // 收集选中的音符，并转换成原生格式
     currentMidiData.tracks.forEach((track, idx) => {
         if (selectedArr.includes(idx) && idx !== 9) {
             rawNotesToPlay.push(...track.notes);
@@ -198,8 +202,44 @@ btnPreviewOriginal.addEventListener('click', () => {
         return;
     }
 
-    playMidiNotes(rawNotesToPlay);
+    if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.playRawMidiPreview) {
+        // 映射 MIDI 音高到 0~14 的键位
+        const playPayload = rawNotesToPlay.map(n => {
+            let pitch = n.midi;
+            while (pitch < 60) pitch += 12;
+            while (pitch > 76) pitch -= 12;
+
+            const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
+            let bestKeyIdx = 0;
+            let minDist = 999;
+            
+            for (let i = 0; i < VALID_KEYS.length; i++) {
+                let dist = Math.abs(pitch - VALID_KEYS[i]);
+                if (dist < minDist) { minDist = dist; bestKeyIdx = i; }
+            }
+            
+            let keyIndex = bestKeyIdx;
+            if (pitch > 76) {
+                keyIndex = Math.min(14, bestKeyIdx + 5);
+            }
+
+            return {
+                time: Math.round(n.time * 1000), // 毫秒
+                keyIndex: keyIndex
+            };
+        });
+
+        // 按时间排序（原生延时器需要）
+        playPayload.sort((a, b) => a.time - b.time);
+
+        window.AndroidBridge.playRawMidiPreview(JSON.stringify(playPayload));
+    } else {
+        showToast('浏览器环境暂不支持原曲试听，请在 App 内使用', 'error');
+        btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
+        return;
+    }
     
+    // 自动恢复按钮
     const maxEndTime = Math.max(...rawNotesToPlay.map(n => n.time + n.duration));
     setTimeout(() => {
         if (btnPreviewOriginal.textContent.includes('停止')) {
@@ -233,7 +273,13 @@ function mapPitchToSky(midiPitch, shift = 0) {
 
 convertBtn.addEventListener('click', async (e) => {
     e.preventDefault();
+    if (typeof window.AndroidBridge !== 'undefined') {
+        if (window.AndroidBridge.stopRawMidiPreview) window.AndroidBridge.stopRawMidiPreview();
+        if (window.AndroidBridge.stopSheetPreview) window.AndroidBridge.stopSheetPreview();
+    }
     stopAudio();
+    if (previewSheetBtn) previewSheetBtn.style.display = 'none';
+    isPreviewingSheet = false;
     
     if (!currentMidiData) return;
     document.activeElement?.blur();
@@ -364,6 +410,40 @@ convertBtn.addEventListener('click', async (e) => {
             const isApp = typeof window.AndroidBridge !== 'undefined';
             document.getElementById('appActions').style.display = isApp ? 'flex' : 'none';
             document.getElementById('browserActions').style.display = isApp ? 'none' : 'block';
+
+            if (previewSheetBtn) {
+                previewSheetBtn.style.display = 'block';
+                previewSheetBtn.onclick = () => {
+                    if (isPreviewingSheet) {
+                        if (window.AndroidBridge && window.AndroidBridge.stopSheetPreview) {
+                            window.AndroidBridge.stopSheetPreview();
+                        }
+                        isPreviewingSheet = false;
+                        previewSheetBtn.textContent = '🎧 试听转换后的谱面';
+                    } else {
+                        if (window.AndroidBridge && window.AndroidBridge.playSheetPreview) {
+                            const payload = allNotes.map(n => {
+                                const keyIdx = parseInt(n.key.replace('1Key', ''));
+                                return { time: n.time, keyIndex: keyIdx };
+                            });
+                            window.AndroidBridge.playSheetPreview(JSON.stringify(payload));
+                        } else {
+                            alert("浏览器环境暂不支持多轨试听");
+                            return;
+                        }
+                        
+                        isPreviewingSheet = true;
+                        previewSheetBtn.textContent = '⏹ 停止试听';
+                        
+                        setTimeout(() => {
+                            if (isPreviewingSheet) {
+                                isPreviewingSheet = false;
+                                previewSheetBtn.textContent = '🎧 试听转换后的谱面';
+                            }
+                        }, (lastNoteTime - firstNoteTime) + 2000);
+                    }
+                };
+            }
 
             if (isApp) {
                 btnSendApp.onclick = () => {

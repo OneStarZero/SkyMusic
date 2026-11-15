@@ -5,10 +5,14 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.SoundPool
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Base64
 import android.view.Gravity
@@ -27,7 +31,11 @@ class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    // 回滚到最原始的 WebView 接管文件选择
+    // 🌟 原生音频引擎
+    private var soundPool: SoundPool? = null
+    private val soundMap = mutableMapOf<Int, Int>()
+    private val handler = Handler(Looper.getMainLooper())
+
     private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (filePathCallback == null) return@registerForActivityResult
         var results: Array<Uri>? = null
@@ -42,6 +50,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        initSoundPool()
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
@@ -70,12 +80,10 @@ class MainActivity : AppCompatActivity() {
                     filePathCallback?.onReceiveValue(null)
                     filePathCallback = cb
                     return try {
-                        // 🌟 核心修复：严格指定 MIME 类型，虽然有些机型还是会列 MP3，但已经排除了绝大多数
                         val intent = params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "audio/midi"
+                            type = "audio/*"
                         }
-                        // 如果系统不支持 audio/midi，给一个通用的拦截兜底
                         intent.type = "audio/*"
                         fileChooserLauncher.launch(intent)
                         true
@@ -107,6 +115,39 @@ class MainActivity : AppCompatActivity() {
         }
         rootLayout.addView(btnSettings, settingsParams)
         setContentView(rootLayout)
+    }
+
+    private fun initSoundPool() {
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_GAME)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+        
+        soundPool = SoundPool.Builder()
+            .setMaxStreams(50) // 最多同时播放 50 个音
+            .setAudioAttributes(audioAttributes)
+            .build()
+
+        try {
+            // 反射读取 res/raw 下 piano0~piano14
+            val fields = R.raw::class.java.fields
+            for (field in fields) {
+                val resName = field.name
+                if (resName.startsWith("piano", ignoreCase = true)) {
+                    val indexStr = resName.replace("piano", "", ignoreCase = true)
+                    val index = indexStr.toIntOrNull()
+                    if (index != null && index in 0..14) {
+                        val resId = field.getInt(null)
+                        val soundId = soundPool?.load(this, resId, 1)
+                        if (soundId != null) {
+                            soundMap[index] = soundId
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun showSettingsDialog() {
@@ -169,6 +210,75 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {} finally { previewMediaPlayer = null }
             }
         }
+
+        @JavascriptInterface
+        fun playSheetPreview(notesJsonStr: String) {
+            runOnUiThread {
+                try {
+                    soundPool?.autoPause()
+                    handler.removeCallbacksAndMessages(null)
+
+                    val jsonArray = org.json.JSONArray(notesJsonStr)
+                    for (i in 0 until jsonArray.length()) {
+                        val noteObj = jsonArray.getJSONObject(i)
+                        val timeMs = noteObj.getLong("time")
+                        val keyIndex = noteObj.getInt("keyIndex")
+
+                        handler.postDelayed({
+                            val soundId = soundMap[keyIndex]
+                            if (soundId != null) {
+                                soundPool?.play(soundId, 1.0f, 1.0f, 1, 0, 1.0f)
+                            }
+                        }, timeMs)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stopSheetPreview() {
+            runOnUiThread {
+                soundPool?.autoPause()
+                handler.removeCallbacksAndMessages(null)
+            }
+        }
+
+        // 🌟 新增：原 MIDI 曲目试听（用 SoundPool 弹奏）
+        @JavascriptInterface
+        fun playRawMidiPreview(notesJsonStr: String) {
+            runOnUiThread {
+                try {
+                    soundPool?.autoPause()
+                    handler.removeCallbacksAndMessages(null)
+
+                    val jsonArray = org.json.JSONArray(notesJsonStr)
+                    for (i in 0 until jsonArray.length()) {
+                        val noteObj = jsonArray.getJSONObject(i)
+                        val timeMs = noteObj.getLong("time")
+                        val keyIndex = noteObj.getInt("keyIndex")
+
+                        handler.postDelayed({
+                            val soundId = soundMap[keyIndex]
+                            if (soundId != null) {
+                                soundPool?.play(soundId, 1.0f, 1.0f, 1, 0, 1.0f)
+                            }
+                        }, timeMs)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stopRawMidiPreview() {
+            runOnUiThread {
+                soundPool?.autoPause()
+                handler.removeCallbacksAndMessages(null)
+            }
+        }
     }
 
     private fun handleSendApp(payloadStr: String) {
@@ -216,5 +326,8 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         previewMediaPlayer?.release()
         previewMediaPlayer = null
+        soundPool?.release()
+        soundPool = null
+        handler.removeCallbacksAndMessages(null)
     }
 }

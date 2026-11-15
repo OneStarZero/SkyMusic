@@ -28,7 +28,6 @@
         </div>
 
         <div class="section-title" style="margin-top: 20px;">⚙️ 提取目标音轨 (点击选中)</div>
-        
         <div class="track-list custom-scrollbar" id="trackListContainer"></div>
 
         <button id="btnPreviewOriginal" class="btn-preview-orig">🎹 试听选中轨道的原声音色</button>
@@ -53,11 +52,12 @@
             <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyPro</div></div>
             <div class="model-desc">极致全景还原，无按键上限，塞入全部伴奏细节。</div>
         </div>
-<!-- 在 OneStar-SkyPro 后面加上这个 -->
-<div class="model-card" data-mode="fastpro">
-    <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyFastPro</div></div>
-    <div class="model-desc">原轨直出，选了多少音就出多少音，不做任何过滤处理。</div>
-</div>
+
+        <div class="model-card" data-mode="fastpro">
+            <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyFastPro</div></div>
+            <div class="model-desc">原轨直出，选了多少音就出多少音，不做任何过滤处理。</div>
+        </div>
+
         <button id="convertBtn" class="primary-btn">✨ 启动 AI 深度提取</button>
         <div id="status">准备就绪</div>
     </div>
@@ -74,6 +74,9 @@
             <div class="res-item"><div class="res-label">音域平移</div><div class="res-value" id="outShift">-</div></div>
         </div>
         
+        <!-- 铺面试听按钮 -->
+        <button id="previewSheetBtn" style="display: none; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--card-border); color: var(--primary); margin-bottom: 12px; width: 100%; padding: 14px; border-radius: var(--radius-item); font-weight: 700; font-size: 0.95rem;">🎧 试听转换后的谱面 (真实钢琴)</button>
+
         <div class="action-row" id="actionRow">
             <div class="btn-group" id="appActions" style="display: none;">
                 <button id="btnSendApp" style="background: linear-gradient(135deg, #0ea5e9, #6366f1);">🚀 发送至 App</button>

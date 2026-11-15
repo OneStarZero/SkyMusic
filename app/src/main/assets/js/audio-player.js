@@ -1,93 +1,110 @@
 // js/audio-player.js
+import PIANO_DATA from './piano-data.js';
+
 let audioCtx = null;
-let activeOscillators = [];
+let activeSources = [];
+let pianoSamples = {};
+let isLoaded = false;
 let keepAliveInterval = null;
 
-export function stopAudio() {
-    // 清除保持唤醒的定时器
-    if (keepAliveInterval) {
-        clearInterval(keepAliveInterval);
-        keepAliveInterval = null;
-    }
+// 🌟 1. 极速解码内置的 Base64 音频
+async function loadSamples() {
+    if (isLoaded) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // 强制停止所有正在发声的振荡器
-    activeOscillators.forEach(osc => {
-        try { osc.stop(); } catch(e) {}
-    });
-    activeOscillators = [];
+    const promises = [];
+    for (let i = 0; i <= 14; i++) {
+        if (!PIANO_DATA[i]) continue;
+        promises.push(
+            fetch(PIANO_DATA[i])
+                .then(res => res.arrayBuffer())
+                .then(buffer => audioCtx.decodeAudioData(buffer))
+                .then(decoded => { pianoSamples[i] = decoded; })
+                .catch(e => console.warn(`音频 ${i} 解码失败`, e))
+        );
+    }
+    await Promise.all(promises);
+    isLoaded = true;
+    console.log("🎹 15 个内置真实钢琴音色加载完毕！");
+}
+
+// 页面一加载就开始偷偷解码
+loadSamples();
+
+// 🌟 2. 统一的播放引擎
+export function playMidiNotes(notes) {
+    if (!isLoaded) {
+        setTimeout(() => playMidiNotes(notes), 500);
+        return;
+    }
     
-    // 关闭上下文释放资源
+    stopAudio();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const startTime = audioCtx.currentTime + 0.1;
+    let lastPlayedTime = -1;
+
+    // 主音量防破音
+    const masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.6; 
+    masterGain.connect(audioCtx.destination);
+
+    notes.sort((a, b) => a.time - b.time);
+    const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
+
+    notes.forEach(note => {
+        if (note.velocity < 0.15) return; 
+        let playTime = note.time;
+        let pitch = note.midi;
+        let duration = Math.min(note.duration + 0.3, 1.2); 
+
+        if (playTime - lastPlayedTime < 0.05) {
+            playTime = lastPlayedTime + 0.05;
+        }
+        lastPlayedTime = playTime;
+
+        let p = pitch;
+        while (p < 60) p += 12;
+        while (p > 76) p -= 12;
+        
+        let bestKeyIdx = 0;
+        let minDist = 999;
+        for (let i = 0; i < VALID_KEYS.length; i++) {
+            let dist = Math.abs(p - VALID_KEYS[i]);
+            if (dist < minDist) { minDist = dist; bestKeyIdx = i; }
+        }
+        let fileIndex = Math.min(14, Math.max(0, pitch > 76 ? bestKeyIdx + 5 : bestKeyIdx));
+
+        const buffer = pianoSamples[fileIndex];
+        if (!buffer) return;
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer; 
+        source.playbackRate.value = 1.0; 
+
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.value = Math.min(1.0, note.velocity * 1.2);
+
+        source.connect(gainNode);
+        gainNode.connect(masterGain);
+
+        const noteStart = startTime + playTime;
+        source.start(noteStart);
+        source.stop(noteStart + duration);
+        
+        activeSources.push(source);
+    });
+}
+
+export function stopAudio() {
+    if (keepAliveInterval) clearInterval(keepAliveInterval);
+    activeSources.forEach(source => {
+        try { source.stop(); } catch(e) {}
+    });
+    activeSources = [];
     if (audioCtx) {
         audioCtx.close();
         audioCtx = null;
-    }
-}
-
-// 页面切到后台时，强制静音停止
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        stopAudio();
-    }
-});
-
-export function playMidiNotes(notes) {
-    stopAudio();
-    
-    try {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-
-        // 🌟 核心修复：开启一个定时器，每 1 秒强制唤醒一次音频上下文，防止被系统休眠
-        keepAliveInterval = setInterval(() => {
-            if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-        }, 1000);
-
-        const startTime = audioCtx.currentTime + 0.1;
-        let lastPlayedTime = -1;
-
-        notes.sort((a, b) => a.time - b.time);
-
-        notes.forEach(note => {
-            if (note.velocity < 0.15) return; // 过滤极弱音
-
-            let playTime = note.time;
-            let pitch = note.midi;
-            let duration = Math.min(note.duration, 0.5); // 最多响 0.5 秒
-            let gain = Math.min(0.3, note.velocity * 1.5);
-
-            // 强制错开 40ms
-            if (playTime - lastPlayedTime < 0.04) {
-                playTime = lastPlayedTime + 0.04;
-            }
-            lastPlayedTime = playTime;
-
-            const freq = 440 * Math.pow(2, (pitch - 69) / 12);
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            
-            osc.type = 'triangle';
-            osc.frequency.value = freq;
-
-            const noteStart = startTime + playTime;
-            gainNode.gain.setValueAtTime(0, noteStart);
-            gainNode.gain.linearRampToValueAtTime(gain, noteStart + 0.02);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, noteStart + duration);
-
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-
-            osc.start(noteStart);
-            osc.stop(noteStart + duration + 0.1);
-            
-            activeOscillators.push(osc);
-        });
-
-        // ❌ 删除了之前那个 setTimeout 自动挂起的逻辑
-        // 现在它会一直播放，直到用户手动点击“停止”或者切到后台
-
-    } catch (e) {
-        console.error("【音频引擎崩溃】", e);
     }
 }
