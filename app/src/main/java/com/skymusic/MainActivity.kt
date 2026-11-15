@@ -27,7 +27,7 @@ class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
-    // 🌟 接收原生选择器回来的数据
+    // 接收 MidiPickerActivity 传回来的结果
     private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             val base64Data = result.data?.getStringExtra("base64Data")
@@ -71,7 +71,7 @@ class MainActivity : AppCompatActivity() {
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
                     filePathCallback = cb
-                    // 🌟 跳转到独立的选择器 Activity
+                    // 拦截网页的文件选择，直接跳到我们自己的纯净选择器
                     midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java))
                     return true
                 }
