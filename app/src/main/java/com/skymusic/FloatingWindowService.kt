@@ -15,6 +15,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.Spannable
 import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
 import android.text.style.ForegroundColorSpan
 import android.view.ContextThemeWrapper
@@ -472,7 +473,8 @@ class FloatingWindowService : Service() {
         if (songName.contains(" || ")) {
             val spannable = SpannableString(songName)
             val splitIndex = songName.indexOf(" || ")
-            spannable.setSpan(ForegroundColorSpan(Color.parseColor("#38BDF8")), splitIndex, songName.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            // 🌟 修复：使用 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            spannable.setSpan(ForegroundColorSpan(Color.parseColor("#38BDF8")), splitIndex, songName.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             titleTv.text = spannable
         } else {
             titleTv.text = songName
