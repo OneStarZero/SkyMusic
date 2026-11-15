@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">##「✨SkyMusic」</string>
-    <!-- 这段就是系统设置里显示的无障碍名称与介绍 -->
-    <string name="accessibility_service_description">🌟SkyMusic 自动演奏服务❤️。开启后，App 才能在光遇游戏内自动识别琴键并模拟多指点击👍，帮您自动弹琴。(¯▽¯)👍</string>
+    <string name="app_name">SkyMusic-MP3 Alpha演奏助手</string>
+    <!-- 极客风无障碍描述 -->
+    <string name="accessibility_service_description">🎹 SkyMusic-Alpha 智能演奏服务已激活 (๑•̀ㅂ•́)و✧\n开启此服务后，App 将在光遇中化身你的专属琴师 🎵，精准识别琴键并模拟多指物理点击 👆✨。请放心，该服务仅用于自动弹琴，绝不收集您的任何隐私数据。(¯▽¯)👍</string>
 </resources>

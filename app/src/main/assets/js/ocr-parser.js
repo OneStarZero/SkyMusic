@@ -10,25 +10,26 @@ export function initOcr() {
         }
     });
 
-    // 🌟 接收原生的图片临时文件路径
-    window.onImagePathReceived = async function(imagePath) {
+    // 接收原生传回的 Base64 图片数据
+    window.onImageBase64Received = async function(imageBase64) {
         const ocrStatus = document.getElementById('ocrStatus');
-        ocrStatus.textContent = "正在通过云端 AI 识别(需联网)...";
+        ocrStatus.textContent = "正在分析图片结构...";
 
+        // 策略 1：先尝试在前端进行 Canvas 像素级网格扫描（秒杀色块图）
+        const isGridImage = await scanGridImage(imageBase64);
+        
+        if (isGridImage) {
+            return; // 如果是网格图，scanGridImage 内部已经处理并发送了
+        }
+
+        // 策略 2：如果不是网格图，则调用云端 OCR 解析数字谱
+        ocrStatus.textContent = "正在通过云端 AI 解析简谱...";
         try {
-            // WebView 没有权限直接 fetch 本地 file，必须用 XHR 读成 Blob
-            const base64Image = await readLocalFileAsBase64(imagePath);
-
-            if (!base64Image) {
-                ocrStatus.textContent = "❌ 本地图片读取失败";
-                return;
-            }
-
             const formData = new FormData();
-            formData.append("base64Image", "data:image/jpeg;base64," + base64Image);
-            formData.append("language", "chs"); 
+            formData.append("base64Image", "data:image/jpeg;base64," + imageBase64);
+            formData.append("language", "chs");
             formData.append("isOverlayRequired", "false");
-            formData.append("apikey", "helloworld"); 
+            formData.append("apikey", "helloworld");
 
             const res = await fetch('https://api.ocr.space/parse/image', {
                 method: 'POST',
@@ -49,48 +50,91 @@ export function initOcr() {
     };
 }
 
-// 用 XHR 读取本地文件并转 Base64
-function readLocalFileAsBase64(path) {
+// ================= 引擎 1：Canvas 像素扫描（识别色块网格图） =================
+function scanGridImage(base64) {
     return new Promise((resolve) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', 'file://' + path, true);
-        xhr.responseType = 'blob';
-        xhr.onload = () => {
-            if (xhr.status === 200 || xhr.status === 0) {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const base64data = reader.result.split(',')[1];
-                    resolve(base64data);
-                };
-                reader.readAsDataURL(xhr.response);
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+
+            // 光遇色块图的特征：5 列，通常很长
+            const cols = 5; 
+            const rows = 15; 
+            
+            // 如果图片不是偏长条形，判定不是网格图
+            if (img.width >= img.height) {
+                resolve(false);
+                return;
+            }
+
+            const cellW = img.width / cols;
+            const cellH = img.height / rows;
+            let noteCount = 0;
+            let notes = [];
+
+            // 扫描网格中心点是否有颜色（非白非黑）
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const centerX = Math.floor(c * cellW + cellW / 2);
+                    const centerY = Math.floor(r * cellH + cellH / 2);
+                    
+                    const pixel = ctx.getImageData(centerX, centerY, 1, 1).data;
+                    const rC = pixel[0], gC = pixel[1], bC = pixel[2];
+                    
+                    const isWhite = rC > 240 && gC > 240 && bC > 240;
+                    const isBlack = rC < 30 && gC < 30 && bC < 30;
+                    
+                    if (!isWhite && !isBlack) {
+                        noteCount++;
+                        // 假设这 5 列对应光遇的第一排键位 (0~4)，实际需根据谱面调整
+                        notes.push({ time: noteCount * 200, key: `1Key${c}` });
+                    }
+                }
+            }
+
+            // 如果色块数量大于 10，大概率是网格图
+            if (noteCount > 10) {
+                document.getElementById('ocrStatus').textContent = `✅ 识别为网格图，提取 ${notes.length} 个色块`;
+                sendOcrToApp(notes);
+                resolve(true);
             } else {
-                resolve(null);
+                resolve(false);
             }
         };
-        xhr.onerror = () => resolve(null);
-        xhr.send();
+        img.onerror = () => resolve(false);
+        img.src = 'data:image/jpeg;base64,' + base64;
     });
 }
 
+// ================= 引擎 2：数字简谱解析 =================
 function processOcrText(text) {
     const ocrStatus = document.getElementById('ocrStatus');
-    const cleanText = text.replace(/[^1-7]/g, '');
-    const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71 };
+    
+    // 剔除无关字符，保留数字和 i（i 表示高音 1）
+    const cleanText = text.replace(/[^1-7i]/g, '');
+    const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71, 'i': 72 };
     
     let parsedNotes = [];
     let currentTime = 0;
 
     for (let char of cleanText) {
-        parsedNotes.push({ time: currentTime, midi: BASE_MIDI[char], velocity: 0.8 });
-        currentTime += 350; 
+        let midi = BASE_MIDI[char];
+        if (midi) {
+            parsedNotes.push({ time: currentTime, midi: midi, velocity: 0.8 });
+            currentTime += 350; 
+        }
     }
 
     if (parsedNotes.length === 0) {
-        ocrStatus.textContent = "❌ 未能识别出有效数字";
+        ocrStatus.textContent = "❌ 未能识别出有效简谱";
         return;
     }
 
-    ocrStatus.textContent = `✅ 识别成功，共 ${parsedNotes.length} 个音符`;
+    ocrStatus.textContent = `✅ 简谱识别成功，共 ${parsedNotes.length} 个音符`;
     showOcrResult(parsedNotes);
 }
 

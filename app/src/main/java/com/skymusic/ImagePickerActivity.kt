@@ -6,9 +6,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.widget.Toast
-import java.io.File
-import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
 class ImagePickerActivity : Activity() {
@@ -33,9 +33,9 @@ class ImagePickerActivity : Activity() {
                     BitmapFactory.decodeStream(inputStream, null, options)
                     inputStream?.close()
 
-                    // 2. 计算安全压缩比
+                    // 2. 计算安全压缩比 (目标最大宽度 800px，防止 Base64 太大)
                     var scale = 1
-                    val maxWidth = 1000
+                    val maxWidth = 800
                     if (options.outWidth > maxWidth) {
                         scale = options.outWidth / maxWidth
                     }
@@ -47,7 +47,6 @@ class ImagePickerActivity : Activity() {
                     inputStream?.close()
 
                     if (bitmap != null) {
-                        // 再次检查宽度，防止某些机型 inSampleSize 不彻底
                         if (bitmap.width > maxWidth) {
                             val ratio = maxWidth.toFloat() / bitmap.width
                             val scaledBitmap = Bitmap.createScaledBitmap(bitmap, maxWidth, (bitmap.height * ratio).toInt(), true)
@@ -57,17 +56,17 @@ class ImagePickerActivity : Activity() {
                             }
                         }
 
-                        // 4. 存到缓存目录，绝不留垃圾在相册
-                        val cacheFile = File(cacheDir, "ocr_temp.jpg")
-                        val outputStream = FileOutputStream(cacheFile)
+                        // 4. 压缩为 JPEG 并转 Base64
+                        val outputStream = ByteArrayOutputStream()
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
-                        outputStream.flush()
-                        outputStream.close()
+                        val bytes = outputStream.toByteArray()
+                        val base64Image = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        
                         bitmap.recycle()
 
-                        // 5. 回传文件绝对路径
+                        // 5. 回传 Base64
                         val resultIntent = Intent().apply {
-                            putExtra("imagePath", cacheFile.absolutePath)
+                            putExtra("imageBase64", base64Image)
                         }
                         setResult(Activity.RESULT_OK, resultIntent)
                     } else {
