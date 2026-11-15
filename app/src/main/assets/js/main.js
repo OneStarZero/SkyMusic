@@ -1,6 +1,5 @@
 // js/main.js
 import { Midi } from '@tonejs/midi';
-import { stopAudio } from './audio-player.js';
 
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
@@ -19,16 +18,13 @@ const convertBtn = document.getElementById('convertBtn');
 const statusDiv = document.getElementById('status');
 const logDiv = document.getElementById('log');
 const resultCard = document.getElementById('resultCard');
-const btnPreviewOriginal = document.getElementById('btnPreviewOriginal');
 const btnSendApp = document.getElementById('btnSendApp');
 const btnSaveLocal = document.getElementById('btnSaveLocal');
-const previewSheetBtn = document.getElementById('previewSheetBtn');
 
 let currentMidiData = null;
 let pendingTxtContent = null;
 let selectedMode = 'fast';
 let selectedTrackIndices = new Set(); 
-let isPreviewingSheet = false;
 
 document.querySelectorAll('.model-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -58,15 +54,7 @@ dropZone.addEventListener('drop', (e) => {
 midiInput.addEventListener('change', handleFileSelect);
 
 async function handleFileSelect() {
-    if (typeof window.AndroidBridge !== 'undefined') {
-        if (window.AndroidBridge.stopRawMidiPreview) window.AndroidBridge.stopRawMidiPreview();
-        if (window.AndroidBridge.stopSheetPreview) window.AndroidBridge.stopSheetPreview();
-    }
-    stopAudio();
-    
-    btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
     if (previewSheetBtn) previewSheetBtn.style.display = 'none';
-    isPreviewingSheet = false;
     
     const file = midiInput.files[0];
     if (!file) return;
@@ -170,75 +158,6 @@ async function handleFileSelect() {
     }
 }
 
-// 原曲试听
-btnPreviewOriginal.addEventListener('click', () => {
-    if (btnPreviewOriginal.textContent.includes('停止')) {
-        btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
-        if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.stopRawMidiPreview) {
-            window.AndroidBridge.stopRawMidiPreview();
-        }
-        return;
-    }
-
-    if (selectedTrackIndices.size === 0) {
-        showToast('请至少选择一个音轨！', 'error');
-        return;
-    }
-
-    if (typeof window.AndroidBridge === 'undefined') {
-        showToast('浏览器暂不支持原声试听，请下载 App', 'error');
-        return;
-    }
-
-    btnPreviewOriginal.textContent = '⏹ 停止试听原声';
-    
-    let rawNotesToPlay = [];
-    const selectedArr = Array.from(selectedTrackIndices);
-    
-    currentMidiData.tracks.forEach((track, idx) => {
-        if (selectedArr.includes(idx) && idx !== 9) {
-            rawNotesToPlay.push(...track.notes);
-        }
-    });
-
-    if (rawNotesToPlay.length === 0) {
-        showToast('选中的轨道没有可播放的音符', 'error');
-        btnPreviewOriginal.textContent = '🎹 试听选中轨道的原声音色';
-        return;
-    }
-
-    const playPayload = rawNotesToPlay.map(n => {
-        let pitch = n.midi;
-        while (pitch < 60) pitch += 12;
-        while (pitch > 76) pitch -= 12;
-
-        const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
-        let bestKeyIdx = 0;
-        let minDist = 999;
-        
-        for (let i = 0; i < VALID_KEYS.length; i++) {
-            let dist = Math.abs(pitch - VALID_KEYS[i]);
-            if (dist < minDist) { minDist = dist; bestKeyIdx = i; }
-        }
-        
-        let keyIndex = bestKeyIdx;
-        if (pitch > 76) keyIndex = Math.min(14, bestKeyIdx + 5);
-
-        return { time: Math.round(n.time * 1000), keyIndex: keyIndex };
-    });
-
-    playPayload.sort((a, b) => a.time - b.time);
-    window.AndroidBridge.playRawMidiPreview(JSON.stringify(playPayload));
-    
-    const maxEndTime = Math.max(...rawNotesToPlay.map(n => n.time + n.duration));
-    setTimeout(() => {
-        if (btnPreviewOriginal.textContent.includes('停止')) {
-            btnPreviewOriginal.click();
-        }
-    }, maxEndTime * 1000 + 500);
-});
-
-// 转换提取逻辑
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
 const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
 
@@ -263,13 +182,6 @@ function mapPitchToSky(midiPitch, shift = 0) {
 
 convertBtn.addEventListener('click', async (e) => {
     e.preventDefault();
-    if (typeof window.AndroidBridge !== 'undefined') {
-        if (window.AndroidBridge.stopRawMidiPreview) window.AndroidBridge.stopRawMidiPreview();
-        if (window.AndroidBridge.stopSheetPreview) window.AndroidBridge.stopSheetPreview();
-    }
-    stopAudio();
-    if (previewSheetBtn) previewSheetBtn.style.display = 'none';
-    isPreviewingSheet = false;
     
     if (!currentMidiData) return;
     document.activeElement?.blur();
@@ -400,40 +312,6 @@ convertBtn.addEventListener('click', async (e) => {
             const isApp = typeof window.AndroidBridge !== 'undefined';
             document.getElementById('appActions').style.display = isApp ? 'flex' : 'none';
             document.getElementById('browserActions').style.display = isApp ? 'none' : 'block';
-
-            if (previewSheetBtn) {
-                previewSheetBtn.style.display = 'block';
-                previewSheetBtn.onclick = () => {
-                    if (isPreviewingSheet) {
-                        if (window.AndroidBridge && window.AndroidBridge.stopSheetPreview) {
-                            window.AndroidBridge.stopSheetPreview();
-                        }
-                        isPreviewingSheet = false;
-                        previewSheetBtn.textContent = '🎧 试听转换后的谱面';
-                    } else {
-                        if (window.AndroidBridge && window.AndroidBridge.playSheetPreview) {
-                            const payload = allNotes.map(n => {
-                                const keyIdx = parseInt(n.key.replace('1Key', ''));
-                                return { time: n.time, keyIndex: keyIdx };
-                            });
-                            window.AndroidBridge.playSheetPreview(JSON.stringify(payload));
-                        } else {
-                            alert("浏览器环境暂不支持多轨试听，请在 App 内使用");
-                            return;
-                        }
-                        
-                        isPreviewingSheet = true;
-                        previewSheetBtn.textContent = '⏹ 停止试听';
-                        
-                        setTimeout(() => {
-                            if (isPreviewingSheet) {
-                                isPreviewingSheet = false;
-                                previewSheetBtn.textContent = '🎧 试听转换后的谱面';
-                            }
-                        }, (lastNoteTime - firstNoteTime) + 2000);
-                    }
-                };
-            }
 
             if (isApp) {
                 btnSendApp.onclick = () => {
