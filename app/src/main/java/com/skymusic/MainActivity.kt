@@ -9,6 +9,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Base64
 import android.view.Gravity
@@ -25,35 +26,34 @@ import java.io.InputStream
 
 class MainActivity : AppCompatActivity() {
     private var previewMediaPlayer: MediaPlayer? = null
+    private var webViewInstance: WebView? = null
 
-    // 🌟 核心修复：直接获取文件 URI，由 Kotlin 端读取流并转 Base64 发给 JS
     private val midiFileLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@registerForActivityResult
         
         try {
-            // 读取选中的文件流
+            var fileName = "未知文件.mid"
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1) fileName = cursor.getString(nameIndex)
+                }
+            }
+
+            // 🌟 修复：严格拦截，如果不是 mid 或 midi 结尾，绝不进行后续操作，防止 MP3 卡死
+            if (!fileName.lowercase().endsWith(".mid") && !fileName.lowercase().endsWith(".midi")) {
+                runOnUiThread { Toast.makeText(this, "请选择标准 MIDI 文件 (.mid / .midi)", Toast.LENGTH_SHORT).show() }
+                return@registerForActivityResult
+            }
+
             val inputStream: InputStream? = contentResolver.openInputStream(uri)
             val bytes = inputStream?.readBytes()
             inputStream?.close()
 
             if (bytes != null) {
-                // 转成 Base64 方便传输给 JS
                 val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                
-                // 获取文件名
-                var fileName = "未知文件.mid"
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1) fileName = cursor.getString(nameIndex)
-                    }
-                }
-
-                // 将数据注入回 WebView 的 JS 函数
                 runOnUiThread {
                     val jsCode = "window.onFileSelectedFromAndroid('data:application/octet-stream;base64,$base64Data', '${fileName.replace("'", "\\'")}');"
-                    (findViewById<View>(android.R.id.content).parent as? WebView)?.evaluateJavascript(jsCode, null)
-                    // 上面的逻辑不对，因为 WebView 不在 findViewById 里，所以采用全局变量保存
                     webViewInstance?.evaluateJavascript(jsCode, null)
                 }
             }
@@ -62,9 +62,6 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { Toast.makeText(this, "读取文件失败: ${e.message}", Toast.LENGTH_SHORT).show() }
         }
     }
-
-    // 保存 WebView 实例以便调用 evaluateJavascript
-    private var webViewInstance: WebView? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,10 +90,9 @@ class MainActivity : AppCompatActivity() {
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             webViewClient = WebViewClient()
             
-            // 🌟 当 JS 触发 fileInput.click() 时，拦截它！
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    // 不交给 WebView，直接调起原生选择器
+                    // 直接调起原生选择器
                     midiFileLauncher.launch("*/*")
                     return true
                 }
@@ -203,6 +199,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_data", ArrayList(notesList))
             intent.putExtra("song_name", payload.optString("name", "未命名"))
             intent.putExtra("song_author", payload.optString("author", "未知作者"))
+            intent.putExtra("song_model", payload.optString("model", ""))
             startService(intent)
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {

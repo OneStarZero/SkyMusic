@@ -56,7 +56,6 @@ class FloatingWindowService : Service() {
     private lateinit var seekBar: SeekBar
     private lateinit var btnPlayPause: Button
     private lateinit var tvSpeed: TextView
-    private lateinit var tvInfo: TextView
 
     private val handler = Handler(Looper.getMainLooper())
     private var playRunnable: Runnable? = null
@@ -124,13 +123,15 @@ class FloatingWindowService : Service() {
         val dm = resources.displayMetrics
         val isLandscape = newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
         
-        val panelWidthRatio = if (isLandscape) 0.40f else 0.55f
-        val panelHeightRatio = if (isLandscape) 0.55f else 0.45f
+        // 🌟 修复：横屏限制面板 35%，竖屏 55%
+        val panelWidthRatio = if (isLandscape) 0.35f else 0.55f
+        val panelHeightRatio = if (isLandscape) 0.50f else 0.45f
 
         panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
         
-        playerParams.width = (dm.widthPixels * 0.40f).toInt()
+        // 🌟 修复：播放器横屏 30%，竖屏 45%
+        playerParams.width = if (isLandscape) (dm.widthPixels * 0.30f).toInt() else (dm.widthPixels * 0.45f).toInt()
         if (playerParams.y > dm.heightPixels - 200) {
             playerParams.y = (dm.heightPixels * 0.7).toInt()
         }
@@ -159,8 +160,8 @@ class FloatingWindowService : Service() {
             val dm = resources.displayMetrics
 
             val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val panelWidthRatio = if (isLandscape) 0.40f else 0.55f
-            val panelHeightRatio = if (isLandscape) 0.55f else 0.45f
+            val panelWidthRatio = if (isLandscape) 0.35f else 0.55f
+            val panelHeightRatio = if (isLandscape) 0.50f else 0.45f
 
             panelParams = WindowManager.LayoutParams(
                 (dm.widthPixels * panelWidthRatio).toInt(), (dm.heightPixels * panelHeightRatio).toInt(), 
@@ -175,7 +176,7 @@ class FloatingWindowService : Service() {
                 60, 60, layoutType, baseFlags, PixelFormat.TRANSLUCENT
             ).apply { gravity = Gravity.TOP or Gravity.START; x = 100; y = 200 }
 
-            val playerWidth = (dm.widthPixels * 0.40).toInt()
+            val playerWidth = if (isLandscape) (dm.widthPixels * 0.30f).toInt() else (dm.widthPixels * 0.45f).toInt()
             playerParams = WindowManager.LayoutParams(
                 playerWidth, WindowManager.LayoutParams.WRAP_CONTENT, 
                 layoutType, baseFlags, PixelFormat.TRANSLUCENT
@@ -273,8 +274,8 @@ class FloatingWindowService : Service() {
         
         val dm = resources.displayMetrics
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val panelWidthRatio = if (isLandscape) 0.40f else 0.55f
-        val panelHeightRatio = if (isLandscape) 0.55f else 0.45f
+        val panelWidthRatio = if (isLandscape) 0.35f else 0.55f
+        val panelHeightRatio = if (isLandscape) 0.50f else 0.45f
         
         panelParams.width = (dm.widthPixels * panelWidthRatio).toInt()
         panelParams.height = (dm.heightPixels * panelHeightRatio).toInt()
@@ -297,7 +298,7 @@ class FloatingWindowService : Service() {
         }
         
         titleText = TextView(this).apply {
-            text = if (initialPage == 0) "本地曲库 (按住此处拖动)" else "App 发送 (按住此处拖动)"
+            text = if (initialPage == 0) "本地曲库 (按住拖动)" else "App 发送 (按住拖动)"
             setTextColor(Color.WHITE); textSize = 14f
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
@@ -378,7 +379,7 @@ class FloatingWindowService : Service() {
             }
 
             val loadingTv = TextView(this).apply {
-                text = "正在扫描并解析本地曲库..." 
+                text = "正在扫描并解析..." 
                 setTextColor(Color.GRAY); textSize = 13f; setPadding(20, 20, 20, 20)
             }
             listContainer.addView(loadingTv)
@@ -432,7 +433,7 @@ class FloatingWindowService : Service() {
         if (!this::listContainer.isInitialized) return
         if (songInfoList.isEmpty()) {
             listContainer.addView(TextView(this).apply { 
-                text = "未找到本地乐谱。\n请将 txt 文件放入：\nSkyMusic-OneStar/LocalSheets/"
+                text = "未找到本地乐谱。\n请将 txt 放入 LocalSheets/"
                 setTextColor(Color.GRAY); textSize = 12f; setPadding(10, 10, 10, 10) 
             })
             return
@@ -447,15 +448,15 @@ class FloatingWindowService : Service() {
 
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-        val padTopBottom = if (isLandscape) (6 * density).toInt() else (12 * density).toInt()
-        val titleSize = if (isLandscape) 14f else 16f
+        val padTopBottom = if (isLandscape) (6 * density).toInt() else (10 * density).toInt()
+        val titleSize = if (isLandscape) 14f else 15f
         val subSize = if (isLandscape) 10f else 11f
         val btnSize = if (isLandscape) 15f else 18f
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding((12 * density).toInt(), padTopBottom, (12 * density).toInt(), padTopBottom)
+            setPadding((8 * density).toInt(), padTopBottom, (8 * density).toInt(), padTopBottom)
             layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
 
@@ -465,7 +466,7 @@ class FloatingWindowService : Service() {
             setOnClickListener { onClick() }
         }
         
-        // 🌟 标题渲染：歌曲名白色，模型名青色
+        // 标题渲染：歌曲名白色，模型名青色
         val titleTv = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = titleSize; setTypeface(null, android.graphics.Typeface.BOLD); 
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.END 
@@ -473,7 +474,6 @@ class FloatingWindowService : Service() {
         if (songName.contains(" || ")) {
             val spannable = SpannableString(songName)
             val splitIndex = songName.indexOf(" || ")
-            // 🌟 修复：使用 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             spannable.setSpan(ForegroundColorSpan(Color.parseColor("#38BDF8")), splitIndex, songName.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             titleTv.text = spannable
         } else {
@@ -487,38 +487,28 @@ class FloatingWindowService : Service() {
         }
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        // 🌟 小字信息：用 || 分隔，并带上模型名
-        val items = mutableListOf(
-            "作者:$author", "音符:$notes", "BPM:$bpm", "时长:$duration", "倍速:$speedStr"
-        )
-        if (model.isNotBlank()) {
-            items.add("模型:$model")
+        
+        // 🌟 修复：小字排版重构，分成两行显示，绝不挤压右侧按钮
+        // 第一行：作者 + 模型
+        val line1 = TextView(this).apply {
+            text = "作者: $author  ||  模型: ${if (model.isNotBlank()) model else "未知"}"
+            setTextColor(Color.parseColor("#9CA3AF"))
+            textSize = subSize
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        
+        // 第二行：音符 + BPM + 时长 + 倍速
+        val line2 = TextView(this).apply {
+            text = "音符:$notes  ||  BPM:$bpm  ||  时长:$duration  ||  倍速:$speedStr"
+            setTextColor(Color.parseColor("#6B7280")) // 颜色稍暗，拉开层级
+            textSize = (subSize - 1f)
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
         }
 
-        var currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        var currentLineWidth = 0f
-        val maxWidth = resources.displayMetrics.widthPixels * 0.45f - (100 * density)
-
-        for (item in items) {
-            val tv = TextView(this).apply {
-                text = "$item  ||  "
-                setTextColor(Color.parseColor("#9CA3AF"))
-                textSize = subSize
-            }
-            
-            val paint = tv.paint
-            val width = paint.measureText(tv.text.toString())
-            
-            if (currentLineWidth + width > maxWidth && currentLine.childCount > 0) {
-                subContainer.addView(currentLine)
-                currentLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                currentLineWidth = 0f
-            }
-            
-            currentLine.addView(tv)
-            currentLineWidth += width
-        }
-        if (currentLine.childCount > 0) subContainer.addView(currentLine)
+        subContainer.addView(line1)
+        subContainer.addView(line2)
 
         textLayout.addView(subContainer)
         card.addView(textLayout)
@@ -530,7 +520,7 @@ class FloatingWindowService : Service() {
         }
         
         val btnDelete = TextView(this).apply { 
-            text = "🗑️"; textSize = btnSize; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
+            text = "🗑️"; textSize = btnSize; setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
             setOnClickListener { 
                 if (file != null) {
                     val contextWrapper = ContextThemeWrapper(this@FloatingWindowService, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -568,7 +558,7 @@ class FloatingWindowService : Service() {
         btnLayout.addView(btnDelete)
         
         val btnPlay = TextView(this).apply { 
-            text = "▶"; textSize = (btnSize + 2f); setTextColor(Color.parseColor("#10B981")); setPadding((10 * density).toInt(), 0, (5 * density).toInt(), 0)
+            text = "▶"; textSize = (btnSize + 2f); setTextColor(Color.parseColor("#10B981")); setPadding((5 * density).toInt(), 0, 0, 0)
             setOnClickListener { onClick() } 
         }
         btnLayout.addView(btnPlay)
@@ -583,14 +573,15 @@ class FloatingWindowService : Service() {
         floatView.removeAllViews()
 
         val dm = resources.displayMetrics
-        playerParams.width = (dm.widthPixels * 0.40).toInt()
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        playerParams.width = if (isLandscape) (dm.widthPixels * 0.30f).toInt() else (dm.widthPixels * 0.45f).toInt()
 
         val playerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#EE0F172A"))
-            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+            setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
             outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 10f) }
+                override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 12f) }
             }
             clipToOutline = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
@@ -603,22 +594,24 @@ class FloatingWindowService : Service() {
         }
         playerLayout.addView(titleTv)
         
-        // 🌟 播放器新增信息：作者 || 模型 || 音符 || BPM
-        val infoParts = mutableListOf<String>()
-        infoParts.add("作者:$currentAuthor")
-        if (currentModel.isNotBlank()) infoParts.add("模型:$currentModel")
-        infoParts.add("音符:$currentNotesCount")
-        infoParts.add("BPM:$currentBpm")
-        tvInfo = TextView(this).apply {
-            text = infoParts.joinToString("  ||  ")
+        // 🌟 修复：播放器排版分成两行，确保文字不被截断
+        val line1 = TextView(this).apply {
+            text = "作者:$currentAuthor  ||  模型:${if (currentModel.isNotBlank()) currentModel else "未知"}"
             setTextColor(Color.parseColor("#94A3B8")); textSize = 9f; 
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.END
-            setPadding(0, 2, 0, 4)
+            setPadding(0, 2, 0, 0)
         }
-        playerLayout.addView(tvInfo)
+        val line2 = TextView(this).apply {
+            text = "音符:$currentNotesCount  ||  BPM:$currentBpm"
+            setTextColor(Color.parseColor("#64748B")); textSize = 9f; 
+            setSingleLine(true); ellipsize = TextUtils.TruncateAt.END
+            setPadding(0, 1, 0, 4)
+        }
+        playerLayout.addView(line1)
+        playerLayout.addView(line2)
 
         tvStatus = TextView(this).apply { 
-            setTextColor(Color.parseColor("#38BDF8")); textSize = 9f; setPadding(0, 0, 0, 2) 
+            setTextColor(Color.parseColor("#38BDF8")); textSize = 9f; setPadding(0, 0, 0, 4) 
         }
         playerLayout.addView(tvStatus)
 
@@ -643,21 +636,21 @@ class FloatingWindowService : Service() {
         val btnRow = LinearLayout(this).apply { 
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(-1, (28 * density).toInt()) 
+            layoutParams = LinearLayout.LayoutParams(-1, (30 * density).toInt()) 
         }
         
         btnPlayPause = Button(this).apply {
             text = "▶"; textSize = 10f; setTextColor(Color.WHITE)
             background = playBgDrawable
             setOnClickListener { togglePlayback() }
-            layoutParams = LinearLayout.LayoutParams(0, -1, 0.8f)
+            layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
         }
         btnRow.addView(btnPlayPause)
 
         val speedControl = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 4f }
-            layoutParams = LinearLayout.LayoutParams(0, -1, 1.4f).apply { setMargins(4, 0, 4, 0) }
+            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 6f }
+            layoutParams = LinearLayout.LayoutParams(0, -1, 1.5f).apply { setMargins(6, 0, 6, 0) }
         }
         val btnSpeedDown = Button(this).apply { 
             text = "-"; textSize = 10f; setTextColor(Color.WHITE); background = null; setPadding(0,0,0,0)
@@ -671,16 +664,16 @@ class FloatingWindowService : Service() {
             setOnClickListener { changeSpeed(0.1f) } 
         }
         
-        speedControl.addView(btnSpeedDown, LinearLayout.LayoutParams((20 * density).toInt(), -1))
+        speedControl.addView(btnSpeedDown, LinearLayout.LayoutParams((24 * density).toInt(), -1))
         speedControl.addView(tvSpeed, LinearLayout.LayoutParams(0, -2, 1f))
-        speedControl.addView(btnSpeedUp, LinearLayout.LayoutParams((20 * density).toInt(), -1))
+        speedControl.addView(btnSpeedUp, LinearLayout.LayoutParams((24 * density).toInt(), -1))
         btnRow.addView(speedControl)
 
         val btnClose = Button(this).apply {
             text = "✖"; textSize = 10f; setTextColor(Color.WHITE)
-            background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 4f }
+            background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 6f }
             setOnClickListener { stopPlayback(); showFullPanel(currentPage) }
-            layoutParams = LinearLayout.LayoutParams(0, -1, 0.5f)
+            layoutParams = LinearLayout.LayoutParams(0, -1, 0.6f)
         }
         btnRow.addView(btnClose)
         
@@ -702,11 +695,11 @@ class FloatingWindowService : Service() {
         
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         if (isPlaying) {
-            tvStatus.text = "▶ $currentIndex/${songData.size} | $speedStr"
+            tvStatus.text = "▶ $currentIndex/${songData.size}  |  $speedStr"
             btnPlayPause.text = "⏸"
             btnPlayPause.background = pauseBgDrawable
         } else {
-            tvStatus.text = "已暂停 | $speedStr"
+            tvStatus.text = "已暂停  |  $speedStr"
             btnPlayPause.text = "▶"
             btnPlayPause.background = playBgDrawable
         }
