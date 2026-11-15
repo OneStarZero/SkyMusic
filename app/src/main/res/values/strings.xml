@@ -1,5 +1,10 @@
 <resources>
-    <string name="app_name">SkyMusic-MP3 Alpha演奏助手</string>
-    <!-- 极客风无障碍描述 -->
+    <!-- App 桌面名称 -->
+    <string name="app_name">SkyMusic-Alpha</string>
+    
+    <!-- 无障碍列表显示的名称（带 Emoji） -->
+    <string name="accessibility_service_name">✨SkyMusic-Alpha演奏助手</string>
+    
+    <!-- 极客风无障碍描述（保持不变） -->
     <string name="accessibility_service_description">🎹 SkyMusic-Alpha 智能演奏服务已激活 (๑•̀ㅂ•́)و✧\n开启此服务后，App 将在光遇中化身你的专属琴师 🎵，精准识别琴键并模拟多指物理点击 👆✨。请放心，该服务仅用于自动弹琴，绝不收集您的任何隐私数据。(¯▽¯)👍</string>
 </resources>

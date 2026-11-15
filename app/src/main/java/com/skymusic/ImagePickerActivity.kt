@@ -33,7 +33,7 @@ class ImagePickerActivity : Activity() {
                     BitmapFactory.decodeStream(inputStream, null, options)
                     inputStream?.close()
 
-                    // 2. 计算安全压缩比 (目标最大宽度 800px，防止 Base64 太大)
+                    // 2. 计算安全压缩比 (目标最大宽度 800px，防止 Base64 过大导致 OOM)
                     var scale = 1
                     val maxWidth = 800
                     if (options.outWidth > maxWidth) {

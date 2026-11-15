@@ -36,10 +36,10 @@ class MainActivity : AppCompatActivity() {
 
     private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            // 🌟 接的是路径
-            val imagePath = result.data?.getStringExtra("imagePath")
-            if (imagePath != null) {
-                webViewInstance?.evaluateJavascript("window.onImagePathReceived('$imagePath');", null)
+            // 接收 imageBase64
+            val imageBase64 = result.data?.getStringExtra("imageBase64")
+            if (imageBase64 != null) {
+                webViewInstance?.evaluateJavascript("window.onImageBase64Received('$imageBase64');", null)
             }
         }
     }
