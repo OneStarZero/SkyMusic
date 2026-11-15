@@ -10,113 +10,185 @@ export function initOcr() {
         }
     });
 
-    // 接收原生传回的 Base64 图片数据
+    // 接收原生传回的 Base64 图片
     window.onImageBase64Received = async function(imageBase64) {
         const ocrStatus = document.getElementById('ocrStatus');
-        ocrStatus.textContent = "正在分析图片结构...";
+        ocrStatus.textContent = "正在分析图片结构并自动裁剪...";
 
-        // 策略 1：先尝试在前端进行 Canvas 像素级网格扫描（秒杀色块图）
-        const isGridImage = await scanGridImage(imageBase64);
+        const img = new Image();
+        img.src = 'data:image/jpeg;base64,' + imageBase64;
         
-        if (isGridImage) {
-            return; // 如果是网格图，scanGridImage 内部已经处理并发送了
-        }
+        img.onload = async () => {
+            // 1. 自动裁剪核心铺面区域
+            const croppedCanvas = autoCropScore(img);
+            
+            // 2. 分析铺面类型
+            const scoreType = detectScoreType(croppedCanvas);
 
-        // 策略 2：如果不是网格图，则调用云端 OCR 解析数字谱
-        ocrStatus.textContent = "正在通过云端 AI 解析简谱...";
-        try {
-            const formData = new FormData();
-            formData.append("base64Image", "data:image/jpeg;base64," + imageBase64);
-            formData.append("language", "chs");
-            formData.append("isOverlayRequired", "false");
-            formData.append("apikey", "helloworld");
-
-            const res = await fetch('https://api.ocr.space/parse/image', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await res.json();
-
-            if (data && !data.IsErroredOnProcessing && data.ParsedResults && data.ParsedResults.length > 0) {
-                const text = data.ParsedResults[0].ParsedText;
-                processOcrText(text);
+            if (scoreType === 'block') {
+                ocrStatus.textContent = "检测到色块矩阵谱，正在逐格解析...";
+                parseBlockScore(croppedCanvas);
+            } else if (scoreType === 'number') {
+                ocrStatus.textContent = "检测到数字简谱，正在请求云端 AI...";
+                // 数字谱需要文字识别，转回 Base64 发送
+                const croppedBase64 = croppedCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+                await requestCloudOcr(croppedBase64, ocrStatus);
             } else {
-                ocrStatus.textContent = "❌ 云端识别失败，请重试";
+                ocrStatus.textContent = "⚠️ 无法识别谱面类型";
             }
-        } catch (err) {
-            console.error(err);
-            ocrStatus.textContent = "❌ 网络请求异常";
-        }
+        };
     };
 }
 
-// ================= 引擎 1：Canvas 像素扫描（识别色块网格图） =================
-function scanGridImage(base64) {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+// ================= 核心 1：智能自动裁剪 =================
+function autoCropScore(img) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
 
-            // 光遇色块图的特征：5 列，通常很长
-            const cols = 5; 
-            const rows = 15; 
-            
-            // 如果图片不是偏长条形，判定不是网格图
-            if (img.width >= img.height) {
-                resolve(false);
-                return;
-            }
+    // 简单粗暴的裁剪策略：利用边缘检测
+    // 我们剔除顶部 10% 和底部 5%（通常是标题和作者）
+    // 剔除左右各 5%
+    const cropY = img.height * 0.10;
+    const cropH = img.height * 0.85;
+    const cropX = img.width * 0.05;
+    const cropW = img.width * 0.90;
 
-            const cellW = img.width / cols;
-            const cellH = img.height / rows;
-            let noteCount = 0;
-            let notes = [];
-
-            // 扫描网格中心点是否有颜色（非白非黑）
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    const centerX = Math.floor(c * cellW + cellW / 2);
-                    const centerY = Math.floor(r * cellH + cellH / 2);
-                    
-                    const pixel = ctx.getImageData(centerX, centerY, 1, 1).data;
-                    const rC = pixel[0], gC = pixel[1], bC = pixel[2];
-                    
-                    const isWhite = rC > 240 && gC > 240 && bC > 240;
-                    const isBlack = rC < 30 && gC < 30 && bC < 30;
-                    
-                    if (!isWhite && !isBlack) {
-                        noteCount++;
-                        // 假设这 5 列对应光遇的第一排键位 (0~4)，实际需根据谱面调整
-                        notes.push({ time: noteCount * 200, key: `1Key${c}` });
-                    }
-                }
-            }
-
-            // 如果色块数量大于 10，大概率是网格图
-            if (noteCount > 10) {
-                document.getElementById('ocrStatus').textContent = `✅ 识别为网格图，提取 ${notes.length} 个色块`;
-                sendOcrToApp(notes);
-                resolve(true);
-            } else {
-                resolve(false);
-            }
-        };
-        img.onerror = () => resolve(false);
-        img.src = 'data:image/jpeg;base64,' + base64;
-    });
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = cropW;
+    cropCanvas.height = cropH;
+    const cropCtx = cropCanvas.getContext('2d');
+    cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    
+    return cropCanvas;
 }
 
-// ================= 引擎 2：数字简谱解析 =================
-function processOcrText(text) {
+// ================= 核心 2：判断谱面类型 =================
+function detectScoreType(canvas) {
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let darkPixels = 0;
+    let colorfulPixels = 0;
+    
+    // 抽样计算
+    for (let i = 0; i < imgData.length; i += 40) {
+        const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
+        
+        // 检查是否深色（黑/红/蓝）
+        if (r < 100 && g < 100 && b < 100) darkPixels++;
+        
+        // 检查是否亮色（红、蓝）
+        if ((r > 150 && g < 100 && b < 100) || (b > 150 && r < 100 && g < 100)) {
+            colorfulPixels++;
+        }
+    }
+
+    // 如果彩色像素（红蓝）占比显著，或者深色像素极度密集（方块图特征），判定为 block
+    if (colorfulPixels > 50 || darkPixels > imgData.length / 80) {
+        return 'block';
+    }
+    return 'number';
+}
+
+// ================= 核心 3：方块矩阵解析 =================
+function parseBlockScore(canvas) {
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    
+    // 我们假设自动裁剪后的图片，宽泛地被分为 5 列
+    const cols = 5;
+    const colW = canvas.width / cols;
+    
+    let notes = [];
+    let detectedBlocks = []; // 用于去重
+
+    // 遍历全图寻找带有颜色的点
+    for (let y = 0; y < canvas.height; y += 2) {
+        for (let x = 0; x < canvas.width; x += 2) {
+            const idx = (y * canvas.width + x) * 4;
+            const r = imgData[idx], g = imgData[idx+1], b = imgData[idx+2];
+
+            // 识别带有颜色的方块（排除白、黑）
+            const isWhite = r > 240 && g > 240 && b > 240;
+            const isBlack = r < 30 && g < 30 && b < 30;
+            
+            // 如果是红或蓝，或者明显的灰块，判定为有效键位
+            if (!isWhite && (!isBlack || (r < 100 && g < 100 && b < 100))) {
+                const colIdx = Math.floor(x / colW);
+                
+                // 去重逻辑：如果附近的 30px 范围内已经有记录过，跳过
+                let isDuplicate = detectedBlocks.find(block => 
+                    block.col === colIdx && Math.abs(block.y - y) < 30
+                );
+
+                if (!isDuplicate) {
+                    detectedBlocks.push({ col: colIdx, y: y });
+                }
+            }
+        }
+    }
+
+    // 将 Y 轴坐标转换成时间序列 (按 Y 轴排序)
+    detectedBlocks.sort((a, b) => a.y - b.y);
+
+    // 根据光遇 15 键（3排5列）进行映射
+    // 这里的逻辑是：Y 轴越高，对应的键位行数越高
+    let maxY = canvas.height;
+    detectedBlocks.forEach((block, index) => {
+        let row = Math.floor((block.y / maxY) * 3); // 分为3排
+        row = Math.min(2, Math.max(0, row));
+        
+        // 映射索引：0-4, 5-9, 10-14
+        let keyIndex = (2 - row) * 5 + block.col;
+        
+        // 相隔一定的时间
+        notes.push({ time: index * 180, key: `1Key${keyIndex}` });
+    });
+
+    if (notes.length > 0) {
+        document.getElementById('ocrStatus').textContent = `✅ 矩阵解析完成，共 ${notes.length} 个音符`;
+        sendOcrToApp(notes);
+    } else {
+        document.getElementById('ocrStatus').textContent = "❌ 未能解析出有效色块";
+    }
+}
+
+// ================= 核心 4：云端数字谱解析 =================
+async function requestCloudOcr(croppedBase64, ocrStatus) {
+    try {
+        const formData = new FormData();
+        formData.append("base64Image", "data:image/jpeg;base64," + croppedBase64);
+        formData.append("language", "chs");
+        formData.append("isOverlayRequired", "false");
+        formData.append("apikey", "helloworld");
+
+        const res = await fetch('https://api.ocr.space/parse/image', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+
+        if (data && !data.IsErroredOnProcessing && data.ParsedResults && data.ParsedResults.length > 0) {
+            const text = data.ParsedResults[0].ParsedText;
+            processNumberScore(text);
+        } else {
+            ocrStatus.textContent = "❌ 云端识别失败";
+        }
+    } catch (err) {
+        console.error(err);
+        ocrStatus.textContent = "❌ 网络请求异常";
+    }
+}
+
+function processNumberScore(text) {
     const ocrStatus = document.getElementById('ocrStatus');
     
-    // 剔除无关字符，保留数字和 i（i 表示高音 1）
-    const cleanText = text.replace(/[^1-7i]/g, '');
-    const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71, 'i': 72 };
+    // 过滤出数字，并且保留 (n) 的结构（如果你需要区分行/段的话）
+    // 这里直接提取所有 1-7 音符
+    const cleanText = text.replace(/[^1-7]/g, '');
+    const BASE_MIDI = { '1': 60, '2': 62, '3': 64, '4': 65, '5': 67, '6': 69, '7': 71 };
     
     let parsedNotes = [];
     let currentTime = 0;
@@ -130,11 +202,11 @@ function processOcrText(text) {
     }
 
     if (parsedNotes.length === 0) {
-        ocrStatus.textContent = "❌ 未能识别出有效简谱";
+        ocrStatus.textContent = "❌ 未能识别出有效数字";
         return;
     }
 
-    ocrStatus.textContent = `✅ 简谱识别成功，共 ${parsedNotes.length} 个音符`;
+    ocrStatus.textContent = `✅ 数字谱解析成功，共 ${parsedNotes.length} 个音符`;
     showOcrResult(parsedNotes);
 }
 
