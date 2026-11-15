@@ -35,16 +35,16 @@ export function initAudio() {
 
             status.textContent = "正在生成光遇铺面...";
 
-            // 🌟 路径更新为 OneStarModels_Media
-            const module = await import('../OneStarModels_Media/Sky-MusicFastBasic.js');
+            // 🌟 修改：引入重命名后的 JS 模型
+            const module = await import('../OneStarModels_Media/OneStar_MusicFastBasic.js');
             const finalNotes = module.process(rawNotes, console.log);
 
             const bpm = "120";
-            const skyData = [{ name: "音频扒谱 || Sky-MusicFastBasic", author: "OneStar", bpm: bpm, songNotes: finalNotes }];
+            const skyData = [{ name: "音频扒谱 || OneStarMusicFastBasic", author: "OneStar", bpm: bpm, songNotes: finalNotes }];
             
             if (window.AndroidBridge && window.AndroidBridge.startPlay) {
                 const payload = {
-                    name: "音频扒谱 || Sky-MusicFastBasic", author: "OneStar", model: "Sky-MusicFastBasic",
+                    name: "音频扒谱 || OneStarMusicFastBasic", author: "OneStar", model: "OneStarMusicFastBasic",
                     bpm: bpm, notes: finalNotes, fullJson: JSON.stringify(skyData), targetFolder: "AppSheets"
                 };
                 window.AndroidBridge.startPlay(JSON.stringify(payload));

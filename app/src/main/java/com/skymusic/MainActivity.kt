@@ -43,17 +43,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // 🌟 音频选择器接入 Basic Pitch AI
     private val audioPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@registerForActivityResult
-        Toast.makeText(this, "音频已选择，正在运行 AI 扒谱...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "开始底层解码与推理...", Toast.LENGTH_SHORT).show()
         
-        // 启动 Basic Pitch 推理
-        val helper = BasicPitchHelper(this)
-        helper.processAudio(uri) { resultJson ->
+        val engine = OneStarMusicFastBasicEngine(this)
+        engine.processAudio(uri) { resultJson ->
             runOnUiThread {
                 webViewInstance?.evaluateJavascript("window.onAudioTranscribed('${resultJson.replace("'", "\\'")}');", null)
-                Toast.makeText(this, "✅ 音频解析完成", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "✅ AI 推理完成", Toast.LENGTH_SHORT).show()
             }
         }
     }
