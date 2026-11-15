@@ -53,7 +53,11 @@
             <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyPro</div></div>
             <div class="model-desc">极致全景还原，无按键上限，塞入全部伴奏细节。</div>
         </div>
-
+<!-- 在 OneStar-SkyPro 后面加上这个 -->
+<div class="model-card" data-mode="fastpro">
+    <div class="model-header"><div class="model-radio"></div><div class="model-name">OneStar-SkyFastPro</div></div>
+    <div class="model-desc">原轨直出，选了多少音就出多少音，不做任何过滤处理。</div>
+</div>
         <button id="convertBtn" class="primary-btn">✨ 启动 AI 深度提取</button>
         <div id="status">准备就绪</div>
     </div>
@@ -69,8 +73,6 @@
             <div class="res-item"><div class="res-label">Studio 速度</div><div class="res-value" id="outSpeed">-</div></div>
             <div class="res-item"><div class="res-label">音域平移</div><div class="res-value" id="outShift">-</div></div>
         </div>
-
-        <button id="previewBtn" class="preview-btn">🎧 试听转换后的谱面 (真实钢琴)</button>
         
         <div class="action-row" id="actionRow">
             <div class="btn-group" id="appActions" style="display: none;">
@@ -87,8 +89,7 @@
 <script type="importmap">
 {
   "imports": {
-    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm",
-    "soundfont-player": "https://esm.sh/soundfont-player@0.12.0"
+    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm"
   }
 }
 </script>

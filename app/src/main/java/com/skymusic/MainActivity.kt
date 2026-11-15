@@ -5,10 +5,12 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.webkit.*
@@ -19,19 +21,50 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
 
 class MainActivity : AppCompatActivity() {
-    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var previewMediaPlayer: MediaPlayer? = null
 
-    private val fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (filePathCallback == null) return@registerForActivityResult
-        var results: Array<Uri>? = null
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            result.data?.dataString?.let { results = arrayOf(Uri.parse(it)) }
+    // 🌟 核心修复：直接获取文件 URI，由 Kotlin 端读取流并转 Base64 发给 JS
+    private val midiFileLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        
+        try {
+            // 读取选中的文件流
+            val inputStream: InputStream? = contentResolver.openInputStream(uri)
+            val bytes = inputStream?.readBytes()
+            inputStream?.close()
+
+            if (bytes != null) {
+                // 转成 Base64 方便传输给 JS
+                val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                
+                // 获取文件名
+                var fileName = "未知文件.mid"
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1) fileName = cursor.getString(nameIndex)
+                    }
+                }
+
+                // 将数据注入回 WebView 的 JS 函数
+                runOnUiThread {
+                    val jsCode = "window.onFileSelectedFromAndroid('data:application/octet-stream;base64,$base64Data', '${fileName.replace("'", "\\'")}');"
+                    (findViewById<View>(android.R.id.content).parent as? WebView)?.evaluateJavascript(jsCode, null)
+                    // 上面的逻辑不对，因为 WebView 不在 findViewById 里，所以采用全局变量保存
+                    webViewInstance?.evaluateJavascript(jsCode, null)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            runOnUiThread { Toast.makeText(this, "读取文件失败: ${e.message}", Toast.LENGTH_SHORT).show() }
         }
-        filePathCallback?.onReceiveValue(results)
-        filePathCallback = null
     }
+
+    // 保存 WebView 实例以便调用 evaluateJavascript
+    private var webViewInstance: WebView? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,7 +80,7 @@ class MainActivity : AppCompatActivity() {
 
         val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
 
-        val webView = WebView(this).apply {
+        webViewInstance = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -56,33 +89,24 @@ class MainActivity : AppCompatActivity() {
                 allowFileAccessFromFileURLs = true
                 allowUniversalAccessFromFileURLs = true
                 cacheMode = WebSettings.LOAD_NO_CACHE
-                setSupportZoom(false)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            }
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             webViewClient = WebViewClient()
+            
+            // 🌟 当 JS 触发 fileInput.click() 时，拦截它！
             webChromeClient = object : WebChromeClient() {
                 override fun onShowFileChooser(webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {
-                    filePathCallback?.onReceiveValue(null)
-                    filePathCallback = cb
-                    return try {
-                        val intent = params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "*/*" // 兜底允许所有，但下面会加过滤
-                        }
-                        fileChooserLauncher.launch(intent)
-                        true
-                    } catch (e: Exception) {
-                        filePathCallback = null
-                        false
-                    }
+                    // 不交给 WebView，直接调起原生选择器
+                    midiFileLauncher.launch("*/*")
+                    return true
                 }
             }
+            
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
         }
-        rootLayout.addView(webView, FrameLayout.LayoutParams(-1, -1))
+        
+        rootLayout.addView(webViewInstance, FrameLayout.LayoutParams(-1, -1))
 
         val btnSettings = TextView(this).apply {
             text = "⚙️ 设置"
@@ -124,13 +148,42 @@ class MainActivity : AppCompatActivity() {
 
     inner class WebAppInterface {
         @JavascriptInterface
-        fun startPlay(jsonString: String) {
-            runOnUiThread { handleSendApp(jsonString) }
+        fun startPlay(jsonString: String) = runOnUiThread { handleSendApp(jsonString) }
+
+        @JavascriptInterface
+        fun saveLocal(jsonString: String) = runOnUiThread { handleSaveLocal(jsonString) }
+
+        @JavascriptInterface
+        fun playMidiPreview(base64Data: String) {
+            runOnUiThread {
+                try {
+                    val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                    val tempFile = File(cacheDir, "temp_preview.mid")
+                    tempFile.writeBytes(bytes)
+                    
+                    previewMediaPlayer?.release()
+                    previewMediaPlayer = MediaPlayer().apply {
+                        setDataSource(tempFile.absolutePath)
+                        prepare()
+                        start()
+                        setOnCompletionListener { it.release(); previewMediaPlayer = null }
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "播放失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
 
         @JavascriptInterface
-        fun saveLocal(jsonString: String) {
-            runOnUiThread { handleSaveLocal(jsonString) }
+        fun stopMidiPreview() {
+            runOnUiThread {
+                try {
+                    previewMediaPlayer?.let {
+                        if (it.isPlaying) it.stop()
+                        it.release()
+                    }
+                } catch (e: Exception) {} finally { previewMediaPlayer = null }
+            }
         }
     }
 
@@ -139,20 +192,17 @@ class MainActivity : AppCompatActivity() {
             val payload = JSONObject(payloadStr)
             val notesArray = payload.optJSONArray("notes")
             val notesList = mutableListOf<Pair<Long, Int>>()
-            
             if (notesArray != null) {
                 for (i in 0 until notesArray.length()) {
                     val obj = notesArray.getJSONObject(i)
                     notesList.add(Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
                 }
             }
-
             val intent = Intent(this, FloatingWindowService::class.java)
             intent.putExtra("is_new_data", true)
             intent.putExtra("song_data", ArrayList(notesList))
             intent.putExtra("song_name", payload.optString("name", "未命名"))
             intent.putExtra("song_author", payload.optString("author", "未知作者"))
-            
             startService(intent)
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
@@ -166,17 +216,20 @@ class MainActivity : AppCompatActivity() {
             val name = payload.optString("name", "未命名")
             val author = payload.optString("author", "未知作者")
             val fullJson = payload.optString("fullJson", payloadStr)
-            
             val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
             if (!folder.exists()) folder.mkdirs()
-            
             val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
             val targetFile = File(folder, fileName)
             targetFile.writeText(fullJson, Charsets.UTF_8)
-            
             Toast.makeText(this, "✅ 已保存至:\n${targetFile.absolutePath}", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        previewMediaPlayer?.release()
+        previewMediaPlayer = null
     }
 }

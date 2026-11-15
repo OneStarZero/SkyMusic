@@ -1,67 +1,93 @@
 // js/audio-player.js
-let fallbackAudioCtx = null;
-let currentTimeouts = [];
+let audioCtx = null;
+let activeOscillators = [];
+let keepAliveInterval = null;
 
 export function stopAudio() {
-    currentTimeouts.forEach(t => clearTimeout(t));
-    currentTimeouts = [];
-    if (fallbackAudioCtx) {
-        fallbackAudioCtx.close();
-        fallbackAudioCtx = null;
+    // 清除保持唤醒的定时器
+    if (keepAliveInterval) {
+        clearInterval(keepAliveInterval);
+        keepAliveInterval = null;
+    }
+
+    // 强制停止所有正在发声的振荡器
+    activeOscillators.forEach(osc => {
+        try { osc.stop(); } catch(e) {}
+    });
+    activeOscillators = [];
+    
+    // 关闭上下文释放资源
+    if (audioCtx) {
+        audioCtx.close();
+        audioCtx = null;
     }
 }
 
-// 播放铺面音符（使用轻量三角波，零加载延迟，绝不卡顿）
-export function playNotes(notes) {
-    stopAudio(); // 先停止之前的播放
-    
-    fallbackAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (fallbackAudioCtx.state === 'suspended') {
-        fallbackAudioCtx.resume();
+// 页面切到后台时，强制静音停止
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopAudio();
     }
+});
+
+export function playMidiNotes(notes) {
+    stopAudio();
     
-    const startTime = fallbackAudioCtx.currentTime + 0.1;
-    let maxEndTime = 0;
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
 
-    notes.forEach(n => {
-        // 铺面音符的 time 是毫秒，key 是 "1KeyX"
-        const playTime = n.time / 1000;
-        const keyIdx = parseInt(n.key.replace('1Key', ''));
-        const midiPitch = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76][keyIdx] || 60;
-        const freq = 440 * Math.pow(2, (midiPitch - 69) / 12);
+        // 🌟 核心修复：开启一个定时器，每 1 秒强制唤醒一次音频上下文，防止被系统休眠
+        keepAliveInterval = setInterval(() => {
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }, 1000);
 
-        const osc = fallbackAudioCtx.createOscillator();
-        const gain = fallbackAudioCtx.createGain();
-        
-        // 三角波，听起来最像简单的电子琴
-        osc.type = 'triangle';
-        osc.frequency.value = freq;
+        const startTime = audioCtx.currentTime + 0.1;
+        let lastPlayedTime = -1;
 
-        const noteStart = startTime + playTime;
-        const duration = 0.4; // 铺面单音固定时长
+        notes.sort((a, b) => a.time - b.time);
 
-        // 包络控制：快速起音，快速释放，防止声音糊在一起
-        gain.gain.setValueAtTime(0, noteStart);
-        gain.gain.linearRampToValueAtTime(0.3, noteStart + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, noteStart + duration);
+        notes.forEach(note => {
+            if (note.velocity < 0.15) return; // 过滤极弱音
 
-        osc.connect(gain);
-        gain.connect(fallbackAudioCtx.destination);
+            let playTime = note.time;
+            let pitch = note.midi;
+            let duration = Math.min(note.duration, 0.5); // 最多响 0.5 秒
+            let gain = Math.min(0.3, note.velocity * 1.5);
 
-        osc.start(noteStart);
-        osc.stop(noteStart + duration + 0.1);
+            // 强制错开 40ms
+            if (playTime - lastPlayedTime < 0.04) {
+                playTime = lastPlayedTime + 0.04;
+            }
+            lastPlayedTime = playTime;
 
-        if (playTime + duration > maxEndTime) {
-            maxEndTime = playTime + duration;
-        }
-    });
+            const freq = 440 * Math.pow(2, (pitch - 69) / 12);
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
 
-    // 自动清理
-    const timeout = setTimeout(() => {
-        if (fallbackAudioCtx) {
-            fallbackAudioCtx.close();
-            fallbackAudioCtx = null;
-        }
-    }, (maxEndTime + 1) * 1000);
-    currentTimeouts.push(timeout);
+            const noteStart = startTime + playTime;
+            gainNode.gain.setValueAtTime(0, noteStart);
+            gainNode.gain.linearRampToValueAtTime(gain, noteStart + 0.02);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, noteStart + duration);
+
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            osc.start(noteStart);
+            osc.stop(noteStart + duration + 0.1);
+            
+            activeOscillators.push(osc);
+        });
+
+        // ❌ 删除了之前那个 setTimeout 自动挂起的逻辑
+        // 现在它会一直播放，直到用户手动点击“停止”或者切到后台
+
+    } catch (e) {
+        console.error("【音频引擎崩溃】", e);
+    }
 }
