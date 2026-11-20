@@ -1069,34 +1069,59 @@ class FloatingWindowService : Service() {
         }
 
         val btnCancel = Button(this).apply {
-            text = "✖ 取消"
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            setPadding((15 * density).toInt(), (8 * density).toInt(), (15 * density).toInt(), (8 * density).toInt())
-            setMargins((10 * density).toInt(), 0, 0, 0)
-            background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 8f }
-            setOnClickListener {
-                loadKeyPositions()
-                exitCalibration()
-                Toast.makeText(this@FloatingWindowService, "已取消校准", Toast.LENGTH_SHORT).show()
-            }
-        }
+    text = "✖ 取消"
+    setTextColor(Color.WHITE)
+    textSize = 12f
+    // 这里用 padding 代替 margin 留出间距
+    setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
+    background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 8f }
+    setOnClickListener {
+        loadKeyPositions()
+        exitCalibration()
+        Toast.makeText(this@FloatingWindowService, "已取消校准", Toast.LENGTH_SHORT).show()
+    }
+}
 
-        calibrationBtnContainer?.addView(btnSave)
-        calibrationBtnContainer?.addView(btnCancel)
+// 修改保存按钮，让两个按钮之间用空格留出间距
+val btnSave = Button(this).apply {
+    text = "✔ 保存键位"
+    setTextColor(Color.WHITE)
+    textSize = 12f
+    setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
+    background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 8f }
+    setOnClickListener {
+        saveKeyPositions()
+        exitCalibration()
+        Toast.makeText(this@FloatingWindowService, "🎉 键位已保存！", Toast.LENGTH_SHORT).show()
+    }
+}
 
-        val btnParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, 
-            WindowManager.LayoutParams.WRAP_CONTENT, 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, 
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, 
-            PixelFormat.TRANSLUCENT
-        )
-        btnParams.gravity = Gravity.BOTTOM or Gravity.START
-        btnParams.x = (20 * density).toInt()
-        btnParams.y = (30 * density).toInt()
-        
-        windowManager.addView(calibrationBtnContainer, btnParams)
+val btnParams = WindowManager.LayoutParams(
+    WindowManager.LayoutParams.WRAP_CONTENT, 
+    WindowManager.LayoutParams.WRAP_CONTENT, 
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, 
+    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, 
+    PixelFormat.TRANSLUCENT
+)
+btnParams.gravity = Gravity.BOTTOM or Gravity.START
+btnParams.x = (20 * density).toInt()
+btnParams.y = (30 * density).toInt()
+
+calibrationBtnContainer = LinearLayout(this).apply {
+    orientation = LinearLayout.HORIZONTAL
+    gravity = Gravity.CENTER_VERTICAL
+    // 🌟 在容器两端加上一点 margin，这样按钮就不会贴太近
+    setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
+    // 也可以加一个间距
+    val spacer = Space(this@FloatingWindowService).apply {
+        layoutParams = LinearLayout.LayoutParams((10 * density).toInt(), 1)
+    }
+    addView(btnSave)
+    addView(spacer) // 中间加个间距
+    addView(btnCancel)
+}
+
+windowManager.addView(calibrationBtnContainer, btnParams)
     }
 
     private fun exitCalibration() {
