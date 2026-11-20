@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
 
         webViewInstance = WebView(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -85,7 +86,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsDialog() {
-        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球")
+        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球", "刷新随机背景")
         AlertDialog.Builder(this)
             .setTitle("SkyMusic 设置")
             .setItems(options) { _, which ->
@@ -100,6 +101,11 @@ class MainActivity : AppCompatActivity() {
                             startService(intent)
                             Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
                         }
+                    }
+                    3 -> {
+                        // 🌟 通过 JS 桥接通知 WebView 刷新背景颜色
+                        webViewInstance?.evaluateJavascript("if (window.initRandomBackground) window.initRandomBackground();", null)
+                        Toast.makeText(this, "✨ 主题已刷新！", Toast.LENGTH_SHORT).show()
                     }
                 }
             }.show()
@@ -137,7 +143,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_model", payload.optString("model", ""))
             intent.putExtra("song_bpm", payload.optString("bpm", "0")) 
             startService(intent)
-            Toast.makeText(this, "🚀已发送至悬浮窗", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "❌ 发送失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
