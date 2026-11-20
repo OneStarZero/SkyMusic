@@ -11,8 +11,8 @@ android {
         applicationId = "com.skymusic" // 🌟 回归主分支包名
         minSdk = 24
         targetSdk = 34
-        versionCode = 7                // 🌟 版本号
-        versionName = "0.0.7"          // 🌟 正式版
+        versionCode = 8                // 🌟 版本号
+        versionName = "0.0.8"          // 🌟 正式版
 
         resourceConfigurations += listOf("zh", "en")
     }
