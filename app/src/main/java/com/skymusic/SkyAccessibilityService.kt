@@ -8,7 +8,6 @@ import android.view.accessibility.AccessibilityEvent
 class SkyAccessibilityService : AccessibilityService() {
     companion object { 
         var instance: SkyAccessibilityService? = null 
-        
         var is9KeyMode = false 
     }
 
@@ -18,7 +17,6 @@ class SkyAccessibilityService : AccessibilityService() {
 
     fun clickPoints(points: List<Pair<Float, Float>>) {
         if (points.isEmpty() || instance == null) return
-        
         val safePoints = if (points.size > 10) points.take(10) else points
 
         val builder = GestureDescription.Builder()
@@ -32,11 +30,6 @@ class SkyAccessibilityService : AccessibilityService() {
             }
             builder.addStroke(GestureDescription.StrokeDescription(path, startTime, duration))
         }
-        
-        try { 
-            dispatchGesture(builder.build(), null, null) 
-        } catch (e: Exception) { 
-            e.printStackTrace() 
-        }
+        try { dispatchGesture(builder.build(), null, null) } catch (e: Exception) { e.printStackTrace() }
     }
 }

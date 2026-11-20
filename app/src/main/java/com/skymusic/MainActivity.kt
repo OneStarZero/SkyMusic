@@ -89,9 +89,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("SkyMusic 设置")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> startActivity(
-                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                    )
+                    0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
                     1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     2 -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -127,8 +125,7 @@ class MainActivity : AppCompatActivity() {
                     .putString("theme_bg_top", o.optString("bgTop", "#0B1120"))
                     .putString("theme_bg_bottom", o.optString("bgBottom", "#1E1B4B"))
                     .apply()
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -140,9 +137,7 @@ class MainActivity : AppCompatActivity() {
             if (notesArray != null) {
                 for (i in 0 until notesArray.length()) {
                     val obj = notesArray.getJSONObject(i)
-                    notesList.add(
-                        Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0)
-                    )
+                    notesList.add(Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
                 }
             }
             val intent = Intent(this, FloatingWindowService::class.java)

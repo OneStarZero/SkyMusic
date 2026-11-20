@@ -15,9 +15,7 @@ class MidiPickerActivity : Activity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*" 
         }
-        try {
-            startActivityForResult(intent, 1001)
-        } catch (e: Exception) {
+        try { startActivityForResult(intent, 1001) } catch (e: Exception) {
             Toast.makeText(this, "无法打开文件管理器", Toast.LENGTH_SHORT).show()
             finish()
         }
@@ -43,12 +41,9 @@ class MidiPickerActivity : Activity() {
                         return
                     }
 
-                    // 🌟 核心修改：直接拷贝到内部缓存目录，极大节省内存
                     val cacheFile = File(cacheDir, "temp_midi.mid")
                     contentResolver.openInputStream(uri)?.use { input ->
-                        cacheFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
+                        cacheFile.outputStream().use { output -> input.copyTo(output) }
                     }
 
                     val resultIntent = Intent().apply {
