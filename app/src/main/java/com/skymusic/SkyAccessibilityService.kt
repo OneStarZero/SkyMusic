@@ -8,7 +8,7 @@ import android.view.accessibility.AccessibilityEvent
 class SkyAccessibilityService : AccessibilityService() {
     companion object { 
         var instance: SkyAccessibilityService? = null 
-        // 🌟 新增：记录当前是 15 键还是 9 键模式
+        
         var is9KeyMode = false 
     }
 
