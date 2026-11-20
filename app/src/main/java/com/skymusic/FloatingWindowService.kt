@@ -707,7 +707,24 @@ class FloatingWindowService : Service() {
         name: String, author: String, duration: String, notes: Int,
         bpm: String, model: String, file: File?, mode: Int
     ) {
-        val msg = "歌名：$name\n作者：$author\n模型：$model\nBPM：$bpm\n音符：$notes\n时长：$duration\n键位：${mode}键\n文件：${file?.name ?: \"内存\"}"
+        val fileLabel = file?.name ?: "mem"
+        val msg = buildString {
+            append("歌名：").append(name).append('
+')
+            append("作者：").append(author).append('
+')
+            append("模型：").append(model).append('
+')
+            append("BPM：").append(bpm).append('
+')
+            append("音符：").append(notes).append('
+')
+            append("时长：").append(duration).append('
+')
+            append("键位：").append(mode).append("键
+")
+            append("文件：").append(fileLabel)
+        }
         val d = AlertDialog.Builder(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault_Dialog_Alert))
             .setTitle("谱面详情").setMessage(msg).setPositiveButton("确定", null).create()
         d.window?.setType(
