@@ -925,7 +925,7 @@ class FloatingWindowService : Service() {
         else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         if (isPlaying) {
-            tvStatus.text = "▶ \( currentIndex/ \){songData.size}  |  $speedStr"
+            tvStatus.text = "▶ $currentIndex/${songData.size}  |  $speedStr"
             btnPlayPause.text = "⏸"
             btnPlayPause.background = pauseBgDrawable
         } else {
@@ -1330,8 +1330,8 @@ class FloatingWindowService : Service() {
         keyPositions.clear()
         val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
         for (i in 0 until mode) {
-            val x = prefs.getFloat("key_\( {mode}_ \){i}_x", -1f)
-            val y = prefs.getFloat("key_\( {mode}_ \){i}_y", -1f)
+            val x = prefs.getFloat("key_${mode}_${i}_x", -1f)
+            val y = prefs.getFloat("key_${mode}_${i}_y", -1f)
             keyPositions.add(Pair(x, y))
         }
     }
@@ -1340,8 +1340,8 @@ class FloatingWindowService : Service() {
         val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
         val editor = prefs.edit()
         for (i in keyPositions.indices) {
-            editor.putFloat("key_\( {mode}_ \){i}_x", keyPositions[i].first)
-            editor.putFloat("key_\( {mode}_ \){i}_y", keyPositions[i].second)
+            editor.putFloat("key_${mode}_${i}_x", keyPositions[i].first)
+            editor.putFloat("key_${mode}_${i}_y", keyPositions[i].second)
         }
         editor.apply()
     }
