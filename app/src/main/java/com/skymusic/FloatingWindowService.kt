@@ -13,7 +13,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
-import android.text.Spannable
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextUtils
@@ -78,7 +77,7 @@ class FloatingWindowService : Service() {
     private val pauseBgDrawable = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 6f }
 
     private var calibrationViews = mutableListOf<TextView>()
-    private var calibrationSaveBtn: Button? = null
+    private var calibrationBtnContainer: LinearLayout? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -356,7 +355,7 @@ class FloatingWindowService : Service() {
 
         val btnNavLocal = createNavBtn("📂", "本地") { currentPage = 0; showFullPanel(0) }
         val btnNavApp = createNavBtn("☁️", "发送") { currentPage = 1; showFullPanel(1) }
-        val btnNavSet = createNavBtn("🎯", "校准") { if(checkAccessibility()) { showMiniBall(); startCalibration() } }
+        val btnNavSet = createNavBtn("🎯", "校准") { if(checkAccessibility()) { startCalibration() } }
 
         bottomBar.addView(btnNavLocal, LinearLayout.LayoutParams(0, -1, 1f))
         bottomBar.addView(btnNavApp, LinearLayout.LayoutParams(0, -1, 1f))
@@ -467,13 +466,12 @@ class FloatingWindowService : Service() {
             setOnClickListener { onClick() }
         }
         
-        // 🌟 核心优化：标题支持跑马灯循环滚动
         val titleTv = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = titleSize; setTypeface(null, android.graphics.Typeface.BOLD); 
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.MARQUEE
             marqueeRepeatLimit = -1
-            isSelected = true // 必须选中才能滚动
+            isSelected = true 
             isFocusable = true
             isFocusableInTouchMode = true
         }
@@ -778,15 +776,31 @@ class FloatingWindowService : Service() {
                     return 
                 }
                 
-                val (timeMs, keyIndex) = songData[currentIndex]
-                val point = keyPositions.getOrNull(keyIndex) ?: Pair(0f, 0f)
-                if (point.first != -1f) SkyAccessibilityService.instance?.clickPoints(listOf(point))
+                // 获取当前音符的时间戳
+                val currentTime = songData[currentIndex].first
+                val pointsToClick = mutableListOf<Pair<Float, Float>>()
                 
-                currentIndex++
+                // 🌟 顶级配置：容差放宽到 25ms，吃掉细微的谱面抖动，收集所有同频音符
+                while (currentIndex < songData.size && songData[currentIndex].first - currentTime <= 25) {
+                    val keyIndex = songData[currentIndex].second
+                    val point = keyPositions.getOrNull(keyIndex) ?: Pair(0f, 0f)
+                    if (point.first != -1f) {
+                        pointsToClick.add(point)
+                    }
+                    currentIndex++
+                }
+                
+                // 一次性触发多指并发点击（无障碍服务底层直接多指下压）
+                if (pointsToClick.isNotEmpty()) {
+                    SkyAccessibilityService.instance?.clickPoints(pointsToClick)
+                }
+                
                 updatePlayerUI() 
 
                 if (currentIndex < songData.size) {
-                    val nextInterval = songData[currentIndex].first - timeMs
+                    // 下一组音符的时间戳差值
+                    val nextInterval = songData[currentIndex].first - currentTime
+                    // 除以倍速，并保证最小间隔 1ms
                     handler.postDelayed(this, maxOf((nextInterval / currentSpeed).toLong(), 1L))
                 } else {
                     resetPlayState()
@@ -890,8 +904,13 @@ class FloatingWindowService : Service() {
                     return@thread
                 }
                 
+                // 🌟 核心修改：严格保留原声的 time 和 key 对齐
                 val notes = mutableListOf<Pair<Long, Int>>()
-                for (i in timeMatches.indices) { if (i < keyMatches.size) notes.add(Pair(timeMatches[i], keyMatches[i])) }
+                for (i in timeMatches.indices) { 
+                    if (i < keyMatches.size) {
+                        notes.add(Pair(timeMatches[i], keyMatches[i])) 
+                    }
+                }
                 
                 val sortedNotes = notes.sortedBy { it.first }
                 
@@ -913,6 +932,11 @@ class FloatingWindowService : Service() {
     }
 
     private fun startCalibration() {
+        if (!this::floatView.isInitialized) return
+        
+        floatView.visibility = View.GONE 
+        floatView.removeAllViews()
+
         val dm = resources.displayMetrics
         val screenW = dm.widthPixels
         val screenH = dm.heightPixels
@@ -922,26 +946,33 @@ class FloatingWindowService : Service() {
 
         calibrationViews.forEach { try { windowManager.removeView(it) } catch (e: Exception) {} }
         calibrationViews.clear()
-        calibrationSaveBtn?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
-        calibrationSaveBtn = null
+        calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
+        calibrationBtnContainer = null
 
-        // 🌟 完美 5x3 网格比例：左右各留 15%，第一排距离顶部 55%
-        val startX = screenW * 0.15f
-        val endX = screenW * 0.85f
-        val gapX = (endX - startX) / 4f
+        // 🌟 严格根据光遇 5x3 错位菱形阵列计算
+        val dx = screenW * 0.17f
+        val dy = dx * 0.85f 
 
-        val startY = screenH * 0.55f
-        val gapY = screenH * 0.12f
+        var baseX = screenW * 0.15f
+        var baseY = screenH * 0.55f
 
-        if (keyPositions.isEmpty() || keyPositions[0].first == -1f || keyPositions.size < 15) {
-            keyPositions.clear()
-            for (i in 0 until 15) {
-                val col = i % 5
-                val row = i / 5
-                val x = startX + col * gapX
-                val y = startY + row * gapY
-                keyPositions.add(Pair(x, y))
+        if (keyPositions.isNotEmpty() && keyPositions[0].first != -1f) {
+            baseX = keyPositions[0].first
+            baseY = keyPositions[0].second
+        }
+
+        keyPositions.clear()
+        for (i in 0 until 15) {
+            var offsetX = 0f
+            var offsetY = 0f
+            if (i in 0..4) { 
+                offsetX = i * dx; offsetY = 0f
+            } else if (i in 5..9) { 
+                offsetX = (i - 5) * dx + dx / 2; offsetY = dy
+            } else if (i in 10..14) { 
+                offsetX = (i - 10) * dx; offsetY = 2 * dy
             }
+            keyPositions.add(Pair(baseX + offsetX, baseY + offsetY))
         }
 
         for (i in 0 until 15) {
@@ -978,10 +1009,36 @@ class FloatingWindowService : Service() {
                             initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; return true 
                         }
                         MotionEvent.ACTION_MOVE -> { 
-                            params.x = initialX + (event.rawX - initialTouchX).toInt()
-                            params.y = initialY + (event.rawY - initialTouchY).toInt()
+                            val deltaX = (event.rawX - initialTouchX).toInt()
+                            val deltaY = (event.rawY - initialTouchY).toInt()
+                            
+                            params.x = initialX + deltaX
+                            params.y = initialY + deltaY
                             windowManager.updateViewLayout(dot, params)
-                            keyPositions[i] = Pair((params.x + halfSize).toFloat(), (params.y + halfSize).toFloat()) 
+                            
+                            val centerX = (params.x + halfSize).toFloat()
+                            val centerY = (params.y + halfSize).toFloat()
+                            keyPositions[i] = Pair(centerX, centerY)
+                            
+                            if (i == 0) {
+                                for (j in 1 until 15) {
+                                    var offsetX = 0f
+                                    var offsetY = 0f
+                                    if (j in 1..4) { offsetX = j * dx; offsetY = 0f; } 
+                                    else if (j in 5..9) { offsetX = (j - 5) * dx + dx / 2; offsetY = dy; } 
+                                    else if (j in 10..14) { offsetX = (j - 10) * dx; offsetY = 2 * dy; }
+                                    
+                                    val newX = centerX + offsetX
+                                    val newY = centerY + offsetY
+                                    keyPositions[j] = Pair(newX, newY)
+                                    
+                                    val otherDot = calibrationViews[j]
+                                    val otherParams = otherDot.layoutParams as WindowManager.LayoutParams
+                                    otherParams.x = newX.toInt() - halfSize
+                                    otherParams.y = newY.toInt() - halfSize
+                                    windowManager.updateViewLayout(otherDot, otherParams)
+                                }
+                            }
                             return true 
                         }
                     }
@@ -992,25 +1049,42 @@ class FloatingWindowService : Service() {
             calibrationViews.add(dot)
         }
 
-        calibrationSaveBtn = Button(this).apply {
-            text = "✅ 保存键位并退出"
+        calibrationBtnContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
+        }
+
+        val btnSave = Button(this).apply {
+            text = "✔ 保存键位"
             setTextColor(Color.WHITE)
-            textSize = 14f
-            setPadding(40, 20, 40, 20)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#10B981"))
-                cornerRadius = 12f
-            }
+            textSize = 12f
+            setPadding((15 * density).toInt(), (8 * density).toInt(), (15 * density).toInt(), (8 * density).toInt())
+            background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 8f }
             setOnClickListener {
                 saveKeyPositions()
-                calibrationViews.forEach { windowManager.removeView(it) }
-                calibrationViews.clear()
-                try { windowManager.removeView(this) } catch (e: Exception) {}
-                calibrationSaveBtn = null
+                exitCalibration()
                 Toast.makeText(this@FloatingWindowService, "🎉 键位已保存！", Toast.LENGTH_SHORT).show()
             }
         }
-        
+
+        val btnCancel = Button(this).apply {
+            text = "✖ 取消"
+            setTextColor(Color.WHITE)
+            textSize = 12f
+            setPadding((15 * density).toInt(), (8 * density).toInt(), (15 * density).toInt(), (8 * density).toInt())
+            setMargins((10 * density).toInt(), 0, 0, 0)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 8f }
+            setOnClickListener {
+                loadKeyPositions()
+                exitCalibration()
+                Toast.makeText(this@FloatingWindowService, "已取消校准", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        calibrationBtnContainer?.addView(btnSave)
+        calibrationBtnContainer?.addView(btnCancel)
+
         val btnParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, 
             WindowManager.LayoutParams.WRAP_CONTENT, 
@@ -1018,10 +1092,21 @@ class FloatingWindowService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, 
             PixelFormat.TRANSLUCENT
         )
-        btnParams.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-        btnParams.y = (100 * density).toInt()
+        btnParams.gravity = Gravity.BOTTOM or Gravity.START
+        btnParams.x = (20 * density).toInt()
+        btnParams.y = (30 * density).toInt()
         
-        windowManager.addView(calibrationSaveBtn, btnParams)
+        windowManager.addView(calibrationBtnContainer, btnParams)
+    }
+
+    private fun exitCalibration() {
+        calibrationViews.forEach { try { windowManager.removeView(it) } catch (e: Exception) {} }
+        calibrationViews.clear()
+        calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
+        calibrationBtnContainer = null
+        
+        floatView.visibility = View.VISIBLE
+        showMiniBall()
     }
 
     private fun loadKeyPositions() {
