@@ -137,7 +137,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_model", payload.optString("model", ""))
             intent.putExtra("song_bpm", payload.optString("bpm", "0")) 
             startService(intent)
-            Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "🚀已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "❌ 发送失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
