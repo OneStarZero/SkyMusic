@@ -931,198 +931,210 @@ class FloatingWindowService : Service() {
         }
     }
 
-    private fun startCalibration() {
-        if (!this::floatView.isInitialized) return
-        
-        floatView.visibility = View.GONE 
-        floatView.removeAllViews()
+   private fun startCalibration() {
+    if (!this::floatView.isInitialized) return
 
-        val dm = resources.displayMetrics
-        val screenW = dm.widthPixels
-        val screenH = dm.heightPixels
-        val density = resources.displayMetrics.density
-        val dotSize = (42 * density).toInt() 
-        val halfSize = dotSize / 2
+    floatView.visibility = View.GONE
+    floatView.removeAllViews()
 
-        calibrationViews.forEach { try { windowManager.removeView(it) } catch (e: Exception) {} }
-        calibrationViews.clear()
-        calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
-        calibrationBtnContainer = null
+    val dm = resources.displayMetrics
+    val screenW = dm.widthPixels
+    val screenH = dm.heightPixels
+    val density = resources.displayMetrics.density
+    val dotSize = (42 * density).toInt()
+    val halfSize = dotSize / 2
 
-        // 🌟 严格根据光遇 5x3 错位菱形阵列计算
-        val dx = screenW * 0.17f
-        val dy = dx * 0.85f 
+    // 清理之前残留的校准视图
+    calibrationViews.forEach { try { windowManager.removeView(it) } catch (e: Exception) {} }
+    calibrationViews.clear()
+    calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (e: Exception) {} }
+    calibrationBtnContainer = null
 
-        var baseX = screenW * 0.15f
-        var baseY = screenH * 0.55f
+    // 根据光遇 5x3 错位菱形阵列计算
+    val dx = screenW * 0.17f
+    val dy = dx * 0.85f
 
-        if (keyPositions.isNotEmpty() && keyPositions[0].first != -1f) {
-            baseX = keyPositions[0].first
-            baseY = keyPositions[0].second
+    var baseX = screenW * 0.15f
+    var baseY = screenH * 0.55f
+
+    if (keyPositions.isNotEmpty() && keyPositions[0].first != -1f) {
+        baseX = keyPositions[0].first
+        baseY = keyPositions[0].second
+    }
+
+    keyPositions.clear()
+    for (i in 0 until 15) {
+        var offsetX = 0f
+        var offsetY = 0f
+        if (i in 0..4) {
+            offsetX = i * dx
+            offsetY = 0f
+        } else if (i in 5..9) {
+            offsetX = (i - 5) * dx + dx / 2
+            offsetY = dy
+        } else if (i in 10..14) {
+            offsetX = (i - 10) * dx
+            offsetY = 2 * dy
+        }
+        keyPositions.add(Pair(baseX + offsetX, baseY + offsetY))
+    }
+
+    // 创建 15 个可拖动的校准点
+    for (i in 0 until 15) {
+        val dot = TextView(this).apply {
+            text = "${i + 1}"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#CC0F172A"))
+                setStroke((2 * density).toInt(), Color.parseColor("#38BDF8"))
+            }
         }
 
-        keyPositions.clear()
-        for (i in 0 until 15) {
-            var offsetX = 0f
-            var offsetY = 0f
-            if (i in 0..4) { 
-                offsetX = i * dx; offsetY = 0f
-            } else if (i in 5..9) { 
-                offsetX = (i - 5) * dx + dx / 2; offsetY = dy
-            } else if (i in 10..14) { 
-                offsetX = (i - 10) * dx; offsetY = 2 * dy
-            }
-            keyPositions.add(Pair(baseX + offsetX, baseY + offsetY))
-        }
+        val params = WindowManager.LayoutParams(
+            dotSize, dotSize,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = keyPositions[i].first.toInt() - halfSize
+        params.y = keyPositions[i].second.toInt() - halfSize
 
-        for (i in 0 until 15) {
-            val dot = TextView(this).apply { 
-                text = "${i + 1}"
-                setTextColor(Color.parseColor("#38BDF8"))
-                textSize = 16f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                gravity = Gravity.CENTER
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#CC0F172A"))
-                    setStroke((2 * density).toInt(), Color.parseColor("#38BDF8"))
-                }
-            }
-            
-            val params = WindowManager.LayoutParams(
-                dotSize, dotSize, 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, 
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
-            )
-            params.gravity = Gravity.TOP or Gravity.START
-            params.x = keyPositions[i].first.toInt() - halfSize
-            params.y = keyPositions[i].second.toInt() - halfSize
+        dot.setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
 
-            dot.setOnTouchListener(object : View.OnTouchListener {
-                private var initialX = 0
-                private var initialY = 0
-                private var initialTouchX = 0f
-                private var initialTouchY = 0f
-                override fun onTouch(v: View?, event: MotionEvent): Boolean {
-                    when (event.action) {
-                        MotionEvent.ACTION_DOWN -> { 
-                            initialX = params.x; initialY = params.y; initialTouchX = event.rawX; initialTouchY = event.rawY; return true 
-                        }
-                        MotionEvent.ACTION_MOVE -> { 
-                            val deltaX = (event.rawX - initialTouchX).toInt()
-                            val deltaY = (event.rawY - initialTouchY).toInt()
-                            
-                            params.x = initialX + deltaX
-                            params.y = initialY + deltaY
-                            windowManager.updateViewLayout(dot, params)
-                            
-                            val centerX = (params.x + halfSize).toFloat()
-                            val centerY = (params.y + halfSize).toFloat()
-                            keyPositions[i] = Pair(centerX, centerY)
-                            
-                            if (i == 0) {
-                                for (j in 1 until 15) {
-                                    var offsetX = 0f
-                                    var offsetY = 0f
-                                    if (j in 1..4) { offsetX = j * dx; offsetY = 0f; } 
-                                    else if (j in 5..9) { offsetX = (j - 5) * dx + dx / 2; offsetY = dy; } 
-                                    else if (j in 10..14) { offsetX = (j - 10) * dx; offsetY = 2 * dy; }
-                                    
-                                    val newX = centerX + offsetX
-                                    val newY = centerY + offsetY
-                                    keyPositions[j] = Pair(newX, newY)
-                                    
-                                    val otherDot = calibrationViews[j]
-                                    val otherParams = otherDot.layoutParams as WindowManager.LayoutParams
-                                    otherParams.x = newX.toInt() - halfSize
-                                    otherParams.y = newY.toInt() - halfSize
-                                    windowManager.updateViewLayout(otherDot, otherParams)
-                                }
-                            }
-                            return true 
-                        }
+            override fun onTouch(v: View?, event: MotionEvent): Boolean {
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = params.x
+                        initialY = params.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        return true
                     }
-                    return false
+                    MotionEvent.ACTION_MOVE -> {
+                        val deltaX = (event.rawX - initialTouchX).toInt()
+                        val deltaY = (event.rawY - initialTouchY).toInt()
+
+                        params.x = initialX + deltaX
+                        params.y = initialY + deltaY
+                        windowManager.updateViewLayout(dot, params)
+
+                        val centerX = (params.x + halfSize).toFloat()
+                        val centerY = (params.y + halfSize).toFloat()
+                        keyPositions[i] = Pair(centerX, centerY)
+
+                        // 拖动 1 号键时，自动推算其余 14 个键的位置
+                        if (i == 0) {
+                            for (j in 1 until 15) {
+                                var offsetX = 0f
+                                var offsetY = 0f
+                                if (j in 1..4) {
+                                    offsetX = j * dx
+                                    offsetY = 0f
+                                } else if (j in 5..9) {
+                                    offsetX = (j - 5) * dx + dx / 2
+                                    offsetY = dy
+                                } else if (j in 10..14) {
+                                    offsetX = (j - 10) * dx
+                                    offsetY = 2 * dy
+                                }
+
+                                val newX = centerX + offsetX
+                                val newY = centerY + offsetY
+                                keyPositions[j] = Pair(newX, newY)
+
+                                val otherDot = calibrationViews[j]
+                                val otherParams = otherDot.layoutParams as WindowManager.LayoutParams
+                                otherParams.x = newX.toInt() - halfSize
+                                otherParams.y = newY.toInt() - halfSize
+                                windowManager.updateViewLayout(otherDot, otherParams)
+                            }
+                        }
+                        return true
+                    }
                 }
-            })
-            windowManager.addView(dot, params)
-            calibrationViews.add(dot)
-        }
-
-        calibrationBtnContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
-        }
-
-        val btnSave = Button(this).apply {
-            text = "✔ 保存键位"
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            setPadding((15 * density).toInt(), (8 * density).toInt(), (15 * density).toInt(), (8 * density).toInt())
-            background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 8f }
-            setOnClickListener {
-                saveKeyPositions()
-                exitCalibration()
-                Toast.makeText(this@FloatingWindowService, "🎉 键位已保存！", Toast.LENGTH_SHORT).show()
+                return false
             }
+        })
+
+        windowManager.addView(dot, params)
+        calibrationViews.add(dot)
+    }
+
+    // ==================== 校准按钮（干净版） ====================
+    val btnSave = Button(this).apply {
+        text = "✔ 保存键位"
+        setTextColor(Color.WHITE)
+        textSize = 12f
+        setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
+        background = GradientDrawable().apply {
+            setColor(Color.parseColor("#10B981"))
+            cornerRadius = 8f
         }
-
-        val btnCancel = Button(this).apply {
-    text = "✖ 取消"
-    setTextColor(Color.WHITE)
-    textSize = 12f
-    // 这里用 padding 代替 margin 留出间距
-    setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
-    background = GradientDrawable().apply { setColor(Color.parseColor("#EF4444")); cornerRadius = 8f }
-    setOnClickListener {
-        loadKeyPositions()
-        exitCalibration()
-        Toast.makeText(this@FloatingWindowService, "已取消校准", Toast.LENGTH_SHORT).show()
+        setOnClickListener {
+            saveKeyPositions()
+            exitCalibration()
+            Toast.makeText(this@FloatingWindowService, "🎉 键位已保存！", Toast.LENGTH_SHORT).show()
+        }
     }
+
+    val btnCancel = Button(this).apply {
+        text = "✖ 取消"
+        setTextColor(Color.WHITE)
+        textSize = 12f
+        setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
+        background = GradientDrawable().apply {
+            setColor(Color.parseColor("#EF4444"))
+            cornerRadius = 8f
+        }
+        setOnClickListener {
+            loadKeyPositions()
+            exitCalibration()
+            Toast.makeText(this@FloatingWindowService, "已取消校准", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val spacer = Space(this).apply {
+        layoutParams = LinearLayout.LayoutParams((12 * density).toInt(), 1)
+    }
+
+    calibrationBtnContainer = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
+        addView(btnSave)
+        addView(spacer)
+        addView(btnCancel)
+    }
+
+    val btnParams = WindowManager.LayoutParams(
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        WindowManager.LayoutParams.WRAP_CONTENT,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else
+            WindowManager.LayoutParams.TYPE_PHONE,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+        PixelFormat.TRANSLUCENT
+    ).apply {
+        gravity = Gravity.BOTTOM or Gravity.START
+        x = (20 * density).toInt()
+        y = (30 * density).toInt()
+    }
+
+    windowManager.addView(calibrationBtnContainer, btnParams)
 }
-
-// 修改保存按钮，让两个按钮之间用空格留出间距
-val btnSave = Button(this).apply {
-    text = "✔ 保存键位"
-    setTextColor(Color.WHITE)
-    textSize = 12f
-    setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
-    background = GradientDrawable().apply { setColor(Color.parseColor("#10B981")); cornerRadius = 8f }
-    setOnClickListener {
-        saveKeyPositions()
-        exitCalibration()
-        Toast.makeText(this@FloatingWindowService, "🎉 键位已保存！", Toast.LENGTH_SHORT).show()
-    }
-}
-
-val btnParams = WindowManager.LayoutParams(
-    WindowManager.LayoutParams.WRAP_CONTENT, 
-    WindowManager.LayoutParams.WRAP_CONTENT, 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, 
-    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, 
-    PixelFormat.TRANSLUCENT
-)
-btnParams.gravity = Gravity.BOTTOM or Gravity.START
-btnParams.x = (20 * density).toInt()
-btnParams.y = (30 * density).toInt()
-
-calibrationBtnContainer = LinearLayout(this).apply {
-    orientation = LinearLayout.HORIZONTAL
-    gravity = Gravity.CENTER_VERTICAL
-    // 🌟 在容器两端加上一点 margin，这样按钮就不会贴太近
-    setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
-    // 也可以加一个间距
-    val spacer = Space(this@FloatingWindowService).apply {
-        layoutParams = LinearLayout.LayoutParams((10 * density).toInt(), 1)
-    }
-    addView(btnSave)
-    addView(spacer) // 中间加个间距
-    addView(btnCancel)
-}
-
-windowManager.addView(calibrationBtnContainer, btnParams)
-    }
 
     private fun exitCalibration() {
         calibrationViews.forEach { try { windowManager.removeView(it) } catch (e: Exception) {} }
