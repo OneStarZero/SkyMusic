@@ -42,9 +42,8 @@ export function initMidi() {
     let currentMidiData = null;
     let pendingTxtContent = null;
     let selectedTrackIndices = new Set(); 
-    let hideResultTimeout = null; // 🌟 新增：用于清理卡片消失的定时器
+    let hideResultTimeout = null;
 
-    // 🌟 修复：平滑隐藏卡片的函数（改用 setTimeout，彻底根除过渡事件冲突）
     function hideResultSmoothly() {
         if (resultCard.style.display === 'none') return;
         resultCard.classList.remove('fade-in');
@@ -54,7 +53,7 @@ export function initMidi() {
         hideResultTimeout = setTimeout(() => {
             resultCard.style.display = 'none';
             resultCard.classList.remove('fade-out');
-        }, 300); // 与 CSS 中 .fade-out 的动画时长一致
+        }, 300);
     }
 
     document.querySelectorAll('.model-card').forEach(card => {
@@ -63,7 +62,6 @@ export function initMidi() {
             document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
             card.classList.add('active');
             
-            // 切换模型时，平滑隐藏上一次的结果
             hideResultSmoothly();
             logDiv.style.display = 'none';
             statusDiv.textContent = '已切换提取模型，准备就绪';
@@ -193,7 +191,6 @@ export function initMidi() {
         
         if (selectedTrackIndices.size === 0) { showToast('请至少选择一个音轨！', 'error'); return; }
 
-        // 🌟 修复：实时获取当前选中的模型，防止闭包串号
         const activeCard = document.querySelector('.model-card.active');
         const currentMode = activeCard ? activeCard.getAttribute('data-mode') : 'fastpro';
         const isMelody = (currentMode === 'fast');
@@ -275,8 +272,14 @@ export function initMidi() {
                 if (studioSpeed > 4000) studioSpeed = 4000;
 
                 let modelName = isMelody ? "SkyFast" : (isFastPro ? "SkyFastPro" : "SkyPro");
-                const baseSongName = document.getElementById('songNameInput').value.trim() || '未命名曲目';
+                
+                // 🌟 核心修复：强制清理旧后缀，保证模型名加在最后面
+                let baseSongName = document.getElementById('songNameInput').value.trim() || '未命名曲目';
+                if (baseSongName.includes(" || ")) {
+                    baseSongName = baseSongName.split(" || ")[0].trim();
+                }
                 const finalSongName = `${baseSongName} || ${modelName}`; 
+
                 const finalAuthor = document.getElementById('authorInput').value.trim() || '未知作者';
                 const finalTranscriber = document.getElementById('transcriberInput').value.trim() || '_OneStar';
 
@@ -302,7 +305,6 @@ export function initMidi() {
                 document.getElementById('outModel').textContent = modelName;
                 document.getElementById('outTranscriber').textContent = finalTranscriber;
 
-                // 🌟 修复：平滑显示卡片（清除隐藏定时器，移除 fade-out 防止冲突）
                 clearTimeout(hideResultTimeout);
                 resultCard.style.display = 'block';
                 resultCard.classList.remove('fade-out');
@@ -328,12 +330,15 @@ export function initMidi() {
                     };
                 } else {
                     document.getElementById('btnDownload').onclick = () => {
-                        const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = `${finalSongName} - ${finalAuthor}.txt`;
-                        a.click();
-                    };
+    const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    
+    // 🌟 浏览器下载也严格按照 歌曲名-作者 || 模型名.txt 命名
+    a.download = `${baseSongName}-${finalAuthor} || ${modelName}.txt`;
+    
+    a.click();
+};
                 }
 
             } catch (err) {

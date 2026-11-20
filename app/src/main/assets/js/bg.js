@@ -5,7 +5,6 @@ export function initRandomBackground() {
     let width, height;
     let animationId = null;
 
-    // 完全随机生成治愈系颜色
     function generateRandomTheme() {
         const baseHue = 180 + Math.random() * 160; 
         return {
@@ -34,7 +33,6 @@ export function initRandomBackground() {
         bgGrad.addColorStop(0, theme.bgTop);
         bgGrad.addColorStop(1, theme.bgBottom);
 
-        // 🌟 离屏渲染星云，大大节省 CPU
         nebulaCanvas = document.createElement('canvas');
         nebulaCanvas.width = width;
         nebulaCanvas.height = height;
@@ -87,7 +85,6 @@ export function initRandomBackground() {
         }
     }
 
-    // 限制 30 帧，肉眼看起来依然丝滑，但计算量减半
     let lastTime = 0;
     const interval = 1000 / 30;
 
@@ -100,11 +97,9 @@ export function initRandomBackground() {
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, width, height);
 
-        // 铺离屏星云
         ctx.globalCompositeOperation = 'screen';
         ctx.drawImage(nebulaCanvas, 0, 0);
 
-        // 画极光
         auroras.forEach(a => {
             a.offset += a.speed;
             ctx.beginPath();
@@ -120,7 +115,6 @@ export function initRandomBackground() {
             ctx.fill();
         });
 
-        // 画星星
         ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = theme.star;
         stars.forEach(s => {
@@ -139,7 +133,6 @@ export function initRandomBackground() {
         });
         ctx.globalAlpha = 1.0;
 
-        // 画萤火光点
         ctx.fillStyle = theme.particle;
         particles.forEach(p => {
             p.alpha += p.vAlpha;
@@ -154,14 +147,10 @@ export function initRandomBackground() {
         });
         ctx.globalAlpha = 1.0;
 
-        // 🌟 流星修复：方向改为从右上往左下，产生自然的斜落
         if (Math.random() < 0.015 && meteors.length < 2) {
             meteors.push({
-                x: width + 50, 
-                y: Math.random() * height * 0.4, // 从上半部分出现
-                len: 150, 
-                speed: 15, 
-                angle: Math.PI / 4 + (Math.random() - 0.5) * 0.2, // 约 45 度偏左下
+                x: width + 50, y: Math.random() * height * 0.4,
+                len: 150, speed: 15, angle: Math.PI / 4 + (Math.random() - 0.5) * 0.2,
                 life: 1.0
             });
         }
@@ -170,7 +159,7 @@ export function initRandomBackground() {
             const m = meteors[i];
             ctx.globalAlpha = m.life;
             const tx = m.x - Math.cos(m.angle) * m.len;
-            const ty = m.y + Math.sin(m.angle) * m.len; // y 是加号，向下落
+            const ty = m.y + Math.sin(m.angle) * m.len;
             
             const grad = ctx.createLinearGradient(m.x, m.y, tx, ty);
             grad.addColorStop(0, theme.star);
@@ -183,7 +172,7 @@ export function initRandomBackground() {
             ctx.stroke();
 
             m.x -= Math.cos(m.angle) * m.speed;
-            m.y += Math.sin(m.angle) * m.speed; // y 增加，向下落
+            m.y += Math.sin(m.angle) * m.speed;
             m.life -= 0.02;
             if (m.life <= 0 || m.x < -100 || m.y > height + 100) meteors.splice(i, 1);
         }
@@ -202,4 +191,14 @@ export function initRandomBackground() {
 
     init();
     animationId = requestAnimationFrame(draw);
+
+    // 🌟 核心新增：供外部（Native）调用的刷新接口
+    window.refreshRandomBackground = function() {
+        if (animationId) cancelAnimationFrame(animationId);
+        theme = generateRandomTheme();
+        meteors = [];
+        init();
+        lastTime = performance.now();
+        animationId = requestAnimationFrame(draw);
+    };
 }

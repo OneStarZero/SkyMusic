@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -67,14 +68,22 @@ class MainActivity : AppCompatActivity() {
 
         rootLayout.addView(webViewInstance, FrameLayout.LayoutParams(-1, -1))
 
+        // 🌟 优化：把设置按钮做成半透明玻璃质感，去掉突兀的黑底
         val btnSettings = TextView(this).apply {
-            text = "⚙️ 设置"
-            textSize = 14f
+            text = "⚙"
+            textSize = 20f
             setTextColor(Color.WHITE)
-            setPadding(30, 20, 30, 20)
-            setBackgroundColor(Color.parseColor("#CC000000"))
+            gravity = Gravity.CENTER
+            setPadding(24, 16, 24, 16)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(Color.parseColor("#550B1120")) // 半透明深蓝
+                cornerRadius = 20f
+                setStroke(2, Color.parseColor("#33FFFFFF"))
+            }
             setOnClickListener { showSettingsDialog() }
         }
+        
         rootLayout.addView(btnSettings, FrameLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP or Gravity.END
             topMargin = 60
@@ -84,20 +93,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsDialog() {
-        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球")
-        AlertDialog.Builder(this)
+        val options = arrayOf(
+            "🌌 刷新随机背景 (更换星空主题)",
+            "🚀 启动悬浮球",
+            "🔑 开启悬浮窗权限",
+            "♿ 开启无障碍服务",
+            "ℹ️ 关于 SkyMusic 0.0.7"
+        )
+        
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("SkyMusic 设置")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-                    1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    2 -> {
+                    0 -> {
+                        // 🌟 调用 JS 刷新背景
+                        webViewInstance?.evaluateJavascript("if (window.refreshRandomBackground) window.refreshRandomBackground();", null)
+                        Toast.makeText(this, "✨ 正在生成新的星空...", Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                             Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
                         } else {
                             startService(Intent(this, FloatingWindowService::class.java))
                             Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
                         }
+                    }
+                    2 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                    3 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    4 -> {
+                        AlertDialog.Builder(this)
+                            .setTitle("关于")
+                            .setMessage("SkyMusic 0.0.7\n\n光遇 MIDI 智能转谱工具\n\n愿你在这片星空下奏响最美的旋律。")
+                            .setPositiveButton("确定", null)
+                            .show()
                     }
                 }
             }.show()
@@ -155,18 +183,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleSaveLocal(payloadStr: String) {
-        try {
-            val payload = JSONObject(payloadStr)
-            val name = payload.optString("name", "未命名")
-            val author = payload.optString("author", "未知作者")
-            val fullJson = payload.optString("fullJson", payloadStr)
-            val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
-            if (!folder.exists()) folder.mkdirs()
-            val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            File(folder, fileName).writeText(fullJson, Charsets.UTF_8)
-            Toast.makeText(this, "✅ 已保存", Toast.LENGTH_LONG).show()
-        } catch (e: Exception) {
-            Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
+    try {
+        val payload = JSONObject(payloadStr)
+        val name = payload.optString("name", "未命名")
+        val author = payload.optString("author", "未知作者")
+        val fullJson = payload.optString("fullJson", payloadStr)
+        val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
+        if (!folder.exists()) folder.mkdirs()
+        
+        // 🌟 将模型名从 name 中提取出来，或者从 payload 提取
+        val baseName = if (name.contains(" || ")) name.substringBefore(" || ").trim() else name
+        val modelName = if (name.contains(" || ")) name.substringAfter(" || ").trim() else payload.optString("model", "")
+        
+        // 🌟 严格按照 歌曲名-作者 || 模型名.txt 命名
+        val fileName = if (modelName.isNotBlank()) {
+            "$baseName-$author || $modelName.txt"
+        } else {
+            "$baseName-$author.txt"
+        }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        
+        File(folder, fileName).writeText(fullJson, Charsets.UTF_8)
+        Toast.makeText(this, "✅ 已保存", Toast.LENGTH_LONG).show()
+    } catch (e: Exception) {
+        Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
     }
+}
 }
