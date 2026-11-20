@@ -738,7 +738,7 @@ class FloatingWindowService : Service() {
 
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val line1 = TextView(this).apply {
-            text = "作者:\( currentAuthor  ||  模型: \){if (currentModel.isNotBlank()) currentModel else \"未知\"}"}"
+            text = "作者:$currentAuthor  ||  模型:${if (currentModel.isNotBlank()) currentModel else "未知"}"
             setTextColor(Color.parseColor("#9CA3AF"))
             textSize = subSize
             setSingleLine(true)
@@ -929,7 +929,7 @@ class FloatingWindowService : Service() {
         playerLayout.addView(titleTv)
 
         val line1 = TextView(this).apply {
-            text = "作者:\( currentAuthor  ||  模型: \){if (currentModel.isNotBlank()) currentModel else \"未知\"}"
+            text = "作者:$currentAuthor  ||  模型:${if (currentModel.isNotBlank()) currentModel else "未知"}"
             setTextColor(Color.parseColor("#94A3B8"))
             textSize = 9f
             setSingleLine(true)
@@ -1060,7 +1060,7 @@ class FloatingWindowService : Service() {
 
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         if (isPlaying) {
-            tvStatus.text = "▶ \( currentIndex/ \){songData.size}  |  $speedStr"
+            tvStatus.text = "▶ $currentIndex/${songData.size}  |  $speedStr"
             btnPlayPause.text = "⏸"
             btnPlayPause.background = pauseBgDrawable
         } else {
@@ -1610,8 +1610,8 @@ class FloatingWindowService : Service() {
         val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
         val count = mode
         for (i in 0 until count) {
-            val x = prefs.getFloat("key_\( {mode}_ \){i}_x", -1f)
-            val y = prefs.getFloat("key_\( {mode}_ \){i}_y", -1f)
+            val x = prefs.getFloat("key_${mode}_${i}_x", -1f)
+            val y = prefs.getFloat("key_${mode}_${i}_y", -1f)
             keyPositions.add(Pair(x, y))
         }
     }
@@ -1620,8 +1620,8 @@ class FloatingWindowService : Service() {
         val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
         val editor = prefs.edit()
         for (i in keyPositions.indices) {
-            editor.putFloat("key_\( {mode}_ \){i}_x", keyPositions[i].first)
-            editor.putFloat("key_\( {mode}_ \){i}_y", keyPositions[i].second)
+            editor.putFloat("key_${mode}_${i}_x", keyPositions[i].first)
+            editor.putFloat("key_${mode}_${i}_y", keyPositions[i].second)
         }
         editor.apply()
     }
