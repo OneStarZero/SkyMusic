@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
@@ -46,7 +46,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0f172a")) }
+        val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0B1120")) }
 
         webViewInstance = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
@@ -61,11 +61,10 @@ class MainActivity : AppCompatActivity() {
             }
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
             webViewClient = WebViewClient()
-            
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
             loadUrl("file:///android_asset/index.html")
         }
-        
+
         rootLayout.addView(webViewInstance, FrameLayout.LayoutParams(-1, -1))
 
         val btnSettings = TextView(this).apply {
@@ -76,36 +75,31 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.parseColor("#CC000000"))
             setOnClickListener { showSettingsDialog() }
         }
-        val settingsParams = FrameLayout.LayoutParams(-2, -2).apply {
+        rootLayout.addView(btnSettings, FrameLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP or Gravity.END
             topMargin = 60
             rightMargin = 20
-        }
-        rootLayout.addView(btnSettings, settingsParams)
+        })
         setContentView(rootLayout)
     }
 
     private fun showSettingsDialog() {
-        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球", "刷新随机背景")
+        val options = arrayOf("开启悬浮窗权限", "开启无障碍服务", "手动启动悬浮球")
         AlertDialog.Builder(this)
             .setTitle("SkyMusic 设置")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                    0 -> startActivity(
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                    )
                     1 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     2 -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                             Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
                         } else {
-                            val intent = Intent(this, FloatingWindowService::class.java)
-                            startService(intent)
+                            startService(Intent(this, FloatingWindowService::class.java))
                             Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
                         }
-                    }
-                    3 -> {
-                        // 🌟 通过 JS 桥接通知 WebView 刷新背景颜色
-                        webViewInstance?.evaluateJavascript("if (window.initRandomBackground) window.initRandomBackground();", null)
-                        Toast.makeText(this, "✨ 主题已刷新！", Toast.LENGTH_SHORT).show()
                     }
                 }
             }.show()
@@ -122,6 +116,20 @@ class MainActivity : AppCompatActivity() {
         fun openMidiPicker() {
             runOnUiThread { midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java)) }
         }
+
+        @JavascriptInterface
+        fun saveTheme(jsonString: String) = runOnUiThread {
+            try {
+                val o = JSONObject(jsonString)
+                getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE).edit()
+                    .putFloat("theme_hue", o.optDouble("hue", 220.0).toFloat())
+                    .putString("theme_accent", o.optString("accent", "#7DD3FC"))
+                    .putString("theme_bg_top", o.optString("bgTop", "#0B1120"))
+                    .putString("theme_bg_bottom", o.optString("bgBottom", "#1E1B4B"))
+                    .apply()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun handleSendApp(payloadStr: String) {
@@ -132,7 +140,9 @@ class MainActivity : AppCompatActivity() {
             if (notesArray != null) {
                 for (i in 0 until notesArray.length()) {
                     val obj = notesArray.getJSONObject(i)
-                    notesList.add(Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0))
+                    notesList.add(
+                        Pair(obj.getLong("time"), obj.getString("key").replace("1Key", "").toIntOrNull() ?: 0)
+                    )
                 }
             }
             val intent = Intent(this, FloatingWindowService::class.java)
@@ -141,7 +151,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("song_name", payload.optString("name", "未命名"))
             intent.putExtra("song_author", payload.optString("author", "未知作者"))
             intent.putExtra("song_model", payload.optString("model", ""))
-            intent.putExtra("song_bpm", payload.optString("bpm", "0")) 
+            intent.putExtra("song_bpm", payload.optString("bpm", "0"))
             startService(intent)
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
@@ -158,15 +168,10 @@ class MainActivity : AppCompatActivity() {
             val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
             if (!folder.exists()) folder.mkdirs()
             val fileName = "$name-$author.txt".replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            val targetFile = File(folder, fileName)
-            targetFile.writeText(fullJson, Charsets.UTF_8)
-            Toast.makeText(this, "✅ 已保存至:\n${targetFile.absolutePath}", Toast.LENGTH_LONG).show()
+            File(folder, fileName).writeText(fullJson, Charsets.UTF_8)
+            Toast.makeText(this, "✅ 已保存", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
     }
 }
