@@ -738,7 +738,7 @@ class FloatingWindowService : Service() {
 
         val speedStr = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
         val line1 = TextView(this).apply {
-            text = "作者: $author  ||  模型: ${if (model.isNotBlank()) model else "未知"}"
+            text = "作者:\( currentAuthor  ||  模型: \){if (currentModel.isNotBlank()) currentModel else \"未知\"}"}"
             setTextColor(Color.parseColor("#9CA3AF"))
             textSize = subSize
             setSingleLine(true)
