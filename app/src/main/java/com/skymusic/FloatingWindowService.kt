@@ -99,11 +99,11 @@ class FloatingWindowService : Service() {
     private var calibrationViews = mutableListOf<TextView>()
     private var calibrationBtnContainer: LinearLayout? = null
 
-    // 设置项（默认最佳透明度 0.85f，悬浮球默认约 64dp 且无蓝边）
+    // 设置项（默认最佳透明度 0.85f，悬浮球约星星再大两圈 44dp）
     private var keyMode = 15
     private var defaultSpeed = 1.0f
     private var clickToleranceMs = 25L
-    private var ballSizeDp = 64f
+    private var ballSizeDp = 44f
     private var panelAlpha = 0.85f
     private var autoBackToList = true
     private val songKeyModeMap = mutableMapOf<String, Int>()
@@ -135,7 +135,7 @@ class FloatingWindowService : Service() {
         defaultSpeed = prefs.getFloat("default_speed", 1.0f)
         currentSpeed = defaultSpeed
         clickToleranceMs = prefs.getLong("click_tolerance", 25L)
-        ballSizeDp = prefs.getFloat("ball_size_dp", 64f).coerceIn(56f, 84f)
+        ballSizeDp = prefs.getFloat("ball_size_dp", 44f).coerceIn(38f, 84f)
         panelAlpha = prefs.getFloat("panel_alpha", 0.85f).coerceIn(0.35f, 1.0f)
         autoBackToList = prefs.getBoolean("auto_back_list", true)
         themeAccent = prefs.getString("theme_accent", "#38BDF8") ?: "#38BDF8"
@@ -216,8 +216,8 @@ class FloatingWindowService : Service() {
     }
 
     private fun clampWindowParams(params: WindowManager.LayoutParams, screenW: Int, screenH: Int) {
-        val w = if (params.width > 0) params.width else dp(64f)
-        val h = if (params.height > 0) params.height else dp(64f)
+        val w = if (params.width > 0) params.width else dp(ballSizeDp)
+        val h = if (params.height > 0) params.height else dp(ballSizeDp)
         params.x = params.x.coerceIn(0, (screenW - w).coerceAtLeast(0))
         params.y = params.y.coerceIn(0, (screenH - h).coerceAtLeast(0))
     }
@@ -475,8 +475,8 @@ class FloatingWindowService : Service() {
                         if (!dragging && (abs(dx) > slop || abs(dy) > slop)) dragging = true
                         if (dragging) {
                             val dm = resources.displayMetrics
-                            params.x = (ix + dx.toInt()).coerceIn(0, (dm.widthPixels - (params.width.takeIf { it > 0 } ?: dp(64f))).coerceAtLeast(0))
-                            params.y = (iy + dy.toInt()).coerceIn(0, (dm.heightPixels - (params.height.takeIf { it > 0 } ?: dp(64f))).coerceAtLeast(0))
+                            params.x = (ix + dx.toInt()).coerceIn(0, (dm.widthPixels - (params.width.takeIf { it > 0 } ?: dp(ballSizeDp))).coerceAtLeast(0))
+                            params.y = (iy + dy.toInt()).coerceIn(0, (dm.heightPixels - (params.height.takeIf { it > 0 } ?: dp(ballSizeDp))).coerceAtLeast(0))
                             windowManager.updateViewLayout(floatView, params)
                         }
                     }
@@ -505,12 +505,12 @@ class FloatingWindowService : Service() {
 
         val ball = TextView(this).apply {
             text = "✦"
-            textSize = 23f
+            textSize = 20f
             gravity = Gravity.CENTER
             setTextColor(c("#FDE047"))
-            setShadowLayer(8f, 0f, 0f, c("#EAB308"))
+            setShadowLayer(6f, 0f, 0f, c("#EAB308"))
         }
-        // 去掉蓝色描边，64dp 舒适热区，纯净深空圆盘
+        // 44dp 精巧尺寸，无外圈描边，纯深空圆盘
         val wrap = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -606,7 +606,6 @@ class FloatingWindowService : Service() {
         applyGlassBlur(root, panelAlpha < 0.92f)
         panelRootView = root
 
-        // 顶部栏
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12f), dp(9f), dp(10f), dp(9f))
@@ -646,7 +645,6 @@ class FloatingWindowService : Service() {
             layoutParams = LinearLayout.LayoutParams(-1, 1)
         })
 
-        // 列表滚动区
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
             isFillViewport = true
@@ -655,7 +653,6 @@ class FloatingWindowService : Service() {
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scrollView.addView(listContainer); root.addView(scrollView)
 
-        // 底部导航栏
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(c(themeBottomBar, "#0F172A"))
@@ -1076,6 +1073,31 @@ class FloatingWindowService : Service() {
         d.show()
     }
 
+    private fun createSpeedStepButton(symbol: String, delta: Float): TextView {
+        return TextView(this).apply {
+            text = symbol
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#E2E8F0"))
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(6f).toFloat()
+                setColor(Color.parseColor("#2E38BDF8"))
+                setStroke(dp(1f).coerceAtLeast(1), Color.parseColor("#447DD3FC"))
+            }
+            setOnClickListener { v ->
+                v.animate()
+                    .scaleX(0.86f).scaleY(0.86f).setDuration(65)
+                    .withEndAction {
+                        v.animate().scaleX(1f).scaleY(1f)
+                            .setInterpolator(OvershootInterpolator(1.6f)).setDuration(110).start()
+                    }.start()
+                changeSpeed(delta)
+            }
+        }
+    }
+
     private fun showPlayerPanel() {
         if (!this::floatView.isInitialized) return
         isMiniMode = false; isPlayerMode = true
@@ -1210,7 +1232,7 @@ class FloatingWindowService : Service() {
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(-1, dp(28f))
+            layoutParams = LinearLayout.LayoutParams(-1, dp(30f))
         }
 
         btnPlayPause = Button(this).apply {
@@ -1222,36 +1244,42 @@ class FloatingWindowService : Service() {
                 }.start()
                 togglePlayback()
             }
-            layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, -1, 0.9f)
         }
         row.addView(btnPlayPause)
 
+        // 加速 / 减速胶囊控制器
         val speed = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(3f), dp(2f), dp(3f), dp(2f))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#44000000"))
-                cornerRadius = dp(6f).toFloat()
+                setColor(Color.parseColor("#55090D16"))
+                cornerRadius = dp(8f).toFloat()
+                setStroke(dp(1f).coerceAtLeast(1), Color.parseColor("#2BFFFFFF"))
             }
-            layoutParams = LinearLayout.LayoutParams(0, -1, 1.5f).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -1, 1.75f).apply {
                 leftMargin = dp(6f); rightMargin = dp(6f)
             }
         }
-        speed.addView(Button(this).apply {
-            text = "−"; textSize = 12f; setTextColor(Color.WHITE)
-            background = null; setOnClickListener { changeSpeed(-0.1f) }
-        }, LinearLayout.LayoutParams(dp(24f), -1))
+        speed.addView(
+            createSpeedStepButton("−", -0.1f),
+            LinearLayout.LayoutParams(dp(26f), -1)
+        )
 
         tvSpeed = TextView(this).apply {
             text = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-            setTextColor(c(themeAccent)); textSize = 10.5f; gravity = Gravity.CENTER
+            setTextColor(c(themeAccent)); textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(dp(2f), 0, dp(2f), 0)
         }
         enableMarquee(tvSpeed)
         speed.addView(tvSpeed, LinearLayout.LayoutParams(0, -2, 1f))
 
-        speed.addView(Button(this).apply {
-            text = "+"; textSize = 12f; setTextColor(Color.WHITE)
-            background = null; setOnClickListener { changeSpeed(0.1f) }
-        }, LinearLayout.LayoutParams(dp(24f), -1))
+        speed.addView(
+            createSpeedStepButton("+", 0.1f),
+            LinearLayout.LayoutParams(dp(26f), -1)
+        )
         row.addView(speed)
 
         row.addView(Button(this).apply {
@@ -1459,34 +1487,61 @@ class FloatingWindowService : Service() {
     private fun startCalibration(mode: Int = keyMode) {
         if (!this::floatView.isInitialized) return
         floatView.visibility = View.GONE; floatView.removeAllViews()
-        val dm = resources.displayMetrics; val screenW = dm.widthPixels; val screenH = dm.heightPixels
-        val dotSize = dp(42f); val half = dotSize / 2
+        val dm = resources.displayMetrics
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+        val isLand = screenW > screenH
+        val dotSize = dp(38f); val half = dotSize / 2
         calibrationViews.forEach { try { windowManager.removeView(it) } catch (_: Exception) {} }; calibrationViews.clear()
         calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }; calibrationBtnContainer = null
         keyPositions.clear(); val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
 
+        val stepX15: Float
+        val stepY15: Float
+        val stepX9: Float
+        val stepY9: Float
+
         if (mode == 15) {
-            val keyW = screenW * 0.12f; val keyH = keyW * 1.05f; val gapX = screenW * 0.018f; val gapY = screenH * 0.012f
+            val keyW = if (isLand) screenW * 0.082f else screenW * 0.115f
+            val keyH = if (isLand) screenH * 0.145f else keyW * 0.92f
+            val gapX = if (isLand) screenW * 0.012f else screenW * 0.014f
+            val gapY = if (isLand) screenH * 0.016f else screenH * 0.010f
+            stepX15 = keyW + gapX
+            stepY15 = keyH + gapY
+            stepX9 = stepX15
+            stepY9 = stepY15
+
             val gridW = 5 * keyW + 4 * gapX
-            var baseX = (screenW - gridW) / 2f + keyW / 2f; var baseY = screenH * 0.42f + keyH / 2f
-            val sx = prefs.getFloat("key_15_0_x", -1f); if (sx != -1f) { baseX = sx; baseY = prefs.getFloat("key_15_0_y", baseY) }
+            val gridH = 3 * keyH + 2 * gapY
+            var baseX = (screenW - gridW) / 2f + keyW / 2f
+            var baseY = (screenH - gridH) / 2f + keyH / 2f + if (isLand) screenH * 0.03f else screenH * 0.05f
+            val sx = prefs.getFloat("key_15_0_x", -1f)
+            if (sx != -1f) { baseX = sx; baseY = prefs.getFloat("key_15_0_y", baseY) }
             for (i in 0 until 15) {
                 val row = i / 5; val col = i % 5
-                keyPositions.add(Pair(baseX + col * (keyW + gapX), baseY + row * (keyH + gapY)))
+                keyPositions.add(Pair(baseX + col * stepX15, baseY + row * stepY15))
             }
         } else {
-            val keyW = screenW * 0.16f; val keyH = keyW * 1.05f; val gapX = screenW * 0.03f; val gapY = screenH * 0.02f
+            val keyW = if (isLand) screenW * 0.105f else screenW * 0.145f
+            val keyH = if (isLand) screenH * 0.155f else keyW * 0.92f
+            val gapX = if (isLand) screenW * 0.018f else screenW * 0.022f
+            val gapY = if (isLand) screenH * 0.020f else screenH * 0.014f
+            stepX9 = keyW + gapX
+            stepY9 = keyH + gapY
+            stepX15 = stepX9
+            stepY15 = stepY9
+
             val gridW = 3 * keyW + 2 * gapX
-            var baseX = (screenW - gridW) / 2f + keyW / 2f; var baseY = screenH * 0.45f + keyH / 2f
-            val sx = prefs.getFloat("key_9_0_x", -1f); if (sx != -1f) { baseX = sx; baseY = prefs.getFloat("key_9_0_y", baseY) }
+            val gridH = 3 * keyH + 2 * gapY
+            var baseX = (screenW - gridW) / 2f + keyW / 2f
+            var baseY = (screenH - gridH) / 2f + keyH / 2f + if (isLand) screenH * 0.03f else screenH * 0.05f
+            val sx = prefs.getFloat("key_9_0_x", -1f)
+            if (sx != -1f) { baseX = sx; baseY = prefs.getFloat("key_9_0_y", baseY) }
             for (i in 0 until 9) {
                 val row = i / 3; val col = i % 3
-                keyPositions.add(Pair(baseX + col * (keyW + gapX), baseY + row * (keyH + gapY)))
+                keyPositions.add(Pair(baseX + col * stepX9, baseY + row * stepY9))
             }
         }
-
-        val keyW15 = screenW * 0.12f; val keyH15 = keyW15 * 1.05f; val gapX15 = screenW * 0.018f; val gapY15 = screenH * 0.012f
-        val keyW9 = screenW * 0.16f; val keyH9 = keyW9 * 1.05f; val gapX9 = screenW * 0.03f; val gapY9 = screenH * 0.02f
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -1497,11 +1552,11 @@ class FloatingWindowService : Service() {
 
         for (i in 0 until mode) {
             val dot = TextView(this).apply {
-                text = "${i + 1}"; setTextColor(c(themeAccent)); textSize = 16f
+                text = "${i + 1}"; setTextColor(c(themeAccent)); textSize = 15f
                 setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL; setColor(Color.parseColor("#CC0F172A"))
-                    setStroke(dp(2f), c(themeAccent))
+                    setStroke(dp(1.5f).coerceAtLeast(1), c(themeAccent))
                 }
             }
             val lp = WindowManager.LayoutParams(
@@ -1526,8 +1581,8 @@ class FloatingWindowService : Service() {
                                 for (j in 1 until mode) {
                                     val row = if (mode == 15) j / 5 else j / 3
                                     val col = if (mode == 15) j % 5 else j % 3
-                                    val nx = if (mode == 15) cx + col * (keyW15 + gapX15) else cx + col * (keyW9 + gapX9)
-                                    val ny = if (mode == 15) cy + row * (keyH15 + gapY15) else cy + row * (keyH9 + gapY9)
+                                    val nx = if (mode == 15) cx + col * stepX15 else cx + col * stepX9
+                                    val ny = if (mode == 15) cy + row * stepY15 else cy + row * stepY9
                                     keyPositions[j] = Pair(nx, ny)
                                     val op = calibrationViews[j].layoutParams as WindowManager.LayoutParams
                                     op.x = nx.toInt() - half; op.y = ny.toInt() - half
