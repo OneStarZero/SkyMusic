@@ -150,6 +150,17 @@ class FloatingWindowService : Service() {
     private var themeDivider = "#24FFFFFF"
     private var themeTextMain = "#F8FAFC"
     private var themeTextSoft = "#94A3B8"
+    private data class LoadedSheetEntry(
+        val notes: List<Any>,
+        val bpm: Int = 700,
+        val loadedAtMs: Long = System.currentTimeMillis()
+    )
+
+    private data class FileMetaCacheEntry(
+        val size: Long = 0L,
+        val lastModified: Long = 0L
+    )
+
 
     companion object {
         private const val CHANNEL_ID = "skymusic_float_channel"

@@ -25,7 +25,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            ndk { abiFilters.clear() }
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
         }
     }
 
@@ -34,16 +36,26 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions { jvmTarget = "17" }
-    
-    buildFeatures { viewBinding = false }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    buildFeatures {
+        viewBinding = false
+    }
 
     packaging {
         resources {
             excludes += setOf(
-                "META-INF/*.kotlin_module", "META-INF/*.version", 
-                "DebugProbesKt.bin", "META-INF/DEPENDENCIES", 
-                "META-INF/LICENSE*", "META-INF/NOTICE*"
+                "META-INF/*.kotlin_module",
+                "META-INF/*.version",
+                "DebugProbesKt.bin",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "**.kotlin_builtins"
             )
         }
     }
