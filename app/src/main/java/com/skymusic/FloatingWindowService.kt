@@ -114,7 +114,7 @@ class FloatingWindowService : Service() {
         compactList = prefs.getBoolean("compact_list", true)
         syncWebTheme = prefs.getBoolean("sync_web_theme", false)
         themeHue = prefs.getFloat("theme_hue", 220f)
-        themeAccent = prefs.getString("theme_accent", "#007AFF") ?: "#007AFF" // 优先读取保存的蓝色值
+        themeAccent = prefs.getString("theme_accent", "#007AFF") ?: "#007AFF" // 优先读取保存蓝色值
 
         prefs.all.forEach { (k, v) ->
             if (k.startsWith("song_mode_") && v is Int) songKeyModeMap[k.removePrefix("song_mode_")] = v
