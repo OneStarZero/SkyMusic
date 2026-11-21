@@ -59,10 +59,10 @@ class FloatingWindowService : Service() {
     private lateinit var tvSpeed: TextView
     private lateinit var scrollView: ScrollView
 
-    // 用于实时调节的视图引用
     private var panelRootView: LinearLayout? = null
     private var playerRootView: LinearLayout? = null
-    private val dynamicTextViews = mutableListOf<Pair<TextView, Float>>() // (View, baseSp)
+    private val dynamicTextViews = mutableListOf<Pair<TextView, Float>>()
+    private val dynamicCards = mutableListOf<LinearLayout>()
 
     private val handler = Handler(Looper.getMainLooper())
     private var playRunnable: Runnable? = null
@@ -94,18 +94,19 @@ class FloatingWindowService : Service() {
     private var clickToleranceMs = 25L
     private var ballSize = 60
     private var panelAlpha = 0.60f
-    private var fontSizeSp = 14f // 基准字体大小 (10sp ~ 22sp)
+    private var fontSizeSp = 14f
     private var autoBackToList = true
     private var compactList = true
     private val songKeyModeMap = mutableMapOf<String, Int>()
 
-    // 主题基础色
-    private var themeAccent = "#007AFF"
+    // 现代暗色主题色板
+    private var themeAccent = "#38BDF8"
     private var themeBgPanel = "#990B1120"
-    private var themeTopBar = "#1E293B"
-    private var themeCard = "#1E293B"
+    private var themeTopBar = "#131C2E"
+    private var themeCard = "#172238"
+    private var themeCardStroke = "#293B5C"
     private var themeTextMain = "#F8FAFC"
-    private var themeTextSoft = "#CBD5E1"
+    private var themeTextSoft = "#94A3B8"
 
     override fun onCreate() {
         super.onCreate()
@@ -122,7 +123,7 @@ class FloatingWindowService : Service() {
         fontSizeSp = prefs.getFloat("font_size_sp", 14f).coerceIn(10f, 22f)
         autoBackToList = prefs.getBoolean("auto_back_list", true)
         compactList = prefs.getBoolean("compact_list", true)
-        themeAccent = prefs.getString("theme_accent", "#007AFF") ?: "#007AFF"
+        themeAccent = prefs.getString("theme_accent", "#38BDF8") ?: "#38BDF8"
 
         prefs.all.forEach { (k, v) ->
             if (k.startsWith("song_mode_") && v is Int) {
@@ -131,41 +132,75 @@ class FloatingWindowService : Service() {
         }
 
         updatePanelAlphaColor(panelAlpha)
-        playBgDrawable.setColor(Color.parseColor("#34D399"))
-        pauseBgDrawable.setColor(Color.parseColor("#F87171"))
+        playBgDrawable.setColor(Color.parseColor("#22C55E"))
+        pauseBgDrawable.setColor(Color.parseColor("#EF4444"))
 
         loadKeyPositions()
         File(appSheetsPath).mkdirs()
         File(localSheetsPath).mkdirs()
     }
 
+    private fun fontScaleFactor(): Float = (fontSizeSp / 14f).coerceIn(0.72f, 1.55f)
+
+    private fun cardBgDrawable(cornerDp: Float = 12f): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = cornerDp * density
+        setColor(c(themeCard))
+        setStroke((1f * density).toInt().coerceAtLeast(1), Color.parseColor(themeCardStroke))
+    }
+
+    private fun applyCardCompactMetrics(card: LinearLayout, isSongCard: Boolean = false) {
+        val scale = fontScaleFactor()
+        val padH = ((if (isSongCard) 11f else 12f) * scale * density).toInt().coerceAtLeast((7 * density).toInt())
+        val padV = ((if (isSongCard) 9f else 8.5f) * scale * density).toInt().coerceAtLeast((5 * density).toInt())
+        val marginBottom = (6.5f * scale * density).toInt().coerceAtLeast((4 * density).toInt())
+
+        card.setPadding(padH, padV, padH, padV)
+        (card.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+            lp.bottomMargin = marginBottom
+            card.layoutParams = lp
+        }
+    }
+
     private fun updatePanelAlphaColor(alpha: Float) {
         panelAlpha = alpha.coerceIn(0.20f, 1.0f)
-        val a = (panelAlpha * 255).toInt().coerceIn(50, 255)
-        themeBgPanel = String.format("#%02X0B1120", a)
-        val bgColor = c(themeBgPanel, "#990B1120")
+        val a = (panelAlpha * 255).toInt().coerceIn(45, 255)
+        themeBgPanel = String.format("#%02X0A101D", a)
+        val bgColor = c(themeBgPanel, "#990A101D")
         panelRootView?.setBackgroundColor(bgColor)
         playerRootView?.setBackgroundColor(bgColor)
     }
 
     private fun registerTextSize(tv: TextView, ratioToBase: Float) {
         dynamicTextViews.add(tv to ratioToBase)
-        tv.textSize = (fontSizeSp * ratioToBase).coerceIn(8f, 32f)
+        tv.textSize = (fontSizeSp * ratioToBase).coerceIn(8.5f, 32f)
     }
 
     private fun applyFontSizeRealtime(newBaseSp: Float) {
         fontSizeSp = newBaseSp.coerceIn(10f, 22f)
-        val iterator = dynamicTextViews.iterator()
-        while (iterator.hasNext()) {
-            val (tv, ratio) = iterator.next()
-            if (tv.parent == null && tv !== titleText) {
-                iterator.remove()
+        val itText = dynamicTextViews.iterator()
+        while (itText.hasNext()) {
+            val (tv, ratio) = itText.next()
+            if (tv.parent == null && (!::titleText.isInitialized || tv !== titleText)) {
+                itText.remove()
             } else {
-                tv.textSize = (fontSizeSp * ratio).coerceIn(8f, 32f)
+                tv.textSize = (fontSizeSp * ratio).coerceIn(8.5f, 32f)
             }
         }
         if (::titleText.isInitialized) {
-            titleText.textSize = (fontSizeSp * 1.0f).coerceIn(10f, 26f)
+            titleText.textSize = (fontSizeSp * 1.05f).coerceIn(11f, 26f)
+        }
+        val itCard = dynamicCards.iterator()
+        while (itCard.hasNext()) {
+            val card = itCard.next()
+            if (card.parent == null) {
+                itCard.remove()
+            } else {
+                applyCardCompactMetrics(card, isSongCard = false)
+            }
+        }
+        if (this::listContainer.isInitialized) {
+            listContainer.requestLayout()
         }
     }
 
@@ -215,13 +250,13 @@ class FloatingWindowService : Service() {
             val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
             panelParams = WindowManager.LayoutParams(
-                (dm.widthPixels * if (land) 0.35f else 0.55f).toInt(),
-                (dm.heightPixels * if (land) 0.50f else 0.45f).toInt(),
+                (dm.widthPixels * if (land) 0.36f else 0.56f).toInt(),
+                (dm.heightPixels * if (land) 0.56f else 0.48f).toInt(),
                 type, flags, PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                x = (dm.widthPixels * 0.075).toInt()
-                y = (dm.heightPixels * 0.2).toInt()
+                x = (dm.widthPixels * 0.06f).toInt()
+                y = (dm.heightPixels * 0.18f).toInt()
             }
 
             ballParams = WindowManager.LayoutParams(
@@ -232,7 +267,7 @@ class FloatingWindowService : Service() {
                 y = 200
             }
 
-            val pw = (dm.widthPixels * if (land) 0.30f else 0.45f).toInt()
+            val pw = (dm.widthPixels * if (land) 0.32f else 0.46f).toInt()
             playerParams = WindowManager.LayoutParams(
                 pw, WindowManager.LayoutParams.WRAP_CONTENT, type, flags, PixelFormat.TRANSLUCENT
             ).apply {
@@ -294,7 +329,11 @@ class FloatingWindowService : Service() {
             setTextColor(c("#FDE047")); setShadowLayer(8f, 0f, 0f, c("#EAB308"))
         }
         val wrap = FrameLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#55FFFFFF"))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#66131C2E"))
+                setStroke((1.5f * density).toInt(), c(themeAccent))
+            }
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
                     outline.setOval(0, 0, view.width, view.height)
@@ -343,88 +382,119 @@ class FloatingWindowService : Service() {
         isMiniMode = false; isPlayerMode = false
         playerRootView = null
         dynamicTextViews.clear()
+        dynamicCards.clear()
         floatView.removeAllViews()
 
         updatePanelAlphaColor(panelAlpha)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(c(themeBgPanel, "#990B1120"))
+            setBackgroundColor(c(themeBgPanel, "#990A101D"))
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, 20f)
+                    outline.setRoundRect(0, 0, view.width, view.height, 18f * density)
                 }
             }
             clipToOutline = true; layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
         panelRootView = root
 
+        // 顶部栏
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(14, 14, 14, 14); setBackgroundColor(c(themeTopBar, "#1E293B"))
+            setPadding((14 * density).toInt(), (10 * density).toInt(), (12 * density).toInt(), (10 * density).toInt())
+            setBackgroundColor(c(themeTopBar, "#131C2E"))
         }
         titleText = TextView(this).apply {
             text = when (page) { 0 -> "本地曲库"; 1 -> "App 发送"; else -> "设置" }
             setTextColor(c(themeTextMain))
+            setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
-        registerTextSize(titleText, 1.0f)
+        registerTextSize(titleText, 1.05f)
 
-        val btnRefresh = TextView(this).apply {
-            text = "↻"; setTextColor(c(themeAccent)); textSize = 18f
-            setPadding(12, 0, 12, 0)
-            setOnClickListener {
-                captureCurrentScrollY()
-                if (currentPage == 0) cachedSongList = null
-                showFullPanel(currentPage, resetScroll = false)
+        fun topActionBtn(icon: String, tintHex: String, onClick: () -> Unit) = TextView(this).apply {
+            text = icon
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setTextColor(c(tintHex))
+            val sz = (28 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(sz, sz).apply { leftMargin = (6 * density).toInt() }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#22FFFFFF"))
             }
+            setOnClickListener { onClick() }
         }
-        val btnClose = TextView(this).apply {
-            text = "✕"; setTextColor(c(themeTextMain)); textSize = 18f
-            setPadding(8, 0, 4, 0)
-            setOnClickListener {
-                captureCurrentScrollY()
-                showMiniBall()
-            }
+
+        val btnRefresh = topActionBtn("↻", themeAccent) {
+            captureCurrentScrollY()
+            if (currentPage == 0) cachedSongList = null
+            showFullPanel(currentPage, resetScroll = false)
+        }
+        val btnClose = topActionBtn("✕", themeTextMain) {
+            captureCurrentScrollY()
+            showMiniBall()
         }
         topBar.addView(titleText); topBar.addView(btnRefresh); topBar.addView(btnClose)
         root.addView(topBar); enableDrag(topBar, panelParams)
 
         root.addView(View(this).apply {
-            setBackgroundColor(Color.parseColor("#33FFFFFF"))
+            setBackgroundColor(Color.parseColor("#1FFFFFFF"))
             layoutParams = LinearLayout.LayoutParams(-1, 1)
         })
 
+        // 内容滚动区
         scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
             isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
         }
         listContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(10, 8, 10, 8)
+            orientation = LinearLayout.VERTICAL
+            setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (10 * density).toInt())
         }
         scrollView.addView(listContainer); root.addView(scrollView)
 
+        // 底部现代化导航栏
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Color.parseColor("#CC0B1120"))
-            layoutParams = LinearLayout.LayoutParams(-1, (46 * density).toInt())
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.parseColor("#E60B1120"))
+            setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(-1, (48 * density).toInt())
         }
 
-        fun nav(icon: String, label: String, targetPage: Int) = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setOnClickListener {
-                showFullPanel(targetPage, resetScroll = true)
+        fun nav(icon: String, label: String, targetPage: Int): LinearLayout {
+            val active = currentPage == targetPage
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, -1, 1f).apply {
+                    setMargins((3 * density).toInt(), (2 * density).toInt(), (3 * density).toInt(), (2 * density).toInt())
+                }
+                if (active) {
+                    background = GradientDrawable().apply {
+                        cornerRadius = 10f * density
+                        setColor(Color.parseColor("#2638BDF8"))
+                    }
+                }
+                setOnClickListener { showFullPanel(targetPage, resetScroll = true) }
+                addView(TextView(this@FloatingWindowService).apply {
+                    text = icon; textSize = 16f
+                    setTextColor(if (active) c(themeAccent) else c(themeTextSoft))
+                    gravity = Gravity.CENTER
+                })
+                addView(TextView(this@FloatingWindowService).apply {
+                    text = label; textSize = 10f
+                    if (active) setTypeface(null, Typeface.BOLD)
+                    setTextColor(if (active) c(themeAccent) else c(themeTextSoft))
+                    gravity = Gravity.CENTER
+                })
             }
-            addView(TextView(this@FloatingWindowService).apply {
-                text = icon; textSize = 18f; setTextColor(c(themeTextMain)); gravity = Gravity.CENTER
-            })
-            addView(TextView(this@FloatingWindowService).apply {
-                text = label; setTextColor(c(themeTextSoft)); textSize = 10f; gravity = Gravity.CENTER
-            })
         }
-        bottom.addView(nav("◱", "本地", 0), LinearLayout.LayoutParams(0, -1, 1f))
-        bottom.addView(nav("☁", "发送", 1), LinearLayout.LayoutParams(0, -1, 1f))
-        bottom.addView(nav("⚙", "设置", 2), LinearLayout.LayoutParams(0, -1, 1f))
+        bottom.addView(nav("◱", "本地", 0))
+        bottom.addView(nav("☁", "发送", 1))
+        bottom.addView(nav("⚙", "设置", 2))
         root.addView(bottom)
 
         floatView.addView(root); windowManager.updateViewLayout(floatView, panelParams)
@@ -477,7 +547,7 @@ class FloatingWindowService : Service() {
                     val emptyTv = TextView(this).apply {
                         text = "暂无发送的谱面"; setTextColor(c(themeTextSoft)); setPadding(12, 12, 12, 12)
                     }
-                    registerTextSize(emptyTv, 0.86f)
+                    registerTextSize(emptyTv, 0.88f)
                     listContainer.addView(emptyTv)
                 } else {
                     for (f in files) {
@@ -497,41 +567,70 @@ class FloatingWindowService : Service() {
 
     private fun showSettingsPage() {
         val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
+        val scale = fontScaleFactor()
 
         fun sectionTitle(t: String) = TextView(this).apply {
-            text = t; setTextColor(c(themeAccent))
-            setTypeface(null, Typeface.BOLD); setPadding(6, 14, 6, 6)
-            registerTextSize(this, 0.86f)
+            text = t
+            setTextColor(c(themeAccent))
+            setTypeface(null, Typeface.BOLD)
+            val topPad = (10f * scale * density).toInt().coerceAtLeast((6 * density).toInt())
+            val botPad = (4f * scale * density).toInt().coerceAtLeast((3 * density).toInt())
+            setPadding((4 * density).toInt(), topPad, (4 * density).toInt(), botPad)
+            registerTextSize(this, 0.84f)
         }
 
-        fun cardContainer(): LinearLayout = LinearLayout(this).apply {
+        fun createAdaptiveCard(): LinearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(12, 12, 12, 12)
-            setBackgroundColor(c(themeCard))
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, 14f)
-                }
-            }
-            clipToOutline = true
+            background = cardBgDrawable(12f)
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+            applyCardCompactMetrics(this, isSongCard = false)
+            dynamicCards.add(this)
         }
 
-        fun item(t: String, s: String, click: () -> Unit) = cardContainer().apply {
+        fun badgePill(textStr: String): TextView = TextView(this).apply {
+            text = textStr
+            setTextColor(c(themeAccent))
+            setTypeface(null, Typeface.BOLD)
+            background = GradientDrawable().apply {
+                cornerRadius = 8f * density
+                setColor(Color.parseColor("#2438BDF8"))
+            }
+            setPadding((7 * density).toInt(), (2 * density).toInt(), (7 * density).toInt(), (2 * density).toInt())
+            registerTextSize(this, 0.78f)
+        }
+
+        fun item(t: String, s: String, badge: String? = null, click: () -> Unit) = createAdaptiveCard().apply {
             setOnClickListener {
                 captureCurrentScrollY()
                 click()
             }
+            val topRow = LinearLayout(this@FloatingWindowService).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
             val tvTitle = TextView(this@FloatingWindowService).apply {
-                text = t; setTextColor(c(themeTextMain))
+                text = t
+                setTextColor(c(themeTextMain))
+                setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             }
-            val tvSub = TextView(this@FloatingWindowService).apply {
-                text = s; setTextColor(c(themeTextSoft)); setPadding(0, 3, 0, 0)
+            registerTextSize(tvTitle, 0.94f)
+            topRow.addView(tvTitle)
+
+            if (badge != null) {
+                topRow.addView(badgePill(badge))
             }
-            registerTextSize(tvTitle, 0.93f)
-            registerTextSize(tvSub, 0.79f)
-            addView(tvTitle)
-            addView(tvSub)
+            addView(topRow)
+
+            if (s.isNotEmpty()) {
+                val tvSub = TextView(this@FloatingWindowService).apply {
+                    text = s
+                    setTextColor(c(themeTextSoft))
+                    setPadding(0, (2f * scale * density).toInt().coerceAtLeast(1), 0, 0)
+                }
+                registerTextSize(tvSub, 0.78f)
+                addView(tvSub)
+            }
         }
 
         fun sliderCard(
@@ -541,20 +640,19 @@ class FloatingWindowService : Service() {
             max: Int,
             onDrag: (Int, TextView) -> Unit,
             onCommit: (Int, TextView) -> Unit
-        ) = cardContainer().apply {
+        ) = createAdaptiveCard().apply {
             val header = LinearLayout(this@FloatingWindowService).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             val tvLabel = TextView(this@FloatingWindowService).apply {
-                text = label; setTextColor(c(themeTextMain))
+                text = label
+                setTextColor(c(themeTextMain))
+                setTypeface(null, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             }
-            val tvValue = TextView(this@FloatingWindowService).apply {
-                text = initialText; setTextColor(c(themeAccent))
-            }
-            registerTextSize(tvLabel, 0.93f)
-            registerTextSize(tvValue, 0.86f)
+            val tvValue = badgePill(initialText)
+            registerTextSize(tvLabel, 0.94f)
             header.addView(tvLabel)
             header.addView(tvValue)
             addView(header)
@@ -562,8 +660,10 @@ class FloatingWindowService : Service() {
             val sb = SeekBar(this@FloatingWindowService).apply {
                 this.max = max
                 this.progress = progress.coerceIn(0, max)
-                layoutParams = LinearLayout.LayoutParams(-1, (26 * density).toInt()).apply {
-                    topMargin = (6 * density).toInt()
+                val sbHeight = (22f * scale * density).toInt().coerceAtLeast((18 * density).toInt())
+                val sbTopMargin = (4f * scale * density).toInt().coerceAtLeast((3 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, sbHeight).apply {
+                    topMargin = sbTopMargin
                 }
                 setOnTouchListener { v, event ->
                     if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_MOVE) {
@@ -594,15 +694,15 @@ class FloatingWindowService : Service() {
             addView(sb)
         }
 
-        // 1. 键位与校准（保留）
+        // 1. 键位与校准
         listContainer.addView(sectionTitle("🎹 键位与校准"))
-        listContainer.addView(item("15 键校准", "标准 5×3 网格") {
+        listContainer.addView(item("15 键校准", "标准 5×3 网格", "5×3") {
             if (checkAccessibility()) startCalibration(15)
         })
-        listContainer.addView(item("9 键校准", "标准 3×3 网格") {
+        listContainer.addView(item("9 键校准", "标准 3×3 网格", "3×3") {
             if (checkAccessibility()) startCalibration(9)
         })
-        listContainer.addView(item("默认键位", "当前 ${keyMode} 键") {
+        listContainer.addView(item("默认键位", "点击切换默认键位模式", "${keyMode}键") {
             keyMode = if (keyMode == 15) 9 else 15
             prefs.edit().putInt("key_mode", keyMode).apply()
             loadKeyPositions()
@@ -611,7 +711,7 @@ class FloatingWindowService : Service() {
 
         // 2. 演奏
         listContainer.addView(sectionTitle("🎵 演奏"))
-        listContainer.addView(item("默认倍速", String.format(Locale.getDefault(), "%.1fx", defaultSpeed)) {
+        listContainer.addView(item("默认倍速", "点击步进调节 (0.5x ~ 3.0x)", String.format(Locale.getDefault(), "%.1fx", defaultSpeed)) {
             defaultSpeed += 0.1f
             if (defaultSpeed > 3f) defaultSpeed = 0.5f
             defaultSpeed = Math.round(defaultSpeed * 10f) / 10f
@@ -619,20 +719,19 @@ class FloatingWindowService : Service() {
             prefs.edit().putFloat("default_speed", defaultSpeed).apply()
             refreshSettingsKeepScroll()
         })
-        listContainer.addView(item("点击容差", "${clickToleranceMs}ms") {
+        listContainer.addView(item("点击容差", "合并同时间附近音符窗口", "${clickToleranceMs}ms") {
             clickToleranceMs = when (clickToleranceMs) { 15L -> 25L; 25L -> 40L; else -> 15L }
             prefs.edit().putLong("click_tolerance", clickToleranceMs).apply()
             refreshSettingsKeepScroll()
         })
-        listContainer.addView(item("播完回列表", if (autoBackToList) "开" else "关") {
+        listContainer.addView(item("播完回列表", "演奏结束后自动返回列表", if (autoBackToList) "已开启" else "已关闭") {
             autoBackToList = !autoBackToList
             prefs.edit().putBoolean("auto_back_list", autoBackToList).apply()
             refreshSettingsKeepScroll()
         })
 
-        // 3. 主题设置（精简：仅保留实时字体大小滑动条 & 实时悬浮窗透明度滑动条）
+        // 3. 主题设置（仅保留实时字体大小滑块与实时悬浮窗透明度滑块）
         listContainer.addView(sectionTitle("🎨 主题"))
-        // 字体大小范围：10sp ~ 22sp，步进 1sp (max = 12)
         val fontProgress = (fontSizeSp - 10f).toInt().coerceIn(0, 12)
         listContainer.addView(sliderCard(
             label = "字体大小",
@@ -649,10 +748,10 @@ class FloatingWindowService : Service() {
                 tvVal.text = "${targetSp.toInt()}sp"
                 applyFontSizeRealtime(targetSp)
                 prefs.edit().putFloat("font_size_sp", fontSizeSp).apply()
+                refreshSettingsKeepScroll()
             }
         ))
 
-        // 悬浮窗透明度范围：20% ~ 100%，步进 1% (max = 80)
         val alphaPercent = (panelAlpha * 100f).toInt().coerceIn(20, 100)
         listContainer.addView(sliderCard(
             label = "悬浮窗透明度",
@@ -672,16 +771,16 @@ class FloatingWindowService : Service() {
             }
         ))
 
-        // 4. 权限与清理（保留）
+        // 4. 权限与更多
         listContainer.addView(sectionTitle("🔐 权限与更多"))
-        listContainer.addView(item("清除单曲键位覆盖", "全部恢复全局键位") {
+        listContainer.addView(item("清除单曲键位覆盖", "全部恢复全局默认键位", "重置") {
             val ed = prefs.edit()
             songKeyModeMap.keys.toList().forEach { ed.remove("song_mode_$it") }
             ed.apply()
             songKeyModeMap.clear()
             Toast.makeText(this, "已清除", Toast.LENGTH_SHORT).show()
         })
-        listContainer.addView(item("权限入口", "悬浮窗 / 无障碍") {
+        listContainer.addView(item("权限入口", "悬浮窗 / 无障碍服务授权", "前往") {
             val dialog = AlertDialog.Builder(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault_Dialog_Alert))
                 .setTitle("权限")
                 .setItems(arrayOf("悬浮窗", "无障碍")) { _, w ->
@@ -741,15 +840,9 @@ class FloatingWindowService : Service() {
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding((10 * density).toInt(), (10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt())
-            setBackgroundColor(c(themeCard))
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, 14f)
-                }
-            }
-            clipToOutline = true
+            background = cardBgDrawable(12f)
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+            applyCardCompactMetrics(this, isSongCard = true)
         }
 
         val textCol = LinearLayout(this).apply {
@@ -767,28 +860,28 @@ class FloatingWindowService : Service() {
             if (idx >= 0) sp.setSpan(ForegroundColorSpan(c(themeAccent)), idx, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text = sp
         }
-        registerTextSize(title, 1.0f)
+        registerTextSize(title, 0.98f)
         textCol.addView(title)
 
         if (compactList) {
             val subTv = TextView(this).apply {
                 text = "$author  ·  $duration  ·  ${songMode}键"
                 setTextColor(c(themeTextSoft)); setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END; setPadding(0, (3 * density).toInt(), 0, 0)
+                ellipsize = TextUtils.TruncateAt.END; setPadding(0, (2 * density).toInt(), 0, 0)
             }
-            registerTextSize(subTv, 0.79f)
+            registerTextSize(subTv, 0.78f)
             textCol.addView(subTv)
         } else {
             val sub1 = TextView(this).apply {
                 text = "$author  ·  $modelName"; setTextColor(c(themeTextSoft))
-                setSingleLine(true); setPadding(0, (3 * density).toInt(), 0, 0)
+                setSingleLine(true); setPadding(0, (2 * density).toInt(), 0, 0)
             }
             val sub2 = TextView(this).apply {
                 text = "音符$notes  ·  BPM$bpm  ·  $duration  ·  ${songMode}键"
                 setTextColor(Color.parseColor("#94A3B8")); setSingleLine(true)
             }
-            registerTextSize(sub1, 0.79f)
-            registerTextSize(sub2, 0.71f)
+            registerTextSize(sub1, 0.78f)
+            registerTextSize(sub2, 0.70f)
             textCol.addView(sub1)
             textCol.addView(sub2)
         }
@@ -797,9 +890,14 @@ class FloatingWindowService : Service() {
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
 
         fun iconBtn(t: String, color: Int? = null, click: () -> Unit) = TextView(this).apply {
-            text = t; textSize = 16f
-            setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
+            text = t; textSize = 14f; gravity = Gravity.CENTER
+            val w = (26 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(w, w).apply { leftMargin = (3 * density).toInt() }
             if (color != null) setTextColor(color) else setTextColor(c(themeTextSoft))
+            background = GradientDrawable().apply {
+                cornerRadius = 7f * density
+                setColor(Color.parseColor("#18FFFFFF"))
+            }
             setOnClickListener { captureCurrentScrollY(); click() }
         }
 
@@ -810,7 +908,7 @@ class FloatingWindowService : Service() {
             getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE).edit().putInt("song_mode_$pathKey", nm).apply()
             showFullPanel(currentPage, resetScroll = false)
         })
-        btns.addView(iconBtn("✕") {
+        btns.addView(iconBtn("✕", c("#F87171")) {
             if (file == null) {
                 Toast.makeText(this, "内存谱面", Toast.LENGTH_SHORT).show()
                 return@iconBtn
@@ -834,7 +932,7 @@ class FloatingWindowService : Service() {
             )
             d.show()
         })
-        btns.addView(iconBtn("▷", c("#34D399")) { onClick() })
+        btns.addView(iconBtn("▷", c("#4ADE80")) { onClick() })
 
         card.addView(btns)
         listContainer.addView(card)
@@ -860,21 +958,22 @@ class FloatingWindowService : Service() {
         isMiniMode = false; isPlayerMode = true
         panelRootView = null
         dynamicTextViews.clear()
+        dynamicCards.clear()
         floatView.removeAllViews()
 
         val dm = resources.displayMetrics
         val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        playerParams.width = (dm.widthPixels * if (land) 0.30f else 0.45f).toInt()
+        playerParams.width = (dm.widthPixels * if (land) 0.32f else 0.46f).toInt()
 
         updatePanelAlphaColor(panelAlpha)
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(c(themeBgPanel, "#990B1120"))
+            setBackgroundColor(c(themeBgPanel, "#990A101D"))
             setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, 16f)
+                    outline.setRoundRect(0, 0, view.width, view.height, 16f * density)
                 }
             }
             clipToOutline = true; layoutParams = FrameLayout.LayoutParams(-1, -1)
@@ -887,20 +986,20 @@ class FloatingWindowService : Service() {
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1
             isSelected = true; isFocusable = true; isFocusableInTouchMode = true
         }
-        registerTextSize(title, 0.86f)
+        registerTextSize(title, 0.88f)
         layout.addView(title)
 
         val authorTv = TextView(this).apply {
             text = "$currentAuthor  ·  $currentDuration"
             setTextColor(c(themeTextSoft)); setPadding(0, 2, 0, 4)
         }
-        registerTextSize(authorTv, 0.64f)
+        registerTextSize(authorTv, 0.68f)
         layout.addView(authorTv)
 
         tvStatus = TextView(this).apply {
             setTextColor(c(themeAccent)); setPadding(0, 0, 0, 4)
         }
-        registerTextSize(tvStatus, 0.64f)
+        registerTextSize(tvStatus, 0.68f)
         layout.addView(tvStatus)
 
         seekBar = SeekBar(this).apply {
@@ -932,7 +1031,7 @@ class FloatingWindowService : Service() {
 
         val speed = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 6f }
+            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 6f * density }
             layoutParams = LinearLayout.LayoutParams(0, -1, 1.5f).apply { leftMargin = 6; rightMargin = 6 }
         }
         speed.addView(Button(this).apply {
@@ -1214,7 +1313,7 @@ class FloatingWindowService : Service() {
         val btnSave = Button(this).apply {
             text = "✔ 保存${mode}键"; setTextColor(Color.WHITE); textSize = 12f
             setPadding((18 * density).toInt(), (8 * density).toInt(), (18 * density).toInt(), (8 * density).toInt())
-            background = GradientDrawable().apply { setColor(c("#34D399")); cornerRadius = 8f }
+            background = GradientDrawable().apply { setColor(c("#22C55E")); cornerRadius = 8f * density }
             setOnClickListener {
                 saveKeyPositions(mode); keyMode = mode
                 prefs.edit().putInt("key_mode", mode).apply()
@@ -1225,7 +1324,7 @@ class FloatingWindowService : Service() {
         val btnCancel = Button(this).apply {
             text = "✖ 取消"; setTextColor(Color.WHITE); textSize = 12f
             setPadding((18 * density).toInt(), (8 * density).toInt(), (18 * density).toInt(), (8 * density).toInt())
-            background = GradientDrawable().apply { setColor(c("#F87171")); cornerRadius = 8f }
+            background = GradientDrawable().apply { setColor(c("#EF4444")); cornerRadius = 8f * density }
             setOnClickListener { loadKeyPositions(); exitCalibration() }
         }
         calibrationBtnContainer = LinearLayout(this).apply {
