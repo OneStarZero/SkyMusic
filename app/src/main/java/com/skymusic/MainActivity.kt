@@ -10,12 +10,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.webkit.*
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -23,6 +23,12 @@ import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private var webViewInstance: WebView? = null
+    private var density = 1f
+
+    private var btnOverlay: TextView? = null
+    private var btnAccessibility: TextView? = null
+    private var btnRefreshBg: TextView? = null
+    private var btnFloatBall: TextView? = null
 
     private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
@@ -35,19 +41,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val storagePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        density = resources.displayMetrics.density
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(
+            val readOk = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            val writeOk = ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            if (!readOk || !writeOk) {
+                storagePermissionLauncher.launch(
                     arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 )
             }
         }
 
-        val rootLayout = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0B1120")) }
+        val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
+        val bgTop = prefs.getString("theme_bg_top", "#0B1120") ?: "#0B1120"
+        val accent = prefs.getString("theme_accent", "#7DD3FC") ?: "#7DD3FC"
+
+        val rootLayout = FrameLayout(this).apply {
+            setBackgroundColor(safeColor(bgTop, "#0B1120"))
+        }
 
         webViewInstance = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
@@ -68,67 +85,104 @@ class MainActivity : AppCompatActivity() {
 
         rootLayout.addView(webViewInstance, FrameLayout.LayoutParams(-1, -1))
 
-        // 🌟 优化：把设置按钮做成半透明玻璃质感，去掉突兀的黑底
-        val btnSettings = TextView(this).apply {
-            text = "⚙"
-            textSize = 20f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(24, 16, 24, 16)
+        // 与星空 WebView 融合的 4 按钮顶部栏
+        val barContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(5), dp(6), dp(5))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                setColor(Color.parseColor("#550B1120")) // 半透明深蓝
-                cornerRadius = 20f
-                setStroke(2, Color.parseColor("#33FFFFFF"))
+                setColor(Color.parseColor("#880B1120"))
+                cornerRadius = dp(18).toFloat()
+                setStroke(dp(1).coerceAtLeast(1), Color.parseColor("#38FFFFFF"))
             }
-            setOnClickListener { showSettingsDialog() }
         }
-        
-        rootLayout.addView(btnSettings, FrameLayout.LayoutParams(-2, -2).apply {
+
+        fun createActionBtn(label: String, strokeHex: String = "#33FFFFFF", onClick: () -> Unit): TextView {
+            return TextView(this).apply {
+                text = label
+                textSize = 11.5f
+                setTextColor(Color.parseColor("#F8FAFC"))
+                gravity = Gravity.CENTER
+                setSingleLine(true)
+                ellipsize = TextUtils.TruncateAt.MARQUEE
+                marqueeRepeatLimit = -1
+                isSelected = true
+                setPadding(dp(9), dp(5), dp(9), dp(5))
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(Color.parseColor("#441E293B"))
+                    cornerRadius = dp(12).toFloat()
+                    setStroke(dp(1).coerceAtLeast(1), safeColor(strokeHex, "#33FFFFFF"))
+                }
+                setOnClickListener { onClick() }
+            }
+        }
+
+        btnOverlay = createActionBtn("开启悬浮窗") {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        }
+        btnAccessibility = createActionBtn("无障碍权限") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        btnRefreshBg = createActionBtn("刷新背景") {
+            webViewInstance?.evaluateJavascript("if (window.refreshRandomBackground) window.refreshRandomBackground();", null)
+            Toast.makeText(this, "✨ 正在刷新星空背景", Toast.LENGTH_SHORT).show()
+        }
+        btnFloatBall = createActionBtn("开启悬浮球", accent) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "请先开启悬浮窗权限", Toast.LENGTH_SHORT).show()
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            } else {
+                startService(Intent(this, FloatingWindowService::class.java))
+                Toast.makeText(this, "🚀 悬浮球已启动", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val gap = dp(5)
+        barContainer.addView(btnOverlay)
+        barContainer.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(gap, 1) })
+        barContainer.addView(btnAccessibility)
+        barContainer.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(gap, 1) })
+        barContainer.addView(btnRefreshBg)
+        barContainer.addView(Space(this).apply { layoutParams = LinearLayout.LayoutParams(gap, 1) })
+        barContainer.addView(btnFloatBall)
+
+        rootLayout.addView(barContainer, FrameLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP or Gravity.END
-            topMargin = 60
-            rightMargin = 20
+            topMargin = dp(26)
+            rightMargin = dp(10)
+            leftMargin = dp(10)
         })
+
         setContentView(rootLayout)
+        refreshPermissionIndicators()
     }
 
-    private fun showSettingsDialog() {
-        val options = arrayOf(
-            "🌌 刷新随机背景 (更换星空主题)",
-            "🚀 启动悬浮球",
-            "🔑 开启悬浮窗权限",
-            "♿ 开启无障碍服务",
-            "ℹ️ 关于 SkyMusic 0.0.7"
-        )
-        
-        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("SkyMusic 设置")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> {
-                        // 🌟 调用 JS 刷新背景
-                        webViewInstance?.evaluateJavascript("if (window.refreshRandomBackground) window.refreshRandomBackground();", null)
-                        Toast.makeText(this, "✨ 正在生成新的星空...", Toast.LENGTH_SHORT).show()
-                    }
-                    1 -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                            Toast.makeText(this, "请先开启悬浮窗权限！", Toast.LENGTH_SHORT).show()
-                        } else {
-                            startService(Intent(this, FloatingWindowService::class.java))
-                            Toast.makeText(this, "悬浮球已启动", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    2 -> startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-                    3 -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    4 -> {
-                        AlertDialog.Builder(this)
-                            .setTitle("关于")
-                            .setMessage("SkyMusic 0.0.7\n\n光遇 MIDI 智能转谱工具\n\n愿你在这片星空下奏响最美的旋律。")
-                            .setPositiveButton("确定", null)
-                            .show()
-                    }
-                }
-            }.show()
+    override fun onResume() {
+        super.onResume()
+        refreshPermissionIndicators()
+    }
+
+    private fun refreshPermissionIndicators() {
+        val hasOverlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)
+        val hasA11y = SkyAccessibilityService.instance != null
+
+        btnOverlay?.text = if (hasOverlay) "悬浮窗✓" else "开启悬浮窗"
+        btnOverlay?.setTextColor(if (hasOverlay) Color.parseColor("#86EFAC") else Color.parseColor("#F8FAFC"))
+
+        btnAccessibility?.text = if (hasA11y) "无障碍✓" else "无障碍权限"
+        btnAccessibility?.setTextColor(if (hasA11y) Color.parseColor("#86EFAC") else Color.parseColor("#F8FAFC"))
+    }
+
+    private fun dp(value: Int): Int = (value * density).toInt()
+
+    private fun safeColor(hex: String, fallback: String): Int {
+        return try {
+            Color.parseColor(hex)
+        } catch (_: Exception) {
+            Color.parseColor(fallback)
+        }
     }
 
     inner class WebAppInterface {
@@ -183,29 +237,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleSaveLocal(payloadStr: String) {
-    try {
-        val payload = JSONObject(payloadStr)
-        val name = payload.optString("name", "未命名")
-        val author = payload.optString("author", "未知作者")
-        val fullJson = payload.optString("fullJson", payloadStr)
-        val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
-        if (!folder.exists()) folder.mkdirs()
-        
-        // 🌟 将模型名从 name 中提取出来，或者从 payload 提取
-        val baseName = if (name.contains(" || ")) name.substringBefore(" || ").trim() else name
-        val modelName = if (name.contains(" || ")) name.substringAfter(" || ").trim() else payload.optString("model", "")
-        
-        // 🌟 严格按照 歌曲名-作者 || 模型名.txt 命名
-        val fileName = if (modelName.isNotBlank()) {
-            "$baseName-$author || $modelName.txt"
-        } else {
-            "$baseName-$author.txt"
-        }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        
-        File(folder, fileName).writeText(fullJson, Charsets.UTF_8)
-        Toast.makeText(this, "✅ 已保存", Toast.LENGTH_LONG).show()
-    } catch (e: Exception) {
-        Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        try {
+            val payload = JSONObject(payloadStr)
+            val name = payload.optString("name", "未命名")
+            val author = payload.optString("author", "未知作者")
+            val fullJson = payload.optString("fullJson", payloadStr)
+            val folder = File("/storage/emulated/0/SkyMusic-OneStar/LocalSheets/")
+            if (!folder.exists()) folder.mkdirs()
+
+            val baseName = if (name.contains(" || ")) name.substringBefore(" || ").trim() else name
+            val modelName = if (name.contains(" || ")) name.substringAfter(" || ").trim() else payload.optString("model", "")
+
+            val fileName = if (modelName.isNotBlank()) {
+                "$baseName-$author \vert{}\vert{}$modelName.txt"
+            } else {
+                "$baseName-$author.txt"
+            }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+
+            File(folder, fileName).writeText(fullJson, Charsets.UTF_8)
+            Toast.makeText(this, "✅ 已保存", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
-}
 }
