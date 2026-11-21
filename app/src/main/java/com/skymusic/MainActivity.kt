@@ -357,7 +357,7 @@ class MainActivity : AppCompatActivity() {
             val modelName = if (name.contains(" || ")) name.substringAfter(" || ").trim() else payload.optString("model", "")
 
             val fileName = if (modelName.isNotBlank()) {
-                "$baseName-$author \vert{}\vert{}$modelName.txt"
+                "$baseName-$author ||$modelName.txt"
             } else {
                 "$baseName-$author.txt"
             }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
