@@ -93,20 +93,20 @@ class FloatingWindowService : Service() {
     private var defaultSpeed = 1.0f
     private var clickToleranceMs = 25L
     private var ballSize = 60
-    private var panelAlpha = 0.60f
+    private var panelAlpha = 0.65f
     private var fontSizeSp = 14f
     private var autoBackToList = true
     private var compactList = true
     private val songKeyModeMap = mutableMapOf<String, Int>()
 
-    // 现代暗色主题色板
+    // 自适应对比度主题色板
     private var themeAccent = "#38BDF8"
-    private var themeBgPanel = "#990B1120"
-    private var themeTopBar = "#131C2E"
-    private var themeCard = "#172238"
-    private var themeCardStroke = "#293B5C"
+    private var themeBgPanel = "#B80D1526"
+    private var themeTopBar = "#18243B"
+    private var themeCard = "#1E2D4A"
+    private var themeCardStroke = "#3B527A"
     private var themeTextMain = "#F8FAFC"
-    private var themeTextSoft = "#94A3B8"
+    private var themeTextSoft = "#CBD5E1"
 
     override fun onCreate() {
         super.onCreate()
@@ -119,7 +119,7 @@ class FloatingWindowService : Service() {
         currentSpeed = defaultSpeed
         clickToleranceMs = prefs.getLong("click_tolerance", 25L)
         ballSize = prefs.getInt("ball_size", 60)
-        panelAlpha = prefs.getFloat("panel_alpha", 0.60f).coerceIn(0.20f, 1.0f)
+        panelAlpha = prefs.getFloat("panel_alpha", 0.65f).coerceIn(0.20f, 1.0f)
         fontSizeSp = prefs.getFloat("font_size_sp", 14f).coerceIn(10f, 22f)
         autoBackToList = prefs.getBoolean("auto_back_list", true)
         compactList = prefs.getBoolean("compact_list", true)
@@ -131,7 +131,7 @@ class FloatingWindowService : Service() {
             }
         }
 
-        updatePanelAlphaColor(panelAlpha)
+        updateAdaptiveTheme(panelAlpha)
         playBgDrawable.setColor(Color.parseColor("#22C55E"))
         pauseBgDrawable.setColor(Color.parseColor("#EF4444"))
 
@@ -142,11 +142,53 @@ class FloatingWindowService : Service() {
 
     private fun fontScaleFactor(): Float = (fontSizeSp / 14f).coerceIn(0.72f, 1.55f)
 
+    /**
+     * 自适应背景与卡片对比度：在纯黑背景或较低透明度下自动提升卡片层级与描边可见度
+     */
+    private fun updateAdaptiveTheme(alpha: Float) {
+        panelAlpha = alpha.coerceIn(0.20f, 1.0f)
+        val panelAlphaByte = (panelAlpha * 255).toInt().coerceIn(55, 255)
+        // 面板底色略带 slate-blue 层次，避免纯黑环境下与背景完全融为一体
+        val basePanelRgb = 0x0E1729
+        themeBgPanel = String.format("#%02X%06X", panelAlphaByte, basePanelRgb)
+
+        // 当用户调低透明度时，相对提高卡片不透明度与边框亮色，保证字卡清晰可读
+        val boost = ((1f - panelAlpha) * 0.45f).coerceIn(0f, 0.35f)
+        val cardAlphaByte = ((0.78f + boost) * 255).toInt().coerceIn(180, 250)
+        val strokeAlphaByte = ((0.38f + boost * 1.1f) * 255).toInt().coerceIn(95, 220)
+
+        themeTopBar = "#162238"
+        themeCard = String.format("#%02X%06X", cardAlphaByte, 0x1B2B48)
+        themeCardStroke = String.format("#%02X%06X", strokeAlphaByte, 0x64748B)
+        themeTextMain = "#F8FAFC"
+        themeTextSoft = "#CBD5E1"
+
+        val bgColor = c(themeBgPanel, "#B80E1729")
+        panelRootView?.setBackgroundColor(bgColor)
+        playerRootView?.setBackgroundColor(bgColor)
+
+        dynamicCards.forEach { card ->
+            val lp = card.layoutParams as? LinearLayout.LayoutParams
+            val isSong = lp?.width == -1 && card.orientation == LinearLayout.HORIZONTAL
+            card.background = cardBgDrawable(if (isSong) 12f else 12f)
+        }
+    }
+
     private fun cardBgDrawable(cornerDp: Float = 12f): GradientDrawable = GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = cornerDp * density
-        setColor(c(themeCard))
-        setStroke((1f * density).toInt().coerceAtLeast(1), Color.parseColor(themeCardStroke))
+        setColor(c(themeCard, "#D91B2B48"))
+        setStroke((1.2f * density).toInt().coerceAtLeast(1), c(themeCardStroke, "#6664748B"))
+    }
+
+    private fun enableMarqueeScroll(tv: TextView) {
+        tv.setSingleLine(true)
+        tv.ellipsize = TextUtils.TruncateAt.MARQUEE
+        tv.marqueeRepeatLimit = -1
+        tv.isSelected = true
+        tv.isFocusable = true
+        tv.isFocusableInTouchMode = true
+        tv.setHorizontallyScrolling(true)
     }
 
     private fun applyCardCompactMetrics(card: LinearLayout, isSongCard: Boolean = false) {
@@ -160,15 +202,6 @@ class FloatingWindowService : Service() {
             lp.bottomMargin = marginBottom
             card.layoutParams = lp
         }
-    }
-
-    private fun updatePanelAlphaColor(alpha: Float) {
-        panelAlpha = alpha.coerceIn(0.20f, 1.0f)
-        val a = (panelAlpha * 255).toInt().coerceIn(45, 255)
-        themeBgPanel = String.format("#%02X0A101D", a)
-        val bgColor = c(themeBgPanel, "#990A101D")
-        panelRootView?.setBackgroundColor(bgColor)
-        playerRootView?.setBackgroundColor(bgColor)
     }
 
     private fun registerTextSize(tv: TextView, ratioToBase: Float) {
@@ -250,8 +283,8 @@ class FloatingWindowService : Service() {
             val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
             panelParams = WindowManager.LayoutParams(
-                (dm.widthPixels * if (land) 0.36f else 0.56f).toInt(),
-                (dm.heightPixels * if (land) 0.56f else 0.48f).toInt(),
+                (dm.widthPixels * if (land) 0.38f else 0.58f).toInt(),
+                (dm.heightPixels * if (land) 0.58f else 0.48f).toInt(),
                 type, flags, PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
@@ -267,13 +300,13 @@ class FloatingWindowService : Service() {
                 y = 200
             }
 
-            val pw = (dm.widthPixels * if (land) 0.32f else 0.46f).toInt()
+            val pw = (dm.widthPixels * if (land) 0.34f else 0.50f).toInt()
             playerParams = WindowManager.LayoutParams(
                 pw, WindowManager.LayoutParams.WRAP_CONTENT, type, flags, PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
                 x = (dm.widthPixels - pw) / 2
-                y = dm.heightPixels - 400
+                y = dm.heightPixels - 420
             }
 
             windowManager.addView(floatView, ballParams)
@@ -331,8 +364,8 @@ class FloatingWindowService : Service() {
         val wrap = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#66131C2E"))
-                setStroke((1.5f * density).toInt(), c(themeAccent))
+                setColor(Color.parseColor("#B8162238"))
+                setStroke((1.8f * density).toInt(), c(themeAccent))
             }
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
@@ -385,11 +418,11 @@ class FloatingWindowService : Service() {
         dynamicCards.clear()
         floatView.removeAllViews()
 
-        updatePanelAlphaColor(panelAlpha)
+        updateAdaptiveTheme(panelAlpha)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(c(themeBgPanel, "#990A101D"))
+            setBackgroundColor(c(themeBgPanel, "#B80E1729"))
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
                     outline.setRoundRect(0, 0, view.width, view.height, 18f * density)
@@ -403,7 +436,7 @@ class FloatingWindowService : Service() {
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding((14 * density).toInt(), (10 * density).toInt(), (12 * density).toInt(), (10 * density).toInt())
-            setBackgroundColor(c(themeTopBar, "#131C2E"))
+            setBackgroundColor(c(themeTopBar, "#162238"))
         }
         titleText = TextView(this).apply {
             text = when (page) { 0 -> "本地曲库"; 1 -> "App 发送"; else -> "设置" }
@@ -411,6 +444,7 @@ class FloatingWindowService : Service() {
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
+        enableMarqueeScroll(titleText)
         registerTextSize(titleText, 1.05f)
 
         fun topActionBtn(icon: String, tintHex: String, onClick: () -> Unit) = TextView(this).apply {
@@ -422,7 +456,7 @@ class FloatingWindowService : Service() {
             layoutParams = LinearLayout.LayoutParams(sz, sz).apply { leftMargin = (6 * density).toInt() }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#22FFFFFF"))
+                setColor(Color.parseColor("#2EFFFFFF"))
             }
             setOnClickListener { onClick() }
         }
@@ -440,7 +474,7 @@ class FloatingWindowService : Service() {
         root.addView(topBar); enableDrag(topBar, panelParams)
 
         root.addView(View(this).apply {
-            setBackgroundColor(Color.parseColor("#1FFFFFFF"))
+            setBackgroundColor(Color.parseColor("#38FFFFFF"))
             layoutParams = LinearLayout.LayoutParams(-1, 1)
         })
 
@@ -456,11 +490,11 @@ class FloatingWindowService : Service() {
         }
         scrollView.addView(listContainer); root.addView(scrollView)
 
-        // 底部现代化导航栏
+        // 底部导航栏
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#E60B1120"))
+            setBackgroundColor(Color.parseColor("#F00E1729"))
             setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
             layoutParams = LinearLayout.LayoutParams(-1, (48 * density).toInt())
         }
@@ -475,7 +509,7 @@ class FloatingWindowService : Service() {
                 if (active) {
                     background = GradientDrawable().apply {
                         cornerRadius = 10f * density
-                        setColor(Color.parseColor("#2638BDF8"))
+                        setColor(Color.parseColor("#3338BDF8"))
                     }
                 }
                 setOnClickListener { showFullPanel(targetPage, resetScroll = true) }
@@ -516,6 +550,7 @@ class FloatingWindowService : Service() {
                 val loadingTv = TextView(this).apply {
                     text = "扫描中..."; setTextColor(c(themeTextSoft)); setPadding(16, 16, 16, 16)
                 }
+                enableMarqueeScroll(loadingTv)
                 registerTextSize(loadingTv, 0.93f)
                 listContainer.addView(loadingTv)
 
@@ -547,6 +582,7 @@ class FloatingWindowService : Service() {
                     val emptyTv = TextView(this).apply {
                         text = "暂无发送的谱面"; setTextColor(c(themeTextSoft)); setPadding(12, 12, 12, 12)
                     }
+                    enableMarqueeScroll(emptyTv)
                     registerTextSize(emptyTv, 0.88f)
                     listContainer.addView(emptyTv)
                 } else {
@@ -576,6 +612,7 @@ class FloatingWindowService : Service() {
             val topPad = (10f * scale * density).toInt().coerceAtLeast((6 * density).toInt())
             val botPad = (4f * scale * density).toInt().coerceAtLeast((3 * density).toInt())
             setPadding((4 * density).toInt(), topPad, (4 * density).toInt(), botPad)
+            enableMarqueeScroll(this)
             registerTextSize(this, 0.84f)
         }
 
@@ -593,9 +630,10 @@ class FloatingWindowService : Service() {
             setTypeface(null, Typeface.BOLD)
             background = GradientDrawable().apply {
                 cornerRadius = 8f * density
-                setColor(Color.parseColor("#2438BDF8"))
+                setColor(Color.parseColor("#2E38BDF8"))
             }
             setPadding((7 * density).toInt(), (2 * density).toInt(), (7 * density).toInt(), (2 * density).toInt())
+            setSingleLine(true)
             registerTextSize(this, 0.78f)
         }
 
@@ -612,8 +650,11 @@ class FloatingWindowService : Service() {
                 text = t
                 setTextColor(c(themeTextMain))
                 setTypeface(null, Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    if (badge != null) rightMargin = (6 * density).toInt()
+                }
             }
+            enableMarqueeScroll(tvTitle)
             registerTextSize(tvTitle, 0.94f)
             topRow.addView(tvTitle)
 
@@ -628,6 +669,7 @@ class FloatingWindowService : Service() {
                     setTextColor(c(themeTextSoft))
                     setPadding(0, (2f * scale * density).toInt().coerceAtLeast(1), 0, 0)
                 }
+                enableMarqueeScroll(tvSub)
                 registerTextSize(tvSub, 0.78f)
                 addView(tvSub)
             }
@@ -649,8 +691,11 @@ class FloatingWindowService : Service() {
                 text = label
                 setTextColor(c(themeTextMain))
                 setTypeface(null, Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    rightMargin = (6 * density).toInt()
+                }
             }
+            enableMarqueeScroll(tvLabel)
             val tvValue = badgePill(initialText)
             registerTextSize(tvLabel, 0.94f)
             header.addView(tvLabel)
@@ -761,12 +806,12 @@ class FloatingWindowService : Service() {
             onDrag = { p, tvVal ->
                 val pct = (20 + p).coerceIn(20, 100)
                 tvVal.text = "$pct%"
-                updatePanelAlphaColor(pct / 100f)
+                updateAdaptiveTheme(pct / 100f)
             },
             onCommit = { p, tvVal ->
                 val pct = (20 + p).coerceIn(20, 100)
                 tvVal.text = "$pct%"
-                updatePanelAlphaColor(pct / 100f)
+                updateAdaptiveTheme(pct / 100f)
                 prefs.edit().putFloat("panel_alpha", panelAlpha).apply()
             }
         ))
@@ -809,6 +854,7 @@ class FloatingWindowService : Service() {
             val tv = TextView(this).apply {
                 text = "LocalSheets 为空"; setTextColor(c(themeTextSoft)); setPadding(12, 12, 12, 12)
             }
+            enableMarqueeScroll(tv)
             registerTextSize(tv, 0.93f)
             listContainer.addView(tv)
             return
@@ -846,45 +892,39 @@ class FloatingWindowService : Service() {
         }
 
         val textCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                rightMargin = (6 * density).toInt()
+            }
             setOnClickListener { captureCurrentScrollY(); onClick() }
         }
 
         val title = TextView(this).apply {
             setTextColor(c(themeTextMain)); setTypeface(null, Typeface.BOLD)
-            setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1
-            isSelected = true; isFocusable = true; isFocusableInTouchMode = true
             val full = "$pureName  ·  $modelName"
             val sp = SpannableString(full)
             val idx = full.lastIndexOf("·")
             if (idx >= 0) sp.setSpan(ForegroundColorSpan(c(themeAccent)), idx, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             text = sp
         }
+        enableMarqueeScroll(title)
         registerTextSize(title, 0.98f)
         textCol.addView(title)
 
-        if (compactList) {
-            val subTv = TextView(this).apply {
-                text = "$author  ·  $duration  ·  ${songMode}键"
-                setTextColor(c(themeTextSoft)); setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END; setPadding(0, (2 * density).toInt(), 0, 0)
-            }
-            registerTextSize(subTv, 0.78f)
-            textCol.addView(subTv)
+        // 适度展示作者、时长、音符数、键位，并支持过长来回滚动
+        val detailLine = if (bpm.isNotBlank() && bpm != "0") {
+            "$author  ·  $duration  ·  ${notes}音符  ·  BPM $bpm  ·  ${songMode}键"
         } else {
-            val sub1 = TextView(this).apply {
-                text = "$author  ·  $modelName"; setTextColor(c(themeTextSoft))
-                setSingleLine(true); setPadding(0, (2 * density).toInt(), 0, 0)
-            }
-            val sub2 = TextView(this).apply {
-                text = "音符$notes  ·  BPM$bpm  ·  $duration  ·  ${songMode}键"
-                setTextColor(Color.parseColor("#94A3B8")); setSingleLine(true)
-            }
-            registerTextSize(sub1, 0.78f)
-            registerTextSize(sub2, 0.70f)
-            textCol.addView(sub1)
-            textCol.addView(sub2)
+            "$author  ·  $duration  ·  ${notes}音符  ·  ${songMode}键"
         }
+        val subTv = TextView(this).apply {
+            text = detailLine
+            setTextColor(c(themeTextSoft))
+            setPadding(0, (2 * density).toInt(), 0, 0)
+        }
+        enableMarqueeScroll(subTv)
+        registerTextSize(subTv, 0.78f)
+        textCol.addView(subTv)
         card.addView(textCol)
 
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -896,7 +936,7 @@ class FloatingWindowService : Service() {
             if (color != null) setTextColor(color) else setTextColor(c(themeTextSoft))
             background = GradientDrawable().apply {
                 cornerRadius = 7f * density
-                setColor(Color.parseColor("#18FFFFFF"))
+                setColor(Color.parseColor("#24FFFFFF"))
             }
             setOnClickListener { captureCurrentScrollY(); click() }
         }
@@ -963,13 +1003,17 @@ class FloatingWindowService : Service() {
 
         val dm = resources.displayMetrics
         val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        playerParams.width = (dm.widthPixels * if (land) 0.32f else 0.46f).toInt()
+        playerParams.width = (dm.widthPixels * if (land) 0.34f else 0.50f).toInt()
 
-        updatePanelAlphaColor(panelAlpha)
+        updateAdaptiveTheme(panelAlpha)
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(c(themeBgPanel, "#990A101D"))
+            background = GradientDrawable().apply {
+                cornerRadius = 16f * density
+                setColor(c(themeBgPanel, "#B80E1729"))
+                setStroke((1.2f * density).toInt().coerceAtLeast(1), c(themeCardStroke, "#6664748B"))
+            }
             setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
@@ -981,25 +1025,35 @@ class FloatingWindowService : Service() {
         playerRootView = layout
 
         val title = TextView(this).apply {
-            text = "$currentSongName  ·  $currentModel"
+            text = if (currentModel.isNotBlank()) "$currentSongName  ·  $currentModel" else currentSongName
             setTextColor(c(themeTextMain)); setTypeface(null, Typeface.BOLD)
-            setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1
-            isSelected = true; isFocusable = true; isFocusableInTouchMode = true
         }
-        registerTextSize(title, 0.88f)
+        enableMarqueeScroll(title)
+        registerTextSize(title, 0.90f)
         layout.addView(title)
 
+        val metaText = buildString {
+            append(if (currentAuthor.isNotBlank()) currentAuthor else "未知作者")
+            append("  ·  ").append(currentDuration)
+            append("  ·  ").append(currentNotesCount).append("音符")
+            if (currentBpm.isNotBlank() && currentBpm != "0") {
+                append("  ·  BPM ").append(currentBpm)
+            }
+            append("  ·  ").append(keyMode).append("键")
+        }
         val authorTv = TextView(this).apply {
-            text = "$currentAuthor  ·  $currentDuration"
+            text = metaText
             setTextColor(c(themeTextSoft)); setPadding(0, 2, 0, 4)
         }
-        registerTextSize(authorTv, 0.68f)
+        enableMarqueeScroll(authorTv)
+        registerTextSize(authorTv, 0.70f)
         layout.addView(authorTv)
 
         tvStatus = TextView(this).apply {
             setTextColor(c(themeAccent)); setPadding(0, 0, 0, 4)
         }
-        registerTextSize(tvStatus, 0.68f)
+        enableMarqueeScroll(tvStatus)
+        registerTextSize(tvStatus, 0.72f)
         layout.addView(tvStatus)
 
         seekBar = SeekBar(this).apply {
@@ -1031,7 +1085,11 @@ class FloatingWindowService : Service() {
 
         val speed = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setColor(Color.parseColor("#33000000")); cornerRadius = 6f * density }
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#44000000"))
+                setStroke((1 * density).toInt().coerceAtLeast(1), Color.parseColor("#33FFFFFF"))
+                cornerRadius = 6f * density
+            }
             layoutParams = LinearLayout.LayoutParams(0, -1, 1.5f).apply { leftMargin = 6; rightMargin = 6 }
         }
         speed.addView(Button(this).apply {
@@ -1067,11 +1125,12 @@ class FloatingWindowService : Service() {
         if (!isPlayerMode || !this::floatView.isInitialized) return
         seekBar.progress = if (songData.size <= 1) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
         val sp = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
+        val pct = if (songData.isEmpty()) 0 else ((currentIndex.toFloat() / songData.size) * 100).toInt().coerceIn(0, 100)
         if (isPlaying) {
-            tvStatus.text = "▶ $currentIndex/${songData.size}  |  $sp"
+            tvStatus.text = "▶ $currentIndex/${songData.size} ($pct%)  ·  $sp"
             btnPlayPause.text = "⏸"; btnPlayPause.background = pauseBgDrawable
         } else {
-            tvStatus.text = "暂停  |  $sp"
+            tvStatus.text = "暂停 $currentIndex/${songData.size} ($pct%)  ·  $sp"
             btnPlayPause.text = "▶"; btnPlayPause.background = playBgDrawable
         }
     }
