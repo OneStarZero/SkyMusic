@@ -234,3 +234,8 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
 .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; box-shadow: 0 0 10px var(--cloud-blue); } }
+/* ================= 谱面图片按钮 ================= */
+.btn-image {
+    background: linear-gradient(135deg, #7DD3FC, #A78BFA);
+    width: 100%;
+}

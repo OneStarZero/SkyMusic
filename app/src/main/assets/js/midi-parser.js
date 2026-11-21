@@ -1,5 +1,6 @@
 import { Midi } from '@tonejs/midi';
 import { showToast } from './ui.js';
+import { openSheetImagePreview } from './sheet-image.js';
 
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
 const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
@@ -66,6 +67,24 @@ function applyLongNoteFilterIfEnabled(notes, model, logFn) {
     return kept;
 }
 
+function ensureSheetImageButton(container, onClick) {
+    if (!container) return null;
+    let btn = container.querySelector('[data-role="sheet-image"]');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn btn-image';
+        btn.setAttribute('data-role', 'sheet-image');
+        btn.textContent = '▣ 生成谱面图片';
+        container.appendChild(btn);
+    }
+    btn.onclick = (e) => {
+        e.preventDefault();
+        onClick();
+    };
+    return btn;
+}
+
 export function initMidi() {
     const midiInput = document.getElementById('midiFile');
     const dropZone = document.getElementById('dropZone');
@@ -81,6 +100,9 @@ export function initMidi() {
     let pendingTxtContent = null;
     let selectedTrackIndices = new Set();
     let hideResultTimeout = null;
+
+    // 最近一次转换的上下文，供「生成谱面图片」复用
+    let lastConvertContext = null;
 
     function hideResultSmoothly() {
         if (resultCard.style.display === 'none') return;
@@ -343,6 +365,20 @@ export function initMidi() {
 
                 pendingTxtContent = JSON.stringify(skyStudioData);
 
+                // 记录本次转换上下文，供「生成谱面图片」使用
+                    lastConvertContext = {
+                    sheet: skyStudioData[0],
+                    songName: finalSongName,
+                    baseSongName: baseSongName,
+                    author: finalAuthor,
+                    model: modelName,
+                    transcriber: finalTranscriber,
+                    bpm: studioSpeed,
+                    toleranceMs: mergeWindowMs > 0 ? mergeWindowMs : 25
+                };
+
+
+
                 const firstNoteTime = allNotes[0].time;
                 const lastNoteTime = allNotes[allNotes.length - 1].time;
                 const totalDurationSec = ((lastNoteTime - firstNoteTime) / 1000).toFixed(1);
@@ -368,8 +404,32 @@ export function initMidi() {
                 setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 
                 const isApp = typeof window.AndroidBridge !== 'undefined';
-                document.getElementById('appActions').style.display = isApp ? 'flex' : 'none';
-                document.getElementById('browserActions').style.display = isApp ? 'none' : 'block';
+                const appActions = document.getElementById('appActions');
+                const browserActions = document.getElementById('browserActions');
+                appActions.style.display = isApp ? 'flex' : 'none';
+                browserActions.style.display = isApp ? 'none' : 'block';
+
+                // 生成谱面图片：App 内与浏览器内都可用
+                             const openImage = () => {
+                    if (!lastConvertContext) {
+                        showToast('请先完成一次转谱', 'error');
+                        return;
+                    }
+                                        openSheetImagePreview(lastConvertContext.sheet, {
+                        songName: lastConvertContext.songName,
+                        author: lastConvertContext.author,
+                        model: lastConvertContext.model,
+                        transcriber: lastConvertContext.transcriber,
+                        bpm: lastConvertContext.bpm,
+                        keyCount: 15,
+                        toleranceMs: lastConvertContext.toleranceMs
+                    });
+
+                };
+
+
+                ensureSheetImageButton(appActions, openImage);
+                ensureSheetImageButton(browserActions, openImage);
 
                 if (isApp) {
                     document.getElementById('btnSendApp').onclick = () => {

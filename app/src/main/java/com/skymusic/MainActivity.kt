@@ -316,6 +316,23 @@ class MainActivity : AppCompatActivity() {
         fun openAccessibilitySettings() = runOnUiThread {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
+
+        /**
+         * 生成谱面图片并保存到 /storage/emulated/0/SkyMusic-OneStar/<乐谱名>/
+         * 同步返回 JSON 字符串：{"ok":true,"dir":"...","files":[...]} 或 {"ok":false,"error":"..."}
+         * 注意：@JavascriptInterface 方法在 WebView 的 JavaBridge 线程执行，
+         * 这里不能碰 UI，也不能 runOnUiThread（否则拿不到返回值）。
+         */
+        @JavascriptInterface
+        fun saveSheetImage(payloadJson: String): String {
+            return try {
+                val baseDir = File("/storage/emulated/0/SkyMusic-OneStar/")
+                if (!baseDir.exists()) baseDir.mkdirs()
+                SheetImageExporter.export(baseDir, payloadJson).toString()
+            } catch (e: Throwable) {
+                JSONObject().put("ok", false).put("error", e.message ?: "未知错误").toString()
+            }
+        }
     }
 
     private fun handleSendApp(payloadStr: String) {
