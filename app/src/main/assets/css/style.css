@@ -188,13 +188,14 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 
 /* ================= Toast ================= */
 .toast { 
-    background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(4px);
+    background: rgba(30, 41, 59, 0.92);
     padding: 14px 24px; border-radius: 30px; 
     color: #fff; font-size: 0.95rem; position: fixed; top: 30px; left: 50%; transform: translateX(-50%); 
     z-index: 2000; box-shadow: 0 10px 30px rgba(0,0,0,0.4); 
     animation: slideDown 0.4s var(--ease-spring); 
     border: 1px solid var(--border-soft);
 }
+
 .toast.error { border-left: 4px solid var(--error-red); }
 .toast.success { border-left: 4px solid var(--sky-green); }
 @keyframes slideDown { from { opacity: 0; transform: translate(-50%, -20px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }

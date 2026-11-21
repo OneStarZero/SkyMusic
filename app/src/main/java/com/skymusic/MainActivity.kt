@@ -63,21 +63,17 @@ class MainActivity : AppCompatActivity() {
 
         webViewInstance = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            settings.apply {
+                        settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 allowFileAccess = true
                 allowContentAccess = true
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
                     allowFileAccessFromFileURLs = true
-                    allowUniversalAccessFromFileURLs = true
                 }
                 cacheMode = WebSettings.LOAD_NO_CACHE
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                }
             }
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+          
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)

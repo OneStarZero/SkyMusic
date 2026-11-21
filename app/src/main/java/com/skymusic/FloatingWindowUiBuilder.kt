@@ -2,14 +2,12 @@ package com.skymusic
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.Outline
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.FrameLayout
@@ -23,7 +21,6 @@ internal class FloatingWindowUiBuilder(
     private val dp: (Float) -> Int,
     private val colorOf: (String, String) -> Int,
     private val playAppearAnimation: (View) -> Unit,
-    private val applyGlassBlur: (View?, Boolean) -> Unit,
     private val buildTitleWithBlueModel: (String, String) -> CharSequence,
     private val captureScrollY: () -> Unit,
     private val onRequestDisallowIntercept: (Boolean) -> Unit
@@ -81,12 +78,6 @@ internal class FloatingWindowUiBuilder(
         }
         val wrap = FrameLayout(context).apply {
             background = shapeDrawable(Color.parseColor("#CC0F172A"), isOval = true)
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setOval(0, 0, view.width, view.height)
-                }
-            }
-            clipToOutline = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
         wrap.addView(ball)
@@ -112,7 +103,6 @@ internal class FloatingWindowUiBuilder(
         val textMainColor: Int,
         val textSoftColor: Int,
         val accentColor: Int,
-        val enableBlur: Boolean
     )
 
     fun buildPanel(
@@ -130,15 +120,8 @@ internal class FloatingWindowUiBuilder(
                 strokeWidthDp = 1f,
                 strokeColor = Color.parseColor("#38FFFFFF")
             )
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(14f).toFloat())
-                }
-            }
-            clipToOutline = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
-        applyGlassBlur(root, theme.enableBlur)
 
         val topBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -317,7 +300,6 @@ internal class FloatingWindowUiBuilder(
         val accentColor: Int,
         val playBg: GradientDrawable,
         val pauseBg: GradientDrawable,
-        val enableBlur: Boolean
     )
 
     fun buildPlayer(
@@ -338,15 +320,8 @@ internal class FloatingWindowUiBuilder(
                 strokeColor = Color.parseColor("#38FFFFFF")
             )
             setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, dp(14f).toFloat())
-                }
-            }
-            clipToOutline = true
             layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
-        applyGlassBlur(layout, theme.enableBlur)
 
         layout.addView(marqueeText(buildTitleWithBlueModel(theme.songName, theme.model), theme.textMainColor, 13f, bold = true))
         layout.addView(

@@ -12,8 +12,6 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -150,7 +148,6 @@ class FloatingWindowService : Service() {
             dp = ::dp,
             colorOf = ::c,
             playAppearAnimation = ::playAppearAnimation,
-            applyGlassBlur = ::applyGlassBlur,
             buildTitleWithBlueModel = ::buildTitleWithBlueModel,
             captureScrollY = ::captureCurrentScrollY,
             onRequestDisallowIntercept = { disallow ->
@@ -311,16 +308,9 @@ class FloatingWindowService : Service() {
         params.y = params.y.coerceIn(0, (screenH - h).coerceAtLeast(0))
     }
 
-    private fun applyGlassBlur(view: View?, enableBlur: Boolean) {
-        if (view == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        view.setRenderEffect(
-            if (enableBlur) RenderEffect.createBlurEffect(14f, 14f, Shader.TileMode.CLAMP) else null
-        )
-    }
-
     private fun updatePanelAlphaColor(alpha: Float) {
         panelAlpha = alpha.coerceIn(0.35f, 1.0f)
-        val a = (panelAlpha * 255).toInt().coerceIn(90, 255)
+val a = (panelAlpha * 255).toInt().coerceIn(150, 255)
         themeBgPanel = String.format("#%02X0F172A", a)
         val bgColor = c(themeBgPanel, "#D90F172A")
         panelRootView?.setBackgroundColor(bgColor)
@@ -467,7 +457,8 @@ class FloatingWindowService : Service() {
         try {
             floatView = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }
             val type = overlayWindowType()
-            val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+            val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+
             val dm = resources.displayMetrics
             val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
             val ballPx = dp(ballSizeDp)
@@ -632,7 +623,6 @@ class FloatingWindowService : Service() {
                 textMainColor = c(themeTextMain),
                 textSoftColor = c(themeTextSoft),
                 accentColor = c(themeAccent),
-                enableBlur = panelAlpha < 0.92f
             ),
             onRefresh = {
                 captureCurrentScrollY()
@@ -801,7 +791,6 @@ class FloatingWindowService : Service() {
                 onPreviewAlpha = { previewAlpha -> updatePanelAlphaColor(previewAlpha) },
                 onCommitAlpha = { committedAlpha ->
                     updatePanelAlphaColor(committedAlpha)
-                    applyGlassBlur(panelRootView, panelAlpha < 0.92f)
                     prefs.edit().putFloat("panel_alpha", panelAlpha).apply()
                 }
             )
@@ -1000,7 +989,6 @@ class FloatingWindowService : Service() {
                 accentColor = c(themeAccent),
                 playBg = playBgDrawable,
                 pauseBg = pauseBgDrawable,
-                enableBlur = panelAlpha < 0.92f
             ),
             onJumpClick = ::showJumpToNoteDialog,
             onSeekChanged = { p, fromUser ->
