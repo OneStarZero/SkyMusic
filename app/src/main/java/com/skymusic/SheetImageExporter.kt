@@ -27,8 +27,8 @@ import kotlin.math.sqrt
  *
  * 支持：
  *   · 只导出用户勾选的页（pages 数组已由前端过滤）
- *   · 可选额外输出一张「所有页上下拼接」的完整长图
- *   · 信息面板（infoItems）逐页绘制
+ *   · 可选额外输出一张「所有页上下拼接」的完整长图（-Full.png）
+ *   · 信息面板（infoItems）逐页绘制在标题正下方
  */
 object SheetImageExporter {
 
@@ -181,7 +181,7 @@ object SheetImageExporter {
 
     private fun gridRowsFor(rows: Int): Int = 3
 
-        private fun measure(rows: Int, st: Style, infoItemCount: Int): Size {
+    private fun measure(rows: Int, st: Style, infoItemCount: Int): Size {
         val gCols = gridColsFor(rows)
         val gRows = gridRowsFor(rows)
         val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
@@ -208,6 +208,7 @@ object SheetImageExporter {
             headerH = headerH,
             infoH = infoH,
             footerH = footerH,
+            bodyW = bodyW,
             bodyH = bodyH,
             gridW = gridW,
             gridH = gridH,
@@ -216,7 +217,6 @@ object SheetImageExporter {
             gRows = gRows
         )
     }
-
 
     private fun computeScale(width: Float, height: Float): Float {
         var scale = 2f
@@ -280,13 +280,13 @@ object SheetImageExporter {
             metaPaint
         )
 
-        // —— 信息面板 ——
+        // —— 信息面板（标题正下方，独立占位） ——
         val infoTop = st.pad + size.headerH
         if (st.showInfoPanel && infoItems.isNotEmpty()) {
             drawInfoPanel(canvas, st.pad, infoTop, size.bodyW, infoItems, st)
         }
 
-        // —— 正文 ——
+        // —— 正文（严格从信息面板下方开始） ——
         val bodyTop = infoTop + size.infoH
         val bodyLeft = st.pad
 
@@ -622,6 +622,7 @@ object SheetImageExporter {
         val headerH: Float,
         val infoH: Float,
         val footerH: Float,
+        val bodyW: Float,
         val bodyH: Float,
         val gridW: Float,
         val gridH: Float,
