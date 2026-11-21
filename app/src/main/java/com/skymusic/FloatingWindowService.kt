@@ -90,22 +90,35 @@ class FloatingWindowService : Service() {
     private var compactList = true
     private val songKeyModeMap = mutableMapOf<String, Int>()
 
-    // 主题系统
+    // 主题系统（简化版，移除色相轮）
     private var themeAccent = "#7DD3FC"
     private var themeBgPanel = "#EB0B1120"
     private var themeTopBar = "#1E293B"
     private var themeCard = "#1E293B"
     private var themeTextMain = "#F8FAFC"
     private var themeTextSoft = "#CBD5E1"
-    private var themeHue = 220f
-    private var syncWebTheme = false
+    private val songKeyModeMap = mutableMapOf<String, Int>()
 
+    private var presetAccentColors = listOf(
+        "#7DD3FC",  // Azure
+        "#FDE047",  // Yellow
+        "#34D399",  // Emerald
+        "#C084FC",  // Purple
+        "#F472B6",  // Pink
+        "#FFFFFF"   // White
+    )
+
+    private val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
+    var syncedWebTheme = false
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         density = resources.displayMetrics.density
 
-        val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
+        prefs.all.forEach { (k, v) ->
+            if (k.startsWith("key_mode_") && v is Int) songKeyModeMap[k.removePrefix("key_mode_")] = v as Int
+        }
+
         keyMode = prefs.getInt("key_mode", 15)
         defaultSpeed = prefs.getFloat("default_speed", 1.0f)
         currentSpeed = defaultSpeed
@@ -114,15 +127,8 @@ class FloatingWindowService : Service() {
         panelAlpha = prefs.getFloat("panel_alpha", 0.92f)
         autoBackToList = prefs.getBoolean("auto_back_list", true)
         compactList = prefs.getBoolean("compact_list", true)
-        syncWebTheme = prefs.getBoolean("sync_web_theme", false)
-        themeHue = prefs.getFloat("theme_hue", 220f)
-        themeAccent = prefs.getString("theme_accent", "#7DD3FC") ?: "#7DD3FC"
-
-        prefs.all.forEach { (k, v) ->
-            if (k.startsWith("song_mode_") && v is Int) songKeyModeMap[k.removePrefix("song_mode_")] = v
-        }
-
-        applyHueTheme(themeHue)
+        
+        applyTheme(kotlin.math.min(1, prefs.getFloat("theme_accent_index", 0) / 5f))
         playBgDrawable.setColor(Color.parseColor("#34D399"))
         pauseBgDrawable.setColor(Color.parseColor("#F87171"))
 
@@ -131,18 +137,18 @@ class FloatingWindowService : Service() {
         File(localSheetsPath).mkdirs()
     }
 
-    private fun applyHueTheme(hue: Float) {
-        themeHue = hue
-        themeAccent = hsvHex((hue + 40f) % 360f, 0.85f, 0.72f)
-        themeTopBar = hsvHex(hue % 360f, 0.32f, 0.18f)
-        themeCard = hsvHex(hue % 360f, 0.28f, 0.14f)
-        val bg = Color.HSVToColor(floatArrayOf(hue % 360f, 0.40f, 0.08f))
-        val a = (panelAlpha * 255).toInt().coerceIn(90, 255)
-        themeBgPanel = String.format("#%02X%06X", a, 0xFFFFFF and bg)
-    }
-
-    private fun hsvHex(h: Float, s: Float, v: Float): String {
-        return String.format("#%06X", 0xFFFFFF and Color.HSVToColor(floatArrayOf(h, s, v)))
+    private fun applyTheme(hue: Float) {
+        val hueInt = (hue * 360).toInt()
+        val hexColor = String.format("#%06X", 0xFFFFFF and Color.HSVToColor(floatArrayOf(hueInt, 0.85f, 0.72f)))
+        themeAccent = hexColor
+        
+        val topHueInt = (hueInt + 90).toInt()
+        val topColor = String.format("#%06X", 0xFFFFFF and Color.HSVToColor(floatArrayOf(topHueInt % 360, 0.32f, 0.18f)))
+        themeTopBar = topColor
+        
+        val cardHueInt = (hueInt + 120).toInt()
+        val cardColor = String.format("#%06X", 0xFFFFFF and Color.HSVToColor(floatArrayOf(cardHueInt % 360, 0.28f, 0.14f)))
+        themeCard = cardColor
     }
 
     private fun c(hex: String, fb: String = "#FFFFFF"): Int {
@@ -218,7 +224,6 @@ class FloatingWindowService : Service() {
         isMiniMode = true; isPlayerMode = false; floatView.removeAllViews()
         ballParams.width = ballSize; ballParams.height = ballSize
 
-        // ✦ 保持你喜欢的悬浮球样式
         val ball = TextView(this).apply { text = "✦"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(c("#FDE047")); setShadowLayer(8f, 0f, 0f, c("#EAB308")) }
         val wrap = FrameLayout(this).apply {
             setBackgroundColor(Color.parseColor("#55FFFFFF"))
@@ -234,12 +239,6 @@ class FloatingWindowService : Service() {
         if (!this::floatView.isInitialized) return
         isMiniMode = false; isPlayerMode = false; floatView.removeAllViews()
 
-        if (syncWebTheme) {
-            val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
-            themeHue = prefs.getFloat("theme_hue", themeHue)
-            applyHueTheme(themeHue)
-        }
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(c(themeBgPanel, "#EB0B1120"))
             outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 20f) } }
@@ -249,9 +248,7 @@ class FloatingWindowService : Service() {
         val topBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(14, 14, 14, 14); setBackgroundColor(c(themeTopBar, "#1E293B")) }
         titleText = TextView(this).apply { text = when (page) { 0 -> "本地曲库"; 1 -> "App 发送"; else -> "设置" }; setTextColor(c(themeTextMain)); textSize = 14f; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
         
-        // 🔄 刷新图标改为简单的旋转箭头
         val btnRefresh = TextView(this).apply { text = "↻"; setTextColor(c(themeAccent)); textSize = 18f; setPadding(12, 0, 12, 0); setOnClickListener { when (currentPage) { 0 -> { cachedSongList = null; showFullPanel(0) }; else -> showFullPanel(currentPage) } } }
-        // ✕ 关闭图标保持不变
         val btnClose = TextView(this).apply { text = "✕"; setTextColor(c(themeTextMain)); textSize = 18f; setPadding(8, 0, 4, 0); setOnClickListener { showMiniBall() } }
         topBar.addView(titleText); topBar.addView(btnRefresh); topBar.addView(btnClose)
         root.addView(topBar); enableDrag(topBar, panelParams)
@@ -262,30 +259,33 @@ class FloatingWindowService : Service() {
         listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(10, 8, 10, 8) }
         scrollView.addView(listContainer); root.addView(scrollView)
 
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(Color.parseColor("#CC0B1120")); layoutParams = LinearLayout.LayoutParams(-1, (46 * density).toInt()) }
-        
-        // 底部导航栏文字替代 Emoji
-        fun nav(icon: String, label: String, click: () -> Unit) = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { click() }
-            addView(TextView(this@FloatingWindowService).apply { text = icon; textSize = 18f; setTextColor(c(themeTextMain)); gravity = Gravity.CENTER })
-            addView(TextView(this@FloatingWindowService).apply { text = label; setTextColor(c(themeTextSoft)); textSize = 10f; gravity = Gravity.CENTER })
+        val bottomNav = LinearLayout(this).apply { 
+            orientation = LinearLayout.HORIZONTAL; 
+            setBackgroundColor(Color.parseColor("#CC0B1120")); 
+            layoutParams = LinearLayout.LayoutParams(-1, WindowManager.LayoutParams.WRAP_CONTENT) 
         }
-        bottom.addView(nav("◱", "本地") { currentPage = 0; showFullPanel(0) }, LinearLayout.LayoutParams(0, -1, 1f))
-        bottom.addView(nav("☁", "发送") { currentPage = 1; showFullPanel(1) }, LinearLayout.LayoutParams(0, -1, 1f))
-        bottom.addView(nav("⚙", "设置") { currentPage = 2; showFullPanel(2) }, LinearLayout.LayoutParams(0, -1, 1f))
-        root.addView(bottom)
+        
+        fun nav(icon: String, label: String, click: () -> Unit) {
+            btnNav = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { click() }
+                addView(TextView(this@FloatingWindowService).apply { text = icon; textSize = 18f; setTextColor(c(themeTextMain)); gravity = Gravity.CENTER })
+                addView(TextView(this@FloatingWindowService).apply { text = label; setTextColor(c(themeTextSoft)); textSize = 10f; gravity = Gravity.CENTER })
+            }
+        }
+        bottomNav.addView(nav("◱", "本地", { currentPage = 0; showFullPanel(0) }), LinearLayout.LayoutParams(0, -1, 1f))
+        bottomNav.addView(nav("☁", "发送", { currentPage = 1; showFullPanel(1) }), LinearLayout.LayoutParams(0, -1, 1f))
+        bottomNav.addView(nav("⚙", "设置", { currentPage = 2; showFullPanel(2) }), LinearLayout.LayoutParams(0, -1, 1f))
+        root.addView(bottomNav)
 
         floatView.addView(root); windowManager.updateViewLayout(floatView, panelParams)
         
         switchPage(page)
-        handler.postDelayed({ scrollView.scrollY = lastScrollY }, 50)
     }
 
-    private var lastScrollY = 0
+    private var btnNav: TextView
 
     private fun switchPage(page: Int) {
         if (!this::listContainer.isInitialized) return
-        lastScrollY = 0
         listContainer.removeAllViews()
         when (page) {
             0 -> {
@@ -314,72 +314,58 @@ class FloatingWindowService : Service() {
     }
 
     private fun showSettingsPage() {
-        val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
-        fun title(t: String) = TextView(this).apply { text = t; setTextColor(c(themeAccent)); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(6, 14, 6, 6) }
-        fun item(t: String, s: String, click: () -> Unit) = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(12, 12, 12, 12); setBackgroundColor(c(themeCard)); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
-            outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 14f) } }
-            clipToOutline = true; setOnClickListener { lastScrollY = scrollView.scrollY; click() }
-            addView(TextView(this@FloatingWindowService).apply { text = t; setTextColor(c(themeTextMain)); textSize = 13f })
-            addView(TextView(this@FloatingWindowService).apply { text = s; setTextColor(c(themeTextSoft)); textSize = 11f; setPadding(0, 3, 0, 0) })
+        fun title(t: String) = TextView(this).apply { 
+            text = t; setTextColor(c(themeAccent)); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(6, 14, 6, 6) 
         }
-        fun customView(v: View) = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(12, 12, 12, 12); setBackgroundColor(c(themeCard)); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
+        
+        fun simpleItem(t: String, s: String, click: () -> Unit) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(12, 12, 12, 12); setBackgroundColor(c(themeCard, "#1E293B")); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
             outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 14f) } }
-            clipToOutline = true; addView(v)
+            clipToOutline = true; setOnClickListener { click() }
+            addView(TextView(this@FloatingWindowService).apply { text = t; setTextColor(c(themeTextMain, "#F8FAFC")); textSize = 13f })
+            addView(TextView(this@FloatingWindowService).apply { text = s; setTextColor(c(themeTextSoft, "#CBD5E1")); textSize = 11f; setPadding(0, 3, 0, 0) })
         }
 
         listContainer.addView(title("🎹 键位"))
-        listContainer.addView(item("15 键校准", "标准 5×3 网格") { if (checkAccessibility()) startCalibration(15) })
-        listContainer.addView(item("9 键校准", "标准 3×3 网格") { if (checkAccessibility()) startCalibration(9) })
-        listContainer.addView(item("默认键位", "当前 ${keyMode} 键") { keyMode = if (keyMode == 15) 9 else 15; prefs.edit().putInt("key_mode", keyMode).apply(); loadKeyPositions(); showFullPanel(2) })
+        listContainer.addView(simpleItem("15 键校准", "标准 5×3 网格") { if (checkAccessibility()) startCalibration(15) })
+        listContainer.addView(simpleItem("9 键校准", "标准 3×3 网格") { if (checkAccessibility()) startCalibration(9) })
+        listContainer.addView(simpleItem("切换默认键位", "${when (keyMode == 15) "9" else "15"} 键") { keyMode = if (keyMode == 15) 9 else 15; prefs.edit().putInt("key_mode", keyMode).apply(); loadKeyPositions(); showFullPanel(2) })
 
         listContainer.addView(title("🎵 演奏"))
-        listContainer.addView(item("默认倍速", String.format(Locale.getDefault(), "%.1fx", defaultSpeed)) { defaultSpeed += 0.1f; if (defaultSpeed > 3f) defaultSpeed = 0.5f; defaultSpeed = Math.round(defaultSpeed * 10f) / 10f; currentSpeed = defaultSpeed; prefs.edit().putFloat("default_speed", defaultSpeed).apply(); showFullPanel(2) })
-        listContainer.addView(item("点击容差", "${clickToleranceMs}ms") { clickToleranceMs = when (clickToleranceMs) { 15L -> 25L; 25L -> 40L; else -> 15L }; prefs.edit().putLong("click_tolerance", clickToleranceMs).apply(); showFullPanel(2) })
-        listContainer.addView(item("播完回列表", if (autoBackToList) "开" else "关") { autoBackToList = !autoBackToList; prefs.edit().putBoolean("auto_back_list", autoBackToList).apply(); showFullPanel(2) })
+        listContainer.addView(simpleItem("默认倍速", String.format(Locale.getDefault(), "%.1fx", defaultSpeed)) { defaultSpeed += 0.1f; if (defaultSpeed > 3f) defaultSpeed = 0.5f; defaultSpeed = kotlin.math.round(defaultSpeed * 10f) / 10f; currentSpeed = defaultSpeed; prefs.edit().putFloat("default_speed", defaultSpeed).apply(); showFullPanel(2) })
+        listContainer.addView(simpleItem("点击容差", "${clickToleranceMs}ms") { clickToleranceMs = when (clickToleranceMs) { 15L -> 25L; 25L -> 40L; else -> 15L }; prefs.edit().putLong("click_tolerance", clickToleranceMs).apply(); showFullPanel(2) })
+        listContainer.addView(simpleItem("播完回列表", if (autoBackToList) "开" else "关") { autoBackToList = !autoBackToList; prefs.edit().putBoolean("auto_back_list", autoBackToList).apply(); showFullPanel(2) })
 
-        listContainer.addView(title("🎨 主题"))
-        val hueSlider = SeekBar(this).apply {
-            max = 360; progress = themeHue.toInt()
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                    if (fromUser) { applyHueTheme(progress.toFloat()); prefs.edit().putFloat("theme_hue", themeHue).apply(); }
-                }
-                override fun onStartTrackingTouch(sb: SeekBar?) { lastScrollY = scrollView.scrollY }
-                override fun onStopTrackingTouch(sb: SeekBar?) { applyHueTheme(themeHue); prefs.edit().putFloat("theme_hue", themeHue).apply(); showFullPanel(2) }
-            })
-        }
-        val hueContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(TextView(this@FloatingWindowService).apply { text = "拖动调节色相"; setTextColor(c(themeTextMain)); textSize = 13f }); addView(hueSlider) }
-        listContainer.addView(customView(hueContainer))
+        ListContainer.addView(title("🎨 外观"))
+        listContainer.addView(simpleItem("强调色（轮换）", presetAccentColors.first()) { 
+            val currentIndex = presetAccentColors.indexOf(themeAccent)
+            themeAccent = presetAccentColors[(currentIndex + 1) % presetAccentColors.size]
+            prefs.edit().putString("theme_accent", themeAccent).apply()
+            showFullPanel(2) 
+        })
 
-        listContainer.addView(item("强调色（快捷）", "当前 $themeAccent") {
-            val presets = listOf("#7DD3FC", "#FDE047", "#34D399", "#C084FC", "#F472B6", "#FFFFFF")
-            val i = presets.indexOf(themeAccent).let { if (it < 0) 0 else (it + 1) % presets.size }
-            themeAccent = presets[i]; prefs.edit().putString("theme_accent", themeAccent).apply(); showFullPanel(2)
-        })
-        listContainer.addView(item("同步 WebView 背景", if (syncWebTheme) "开" else "关") {
-            syncWebTheme = !syncWebTheme; prefs.edit().putBoolean("sync_web_theme", syncWebTheme).apply()
-            if (syncWebTheme) { applyHueTheme(themeHue); prefs.edit().putFloat("theme_hue", themeHue).putString("theme_accent", themeAccent).apply() }
-            showFullPanel(2)
-        })
-        listContainer.addView(item("面板透明度", "${(panelAlpha * 100).toInt()}%") {
+        listContainer.addView(simpleItem("关闭导航栏", if (compactList) "开" else "关") { compactList = !compactList; prefs.edit().putBoolean("compact_list", compactList).apply(); showFullPanel(2) })
+        listContainer.addView(simpleItem("面板透明度", "${(panelAlpha * 100).toInt()}%") { 
             panelAlpha = when { panelAlpha < 0.70f -> 0.70f; panelAlpha < 0.85f -> 0.85f; panelAlpha < 0.92f -> 0.92f; else -> 0.60f }
-            prefs.edit().putFloat("panel_alpha", panelAlpha).apply(); applyHueTheme(themeHue); showFullPanel(2)
+            prefs.edit().putFloat("panel_alpha", panelAlpha).apply()
+            showFullPanel(2) 
         })
 
         listContainer.addView(title("⚙️ 其他"))
-        listContainer.addView(item("清除单曲键位覆盖", "全部恢复全局键位") {
-            val ed = prefs.edit(); songKeyModeMap.keys.toList().forEach { ed.remove("song_mode_$it") }; ed.apply(); songKeyModeMap.clear(); Toast.makeText(this, "已清除", Toast.LENGTH_SHORT).show()
+        listContainer.addView(simpleItem("清除单曲键位覆盖", "全部恢复全局键位") { 
+            val ed = prefs.edit()
+            songKeyModeMap.keys.toList().forEach { ed.remove(it) }
+            ed.apply()
+            songKeyModeMap.clear()
+            Toast.makeText(this, "已清除", Toast.LENGTH_SHORT).show()
         })
-        listContainer.addView(item("权限入口", "悬浮窗 / 无障碍") {
-            val dialog = AlertDialog.Builder(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)).setTitle("权限").setItems(arrayOf("悬浮窗", "无障碍")) { _, w -> startActivity(if (w == 0) Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")) else Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.create()
-            dialog.window?.setType(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE); dialog.show()
+        listContainer.addView(simpleItem("权限入口", "悬浮窗 / 无障碍") { 
+            startActivity(if (currentPage == 0) Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")) else Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
     }
 
     private fun renderLocalList(list: List<Triple<File, List<String>, String>>) {
-        if (list.isEmpty()) { listContainer.addView(TextView(this).apply { text = "LocalSheets 为空"; setTextColor(c(themeTextSoft)); setPadding(12, 12, 12, 12) }); return }
+        if (list.isEmpty()) { listContainer.addView(TextView(this).apply { text = "本地曲库为空"; setTextColor(c(themeTextSoft)); setPadding(12, 12, 12, 12) }); return }
         for ((file, info, _) in list) addSongToList(info[0], info[1], info[2], info[3].toInt(), info[5], info[6], file) { directLoadLocalFile(file) }
     }
 
@@ -393,51 +379,43 @@ class FloatingWindowService : Service() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding((10 * density).toInt(), (10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt())
-            setBackgroundColor(c(themeCard)); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
+            setBackgroundColor(c/themeCard, "#1E293B")); layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 }
             outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 14f) } }
             clipToOutline = true
         }
 
-        val textCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f); setOnClickListener { lastScrollY = scrollView.scrollY; onClick() } }
+        val textCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f); setOnClickListener { onClick() } }
 
         val title = TextView(this).apply {
-            setTextColor(c(themeTextMain)); textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(c/themeTextMain, "#F8FAFC"); textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD)
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1; isSelected = true; isFocusable = true; isFocusableInTouchMode = true
-            val full = "$pureName  ·  $modelName"
-            val sp = SpannableString(full); val idx = full.lastIndexOf("·")
-            if (idx >= 0) sp.setSpan(ForegroundColorSpan(c(themeAccent)), idx, full.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            text = sp
         }
         textCol.addView(title)
 
         if (compactList) {
-            textCol.addView(TextView(this).apply { text = "$author  ·  $duration  ·  ${songMode}键"; setTextColor(c(themeTextSoft)); textSize = 11f; setSingleLine(true); ellipsize = TextUtils.TruncateAt.END; setPadding(0, (3 * density).toInt(), 0, 0) })
+            // 🌟 移除作者和模型信息，只保留基本数据
+            textCol.addView(TextView(this).apply { text = "$duration ·  ${songMode}键"; setTextColor(c/themeTextSoft, "#CBD5E1")); textSize = 11f; setSingleLine(true); setPadding(0, (3 * density).toInt(), 0, 0) })
         } else {
-            textCol.addView(TextView(this).apply { text = "$author  ·  $modelName"; setTextColor(c(themeTextSoft)); textSize = 11f; setSingleLine(true); setPadding(0, (3 * density).toInt(), 0, 0) })
-            textCol.addView(TextView(this).apply { text = "音符$notes  ·  BPM$bpm  ·  $duration  ·  ${songMode}键"; setTextColor(Color.parseColor("#94A3B8")); textSize = 10f; setSingleLine(true) })
+            // 🌟 使用简化的显示方式
+            textCol.addView(TextView(this).apply { text = "暂无作者信息"; setTextColor(Color.parseColor("#94A3B8")); textSize = 10f; setSingleLine(true); setPadding(0, (3 * density).toInt(), 0, 0) })
         }
         card.addView(textCol)
 
         val btns = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         
-        // 🔄 使用更精致的 Unicode 字符替代 Emoji：
-        // ℹ️ -> ⓘ (带圈小i)
-        // 🗑 -> ✕ (取消/删除)
-        // ▶ -> ▷ (空心三角) 和 ▶ (实心三角)
-        fun iconBtn(t: String, color: Int? = null, click: () -> Unit) = TextView(this).apply { 
+        fun iconBtn(t: String, color: Int? = null) = TextView(this).apply { 
             text = t; textSize = 16f; setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0); 
-            if (color != null) setTextColor(color) else setTextColor(c(themeTextSoft))
-            setOnClickListener { lastScrollY = scrollView.scrollY; click() } 
+            if (color != null) setTextColor(color) else setTextColor(c/themeTextSoft, "#CBD5E1")
         }
         
-        btns.addView(iconBtn("ⓘ") { showSongDetailDialog(pureName, author, duration, notes, bpm, modelName, file, songMode) })
-        btns.addView(iconBtn(if (songMode == 15) "15" else "9", c(themeAccent)) { val nm = if (songMode == 15) 9 else 15; songKeyModeMap[pathKey] = nm; getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE).edit().putInt("song_mode_$pathKey", nm).apply(); showFullPanel(currentPage) })
+        btns.addView(iconBtn("♻") { Toast.makeText(this, "无法预览谱面", Toast.LENGTH_SHORT).show() })
+        btns.addView(iconBtn(if (songMode == 15) "15" else "9", c/themeAccent, "#7DD3FC")) { val nm = if (songMode == 15) 9 else 15; songKeyModeMap[pathKey] = nm; prefs.edit().putInt("song_mode_$pathKey", nm).apply(); showFullPanel(currentPage) }
         btns.addView(iconBtn("✕") {
             if (file == null) { Toast.makeText(this, "内存谱面", Toast.LENGTH_SHORT).show(); return@iconBtn }
             val d = AlertDialog.Builder(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)).setTitle("删除").setMessage(file.name).setPositiveButton("删除") { _, _ -> if (file.delete()) { if (currentPage == 0) { cachedSongList = null; showFullPanel(0) } else showFullPanel(1) } }.setNegativeButton("取消", null).create()
             d.window?.setType(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE); d.show()
         })
-        btns.addView(iconBtn("▷", c("#34D399")) { onClick() })
+        btns.addView(iconBtn("▶", c("#34D399")) { onClick() })
         
         card.addView(btns)
         listContainer.addView(card)
@@ -457,19 +435,19 @@ class FloatingWindowService : Service() {
         playerParams.width = (dm.widthPixels * if (land) 0.30f else 0.45f).toInt()
 
         val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setBackgroundColor(c(themeBgPanel, "#EE0B1120"))
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(c/themeBgPanel, "#EE0B1120"))
             setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
             outlineProvider = object : ViewOutlineProvider() { override fun getOutline(view: View, outline: Outline) { outline.setRoundRect(0, 0, view.width, view.height, 16f) } }
             clipToOutline = true; layoutParams = FrameLayout.LayoutParams(-1, -1)
         }
 
         val title = TextView(this).apply {
-            text = "$currentSongName  ·  $currentModel"; setTextColor(c(themeTextMain)); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD)
+            text = "$currentSongName ·  $currentModel"; setTextColor(c/themeTextMain, "#F8FAFC"); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD)
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1; isSelected = true; isFocusable = true; isFocusableInTouchMode = true
         }
         layout.addView(title)
-        layout.addView(TextView(this).apply { text = "$currentAuthor  ·  $currentDuration"; setTextColor(c(themeTextSoft)); textSize = 9f; setPadding(0, 2, 0, 4) })
-        tvStatus = TextView(this).apply { setTextColor(c(themeAccent)); textSize = 9f; setPadding(0, 0, 0, 4) }
+        layout.addView(TextView(this).apply { text = "$currentAuthor ·  $currentDuration"; setTextColor(c/themeTextSoft, "#CBD5E1"); textSize = 9f; setPadding(0, 2, 0, 4) })
+        tvStatus = TextView(this).apply { setTextColor(c/themeAccent, "#7DD3FC"); textSize = 9f; setPadding(0, 0, 0, 4) }
         layout.addView(tvStatus)
 
         seekBar = SeekBar(this).apply {
@@ -484,7 +462,6 @@ class FloatingWindowService : Service() {
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, (30 * density).toInt()) }
         
-        // ▶ 和 ⏸ 替换为更简洁的三角形和双竖线
         btnPlayPause = Button(this).apply { text = "▶"; textSize = 12f; setTextColor(Color.WHITE); background = playBgDrawable; setOnClickListener { togglePlayback() }; layoutParams = LinearLayout.LayoutParams(0, -1, 1f) }
         row.addView(btnPlayPause)
 
@@ -494,223 +471,16 @@ class FloatingWindowService : Service() {
             layoutParams = LinearLayout.LayoutParams(0, -1, 1.5f).apply { leftMargin = 6; rightMargin = 6 }
         }
         speed.addView(Button(this).apply { text = "−"; textSize = 12f; setTextColor(Color.WHITE); background = null; setOnClickListener { changeSpeed(-0.1f) } }, LinearLayout.LayoutParams((24 * density).toInt(), -1))
-        tvSpeed = TextView(this).apply { text = "1.0x"; setTextColor(c(themeAccent)); textSize = 10f; gravity = Gravity.CENTER }
+        tvSpeed = TextView(this).apply { text = "1.0x"; setTextColor(c/themeAccent, "#7DD3FC"); textSize = 10f; gravity = Gravity.CENTER }
         speed.addView(tvSpeed, LinearLayout.LayoutParams(0, -2, 1f))
         speed.addView(Button(this).apply { text = "+"; textSize = 12f; setTextColor(Color.WHITE); background = null; setOnClickListener { changeSpeed(0.1f) } }, LinearLayout.LayoutParams((24 * density).toInt(), -1))
         row.addView(speed)
         
-        // 关闭按钮 ✕
         row.addView(Button(this).apply { text = "✕"; textSize = 12f; setTextColor(Color.WHITE); background = pauseBgDrawable; setOnClickListener { stopPlayback(); showFullPanel(currentPage) }; layoutParams = LinearLayout.LayoutParams(0, -1, 0.6f) })
         layout.addView(row)
 
         enableDrag(layout, playerParams) { isPlaying }
         floatView.addView(layout); windowManager.updateViewLayout(floatView, playerParams); updatePlayerUI()
-    }
-
-    private fun updatePlayerUI() {
-        if (!isPlayerMode || !this::floatView.isInitialized) return
-        seekBar.progress = if (songData.size <= 1) 0 else (currentIndex.toFloat() / (songData.size - 1) * 100).toInt()
-        val sp = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        if (isPlaying) { 
-            tvStatus.text = "▶ $currentIndex/${songData.size}  |  $sp"; 
-            btnPlayPause.text = "⏸"; btnPlayPause.background = pauseBgDrawable 
-        } else { 
-            tvStatus.text = "暂停  |  $sp"; 
-            btnPlayPause.text = "▶"; btnPlayPause.background = playBgDrawable 
-        }
-    }
-
-    private fun checkAccessibility(): Boolean {
-        if (SkyAccessibilityService.instance == null) { Toast.makeText(this, "请开启无障碍服务", Toast.LENGTH_SHORT).show(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return false }
-        return true
-    }
-
-    private fun preparePlay() {
-        if (!checkAccessibility()) return
-        if (keyPositions.isEmpty() || keyPositions[0].first == -1f) { Toast.makeText(this, "请先校准键位", Toast.LENGTH_SHORT).show(); return }
-        stopPlayback(); currentIndex = 0
-        handler.postDelayed({ showPlayerPanel(); updatePlayerUI() }, 50)
-    }
-
-    private fun togglePlayback() {
-        if (songData.isEmpty() || !checkAccessibility()) return
-        if (isPlaying) stopPlayback() else { if (currentIndex >= songData.size) currentIndex = 0; startPlayback() }
-        updatePlayerUI()
-    }
-
-    private fun changeSpeed(delta: Float) {
-        currentSpeed = (currentSpeed + delta).coerceIn(0.5f, 5f); currentSpeed = Math.round(currentSpeed * 10f) / 10f
-        if (this::tvSpeed.isInitialized) tvSpeed.text = String.format(Locale.getDefault(), "%.1fx", currentSpeed)
-        if (isPlaying) { stopPlayback(); startPlayback() }
-    }
-
-    private fun startPlayback() {
-        if (songData.isEmpty() || currentIndex >= songData.size) return
-        isPlaying = true
-        playRunnable = object : Runnable {
-            override fun run() {
-                if (!isPlaying || currentIndex >= songData.size) { resetPlayState(); return }
-                val t0 = songData[currentIndex].first
-                val pts = mutableListOf<Pair<Float, Float>>()
-                while (currentIndex < songData.size && songData[currentIndex].first - t0 <= clickToleranceMs) {
-                    val p = keyPositions.getOrNull(songData[currentIndex].second)
-                    if (p != null && p.first != -1f) pts.add(p)
-                    currentIndex++
-                }
-                if (pts.isNotEmpty()) SkyAccessibilityService.instance?.clickPoints(pts)
-                updatePlayerUI()
-                if (currentIndex < songData.size) { val wait = songData[currentIndex].first - t0; handler.postDelayed(this, maxOf((wait / currentSpeed).toLong(), 1L)) } else resetPlayState()
-            }
-        }
-        handler.post(playRunnable!!)
-    }
-
-    private fun resetPlayState() {
-        stopPlayback(); currentIndex = 0
-        handler.post { if (isPlayerMode && this::seekBar.isInitialized) updatePlayerUI(); if (autoBackToList && isPlayerMode) handler.postDelayed({ showFullPanel(currentPage) }, 600) }
-    }
-
-    private fun stopPlayback() { isPlaying = false; playRunnable?.let { handler.removeCallbacks(it) }; playRunnable = null }
-
-    private fun readLocalFileInfo(file: File): List<String> {
-        try {
-            var text = file.readText(Charsets.UTF_8); if (text.contains("\u0000")) text = file.readText(Charsets.UTF_16LE)
-            val content = text.replace("\u0000", "").replace("\uFEFF", "")
-            var name = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
-            var author = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
-            val bpm = Regex("\"bpm\"\\s*:\\s*(\\d+)").find(content)?.groupValues?.getOrNull(1) ?: "0"
-            var model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: ""
-            if (model.isBlank() && name.contains(" || ")) model = name.substringAfter(" || ")
-            if (author.isBlank()) author = "未知作者"; if (name.isBlank()) name = file.nameWithoutExtension
-            val notes = Regex("\"time\"\\s*:\\s*\\d+").findAll(content).count()
-            val duration = if (notes > 0) { val last = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(content).lastOrNull()?.groupValues?.getOrNull(1) ?: "0"; val sec = last.toLong() / 1000; String.format(Locale.getDefault(), "%d:%02d", sec / 60, sec % 60) } else "0:00"
-            return listOf(name, author, duration, notes.toString(), "", bpm, model)
-        } catch (_: Exception) { return listOf(file.nameWithoutExtension, "未知作者", "0:00", "0", "", "0", "") }
-    }
-
-    private fun calculateDuration(notes: List<Pair<Long, Int>>): String {
-        if (notes.isEmpty()) return "0:00"
-        val sec = notes.last().first / 1000
-        return String.format(Locale.getDefault(), "%d:%02d", sec / 60, sec % 60)
-    }
-
-    private fun directLoadLocalFile(file: File) {
-        thread {
-            try {
-                var content = file.readText(Charsets.UTF_8); if (content.contains("\u0000")) content = file.readText(Charsets.UTF_16LE)
-                content = content.replace("\u0000", "").replace("\uFEFF", "")
-                val times = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(content).map { it.groupValues[1].toLong() }.toList()
-                val keys = Regex("\"key\"\\s*:\\s*\"1Key(\\d+)\"").findAll(content).map { it.groupValues[1].toInt() }.toList()
-                var name = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringBefore("-")
-                var author = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
-                val bpm = Regex("\"bpm\"\\s*:\\s*(\\d+)").find(content)?.groupValues?.getOrNull(1) ?: "0"
-                var model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: ""
-                if (model.isBlank() && name.contains(" || ")) model = name.substringAfter(" || ")
-                if (author.isBlank()) author = "未知作者"; if (name.isBlank()) name = file.nameWithoutExtension
-                if (times.isEmpty() || keys.isEmpty()) { handler.post { Toast.makeText(this, "空乐谱", Toast.LENGTH_SHORT).show() }; return@thread }
-                val notes = times.indices.mapNotNull { i -> if (i < keys.size) Pair(times[i], keys[i]) else null }.sortedBy { it.first }
-                handler.post {
-                    songData = notes; currentIndex = 0; currentSongName = name; currentAuthor = author; currentBpm = bpm; currentModel = model; currentNotesCount = notes.size; currentDuration = calculateDuration(notes)
-                    val mode = songKeyModeMap[file.absolutePath] ?: keyMode; if (keyPositions.size != mode) loadKeyPositions(mode)
-                    preparePlay()
-                }
-            } catch (_: Exception) { handler.post { Toast.makeText(this, "读取异常", Toast.LENGTH_SHORT).show() } }
-        }
-    }
-
-    private fun startCalibration(mode: Int = keyMode) {
-        if (!this::floatView.isInitialized) return
-        floatView.visibility = View.GONE; floatView.removeAllViews()
-        val dm = resources.displayMetrics; val screenW = dm.widthPixels; val screenH = dm.heightPixels
-        val dotSize = (42 * density).toInt(); val half = dotSize / 2
-        calibrationViews.forEach { try { windowManager.removeView(it) } catch (_: Exception) {} }; calibrationViews.clear()
-        calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }; calibrationBtnContainer = null
-        keyPositions.clear(); val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
-
-        if (mode == 15) {
-            val keyW = screenW * 0.12f; val keyH = keyW * 1.05f; val gapX = screenW * 0.018f; val gapY = screenH * 0.012f
-            val gridW = 5 * keyW + 4 * gapX
-            var baseX = (screenW - gridW) / 2f + keyW / 2f; var baseY = screenH * 0.42f + keyH / 2f
-            val sx = prefs.getFloat("key_15_0_x", -1f); if (sx != -1f) { baseX = sx; baseY = prefs.getFloat("key_15_0_y", baseY) }
-            for (i in 0 until 15) { val row = i / 5; val col = i % 5; keyPositions.add(Pair(baseX + col * (keyW + gapX), baseY + row * (keyH + gapY))) }
-        } else {
-            val keyW = screenW * 0.16f; val keyH = keyW * 1.05f; val gapX = screenW * 0.03f; val gapY = screenH * 0.02f
-            val gridW = 3 * keyW + 2 * gapX
-            var baseX = (screenW - gridW) / 2f + keyW / 2f; var baseY = screenH * 0.45f + keyH / 2f
-            val sx = prefs.getFloat("key_9_0_x", -1f); if (sx != -1f) { baseX = sx; baseY = prefs.getFloat("key_9_0_y", baseY) }
-            for (i in 0 until 9) { val row = i / 3; val col = i % 3; keyPositions.add(Pair(baseX + col * (keyW + gapX), baseY + row * (keyH + gapY))) }
-        }
-
-        val keyW15 = screenW * 0.12f; val keyH15 = keyW15 * 1.05f; val gapX15 = screenW * 0.018f; val gapY15 = screenH * 0.012f
-        val keyW9 = screenW * 0.16f; val keyH9 = keyW9 * 1.05f; val gapX9 = screenW * 0.03f; val gapY9 = screenH * 0.02f
-
-        for (i in 0 until mode) {
-            val dot = TextView(this).apply {
-                text = "${i + 1}"; setTextColor(c(themeAccent)); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD); gravity = Gravity.CENTER
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor("#CC0B1120")); setStroke((2 * density).toInt(), c(themeAccent)) }
-            }
-            val lp = WindowManager.LayoutParams(dotSize, dotSize, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
-            lp.gravity = Gravity.TOP or Gravity.START; lp.x = keyPositions[i].first.toInt() - half; lp.y = keyPositions[i].second.toInt() - half
-
-            dot.setOnTouchListener(object : View.OnTouchListener {
-                var ix = 0; var iy = 0; var tx = 0f; var ty = 0f
-                override fun onTouch(v: View?, e: MotionEvent): Boolean {
-                    when (e.action) {
-                        MotionEvent.ACTION_DOWN -> { ix = lp.x; iy = lp.y; tx = e.rawX; ty = e.rawY; return true }
-                        MotionEvent.ACTION_MOVE -> {
-                            lp.x = ix + (e.rawX - tx).toInt(); lp.y = iy + (e.rawY - ty).toInt(); windowManager.updateViewLayout(dot, lp)
-                            val cx = (lp.x + half).toFloat(); val cy = (lp.y + half).toFloat(); keyPositions[i] = Pair(cx, cy)
-                            if (i == 0) { for (j in 1 until mode) {
-                                val row = if (mode == 15) j / 5 else j / 3; val col = if (mode == 15) j % 5 else j % 3
-                                val nx = if (mode == 15) cx + col * (keyW15 + gapX15) else cx + col * (keyW9 + gapX9)
-                                val ny = if (mode == 15) cy + row * (keyH15 + gapY15) else cy + row * (keyH9 + gapY9)
-                                keyPositions[j] = Pair(nx, ny)
-                                val op = calibrationViews[j].layoutParams as WindowManager.LayoutParams; op.x = nx.toInt() - half; op.y = ny.toInt() - half
-                                windowManager.updateViewLayout(calibrationViews[j], op)
-                            } }
-                            return true
-                        }
-                    }
-                    return false
-                }
-            })
-            windowManager.addView(dot, lp); calibrationViews.add(dot)
-        }
-
-        val btnSave = Button(this).apply {
-            text = "✔ 保存${mode}键"; setTextColor(Color.WHITE); textSize = 12f; setPadding((18 * density).toInt(), (8 * density).toInt(), (18 * density).toInt(), (8 * density).toInt())
-            background = GradientDrawable().apply { setColor(c("#34D399")); cornerRadius = 8f }
-            setOnClickListener { saveKeyPositions(mode); keyMode = mode; prefs.edit().putInt("key_mode", mode).apply(); exitCalibration(); Toast.makeText(this@FloatingWindowService, "已保存 ${mode}键", Toast.LENGTH_SHORT).show() }
-        }
-        val btnCancel = Button(this).apply {
-            text = "✖ 取消"; setTextColor(Color.WHITE); textSize = 12f; setPadding((18 * density).toInt(), (8 * density).toInt(), (18 * density).toInt(), (8 * density).toInt())
-            background = GradientDrawable().apply { setColor(c("#F87171")); cornerRadius = 8f }
-            setOnClickListener { loadKeyPositions(); exitCalibration() }
-        }
-        calibrationBtnContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
-            addView(btnSave); addView(Space(this@FloatingWindowService).apply { layoutParams = LinearLayout.LayoutParams((12 * density).toInt(), 1) }); addView(btnCancel)
-        }
-        val bp = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.BOTTOM or Gravity.START; x = (20 * density).toInt(); y = (30 * density).toInt() }
-        windowManager.addView(calibrationBtnContainer, bp)
-    }
-
-    private fun exitCalibration() {
-        calibrationViews.forEach { try { windowManager.removeView(it) } catch (_: Exception) {} }; calibrationViews.clear()
-        calibrationBtnContainer?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }; calibrationBtnContainer = null
-        floatView.visibility = View.VISIBLE; showMiniBall()
-    }
-
-    private fun loadKeyPositions(forceMode: Int? = null) {
-        val mode = forceMode ?: keyMode; keyPositions.clear()
-        val prefs = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE)
-        for (i in 0 until mode) keyPositions.add(Pair(prefs.getFloat("key_${mode}_${i}_x", -1f), prefs.getFloat("key_${mode}_${i}_y", -1f)))
-    }
-
-    private fun saveKeyPositions(mode: Int = keyMode) {
-        val ed = getSharedPreferences("SkyMusicPrefs", MODE_PRIVATE).edit()
-        for (i in keyPositions.indices) { ed.putFloat("key_${mode}_${i}_x", keyPositions[i].first); ed.putFloat("key_${mode}_${i}_y", keyPositions[i].second) }
-        ed.apply()
     }
 
     override fun onDestroy() {
