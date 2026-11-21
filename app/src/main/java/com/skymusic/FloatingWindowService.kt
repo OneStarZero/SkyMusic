@@ -911,19 +911,40 @@ val a = (panelAlpha * 255).toInt().coerceIn(150, 255)
                 .apply()
             showFullPanel(currentPage, resetScroll = false)
         })
-        btns.addView(iconBtn("✕", c("#F87171")) {
+                btns.addView(iconBtn("✕", c("#F87171")) {
             if (file == null) {
                 Toast.makeText(this, "内存谱面", Toast.LENGTH_SHORT).show()
                 return@iconBtn
             }
+
+            val sizeText = try {
+                FloatingWindowHelpers.formatSize(file.length())
+            } catch (_: Exception) {
+                "—"
+            }
+
+            val info = buildString {
+                append("谱面名称：").append(pureName).append('\n')
+                append("作者：").append(author.ifBlank { "未知作者" }).append('\n')
+                append("模型：").append(modelName.ifBlank { "—" }).append('\n')
+                append("键位：").append(songMode).append(" 键").append('\n')
+                append("音符：").append(notes).append('\n')
+                append("时长：").append(duration).append('\n')
+                append("大小：").append(sizeText).append('\n')
+                append("路径：\n").append(file.absolutePath)
+            }
+
             val dialog = AlertDialog.Builder(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault_Dialog_Alert))
-                .setTitle("删除")
-                .setMessage(file.name)
+                .setTitle("确认删除谱面")
+                .setMessage(info)
                 .setPositiveButton("删除") { _, _ ->
                     if (file.delete()) {
                         invalidateSheetCache(file)
                         if (currentPage == 0) cachedSongList = null
+                        Toast.makeText(this, "已删除", Toast.LENGTH_SHORT).show()
                         showFullPanel(currentPage, resetScroll = false)
+                    } else {
+                        Toast.makeText(this, "删除失败", Toast.LENGTH_SHORT).show()
                     }
                 }
                 .setNegativeButton("取消", null)

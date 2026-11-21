@@ -326,18 +326,26 @@ class MainActivity : AppCompatActivity() {
          * 注意：@JavascriptInterface 方法在 WebView 的 JavaBridge 线程执行，
          * 这里不能碰 UI，也不能 runOnUiThread（否则拿不到返回值）。
          */
-        @JavascriptInterface
+                  @JavascriptInterface
         fun saveSheetImage(payloadJson: String): String {
             return try {
                 val baseDir = File("/storage/emulated/0/SkyMusic-OneStar/")
                 if (!baseDir.exists()) baseDir.mkdirs()
-                SheetImageExporter.export(baseDir, payloadJson).toString()
+
+                SheetImageExporter.export(baseDir, payloadJson) { text, percent ->
+                    runOnUiThread {
+                        val safeText = JSONObject.quote(text)
+                        webViewInstance?.evaluateJavascript(
+                            "if (window.onSheetImageProgress) window.onSheetImageProgress($safeText, $percent);",
+                            null
+                        )
+                    }
+                }.toString()
             } catch (e: Throwable) {
                 JSONObject().put("ok", false).put("error", e.message ?: "未知错误").toString()
             }
         }
     }
-
     private fun handleSendApp(payloadStr: String) {
         try {
             val payload = JSONObject(payloadStr)

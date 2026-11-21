@@ -9,6 +9,16 @@ internal object FloatingWindowHelpers {
         val totalSec = ms.coerceAtLeast(0L) / 1000L
         return String.format(Locale.getDefault(), "%d:%02d", totalSec / 60L, totalSec % 60L)
     }
+    /** 文件大小格式化：B / KB / MB */
+    fun formatSize(bytes: Long): String {
+        if (bytes < 0) return "—"
+        if (bytes < 1024) return "$bytes B"
+        val kb = bytes / 1024.0
+        if (kb < 1024) return String.format(Locale.US, "%.1f KB", kb)
+        val mb = kb / 1024.0
+        return String.format(Locale.US, "%.2f MB", mb)
+    }
+
 
     fun calculateDuration(notes: List<Pair<Long, Int>>): String {
         if (notes.isEmpty()) return "0:00"

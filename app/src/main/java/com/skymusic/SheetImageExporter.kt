@@ -42,13 +42,18 @@ object SheetImageExporter {
 
     // ============================ 对外入口 ============================
 
-    fun export(baseDir: File, payloadJson: String): JSONObject {
+             fun export(
+        baseDir: File,
+        payloadJson: String,
+        onProgress: ((String, Int) -> Unit)? = null
+    ): JSONObject {
         try {
             val root = JSONObject(payloadJson)
             val songName = root.optString("songName", "未命名乐谱").ifBlank { "未命名乐谱" }
             val rows = root.optInt("rows", 15).coerceIn(1, 15)
             val st = Style.from(root.optJSONObject("style"))
             val mergeLong = root.optBoolean("mergeLong", false)
+            val longOnly = root.optBoolean("longOnly", false)
             val totalPages = root.optInt("totalPages", 0)
             val infoItems = parseInfoItems(root.optJSONArray("infoItems"))
             val pagesArr = root.optJSONArray("pages")
@@ -57,47 +62,70 @@ object SheetImageExporter {
                 return fail("没有选中任何页面")
             }
 
-            // 子目录名 = 谱面名（保留 " || 模型名"），只做非法字符替换
             val safeName = sanitize(songName)
-            val dir = File(baseDir, safeName)
-            if (!dir.exists() && !dir.mkdirs()) {
-                return fail("无法创建目录：" + dir.absolutePath)
+            val rootDir = File(baseDir, safeName)
+            if (!rootDir.exists() && !rootDir.mkdirs()) {
+                return fail("无法创建目录：" + rootDir.absolutePath)
+            }
+
+            // 多图保存时，逐页 PNG 放进「分页」子文件夹；仅长图时直接放根目录
+            val pageDir = if (longOnly) rootDir else File(rootDir, "分页")
+            if (!longOnly && !pageDir.exists() && !pageDir.mkdirs()) {
+                return fail("无法创建目录：" + pageDir.absolutePath)
             }
 
             val files = ArrayList<String>()
             val pageCount = if (totalPages > 0) totalPages else pagesArr.length()
+            val total = pagesArr.length()
 
-            // —— 逐页导出 ——
-            val rendered = ArrayList<Bitmap>(pagesArr.length())
+            // 预解析所有页数据，避免绘制时反复解析 JSON
+            val parsedPages = ArrayList<PageData>(total)
+            for (i in 0 until total) {
+                val pageObj = pagesArr.optJSONObject(i) ?: continue
+                parsedPages.add(parsePage(pageObj, rows))
+            }
+
+            // 预计算尺寸（所有页尺寸相同）
+            val size = measure(rows, st, infoItems.size)
+            val scale = computeScale(size.width, size.height)
+
+            val rendered = ArrayList<Bitmap>(parsedPages.size)
             try {
-                for (i in 0 until pagesArr.length()) {
-                    val pageObj = pagesArr.optJSONObject(i) ?: continue
-                    val pageIndex = pageObj.optInt("index", i)
-                    val bitmap = drawPage(
-                        pageObj, songName, rows, st, pageIndex, pageCount, infoItems
+                for (i in parsedPages.indices) {
+                    val pageIndex = pagesArr.optJSONObject(i)?.optInt("index", i) ?: i
+
+                    onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 80) / total)
+
+                    val bitmap = drawPageFast(
+                        parsedPages[i], songName, rows, st, pageIndex, pageCount,
+                        infoItems, size, scale
                     ) ?: return fail("第 " + (pageIndex + 1) + " 页绘制失败")
 
-                    val fileName = if (pageIndex == 0) {
-                        "$safeName.png"
-                    } else {
-                        "$safeName-${pageIndex + 1}.png"
+                    if (!longOnly) {
+                        val fileName = if (pageIndex == 0) {
+                            "$safeName.png"
+                        } else {
+                            "$safeName-${pageIndex + 1}.png"
+                        }
+                        writeBitmap(bitmap, File(pageDir, fileName))
+                        files.add(fileName)
                     }
-                    writeBitmap(bitmap, File(dir, fileName))
-                    files.add(fileName)
 
-                    if (mergeLong) rendered.add(bitmap) else bitmap.recycle()
+                    if (mergeLong || longOnly) rendered.add(bitmap) else bitmap.recycle()
                 }
 
-                // —— 可选：完整长图 ——
-                if (mergeLong && rendered.isNotEmpty()) {
+                if ((mergeLong || longOnly) && rendered.isNotEmpty()) {
+                    onProgress?.invoke("正在拼接长图…", 85)
                     val longBitmap = mergePages(rendered, st)
                     if (longBitmap != null) {
                         val longName = "$safeName$LONG_SUFFIX.png"
-                        writeBitmap(longBitmap, File(dir, longName))
+                        writeBitmap(longBitmap, File(rootDir, longName))
                         files.add(longName)
                         longBitmap.recycle()
                     }
                 }
+
+                onProgress?.invoke("完成", 100)
             } finally {
                 for (bmp in rendered) {
                     if (!bmp.isRecycled) bmp.recycle()
@@ -108,12 +136,14 @@ object SheetImageExporter {
 
             return JSONObject()
                 .put("ok", true)
-                .put("dir", dir.absolutePath)
+                .put("dir", rootDir.absolutePath)
                 .put("files", JSONArray(files))
         } catch (t: Throwable) {
             return fail(t.message ?: t.javaClass.simpleName)
         }
     }
+
+
 
     private fun fail(message: String): JSONObject =
         JSONObject().put("ok", false).put("error", message)
@@ -127,7 +157,7 @@ object SheetImageExporter {
 
     // ============================ 长图拼接 ============================
 
-    private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
+        private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
         if (pages.isEmpty()) return null
 
         val gap = (st.pad * 0.6f).roundToInt().coerceAtLeast(8)
@@ -141,10 +171,12 @@ object SheetImageExporter {
 
         if (maxW <= 0 || totalH <= 0) return null
 
+        // 降采样：像素总量控制在 4000 万内
         var scale = 1f
         val pixels = maxW.toDouble() * totalH.toDouble()
-        if (pixels > MAX_LONG_PIXELS) {
-            scale = sqrt(MAX_LONG_PIXELS / pixels).toFloat()
+        val limit = 40_000_000.0
+        if (pixels > limit) {
+            scale = sqrt(limit / pixels).toFloat()
         }
 
         val outW = max(1, (maxW * scale).roundToInt())
@@ -167,6 +199,7 @@ object SheetImageExporter {
 
         return longBitmap
     }
+
 
         // ============================ 尺寸计算 ============================
 
@@ -223,18 +256,18 @@ object SheetImageExporter {
 
     // ============================ 绘制 ============================
 
-    private fun drawPage(
-        pageObj: JSONObject,
+      /** 高性能绘制：Paint 复用，尺寸预计算 */
+    private fun drawPageFast(
+        page: PageData,
         songName: String,
         rows: Int,
         st: Style,
         pageIndex: Int,
         pageCount: Int,
-        infoItems: List<Pair<String, String>>
+        infoItems: List<Pair<String, String>>,
+        size: Size,
+        scale: Float
     ): Bitmap? {
-        val page = parsePage(pageObj, rows)
-        val size = measure(rows, st, infoItems.size)
-        val scale = computeScale(size.width, size.height)
         val outW = max(1, (size.width * scale).roundToInt())
         val outH = max(1, (size.height * scale).roundToInt())
 
@@ -242,25 +275,28 @@ object SheetImageExporter {
         val canvas = Canvas(bitmap)
         canvas.scale(scale, scale)
 
+        // 复用 Paint 对象
         val fill = Paint(Paint.ANTI_ALIAS_FLAG)
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val block = RectF()
 
-        // —— 背景 ——
+        // 背景
         drawVerticalGradient(canvas, size.width, size.height, st.bg, st.bgGlow)
         if (st.showStars) drawStars(canvas, size.width, size.height)
         drawWatermark(canvas, size.width, size.height, st)
 
-        // —— 标题 ——
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // 标题
+        textPaint.apply {
             typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
             textSize = st.titleSize
             color = argb(st.titleColor, 1f)
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText(songName, size.width / 2f, st.pad - titlePaint.fontMetrics.top, titlePaint)
+        canvas.drawText(songName, size.width / 2f, st.pad - textPaint.fontMetrics.top, textPaint)
 
-        // —— 页码 ——
-        val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // 页码
+        textPaint.apply {
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
             textSize = st.metaSize
             color = argb(st.metaColor, 1f)
@@ -269,21 +305,21 @@ object SheetImageExporter {
         canvas.drawText(
             "${pageIndex + 1} / $pageCount",
             st.pad,
-            st.pad + st.titleSize * 1.4f + 10f - metaPaint.fontMetrics.top,
-            metaPaint
+            st.pad + st.titleSize * 1.4f + 10f - textPaint.fontMetrics.top,
+            textPaint
         )
 
-        // —— 信息面板（标题正下方，独立占位） ——
+        // 信息面板
         val infoTop = st.pad + size.headerH
         if (st.showInfoPanel && infoItems.isNotEmpty()) {
             drawInfoPanel(canvas, st.pad, infoTop, size.bodyW, infoItems, st)
         }
 
-        // —— 正文（严格从信息面板下方开始） ——
+        // 正文
         val bodyTop = infoTop + size.infoH
         val bodyLeft = st.pad
 
-        val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textPaint.apply {
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
             textSize = st.timeSize
             color = argb(st.timeColor, st.timeAlpha)
@@ -308,12 +344,12 @@ object SheetImageExporter {
             canvas.drawText(
                 formatMs(col.timeMs),
                 gx + size.gridW / 2f,
-                gy + size.gridH + 8f - timePaint.fontMetrics.top,
-                timePaint
+                gy + size.gridH + 8f - textPaint.fontMetrics.top,
+                textPaint
             )
         }
 
-        // —— 页脚 ——
+        // 页脚
         val footY = st.pad + size.headerH + size.infoH + size.bodyH + size.footerH / 2f
         val logoSize = st.logoSize * 1.6f
         val nameWidth = 90f
@@ -322,7 +358,7 @@ object SheetImageExporter {
 
         drawLogo(canvas, startX, footY - logoSize / 2f, logoSize, st, fill, stroke)
 
-        val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textPaint.apply {
             typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
             textSize = st.logoSize
             color = argb(st.logoColor, 1f)
@@ -331,12 +367,13 @@ object SheetImageExporter {
         canvas.drawText(
             APP_NAME,
             startX + logoSize + 8f,
-            footY - (namePaint.fontMetrics.ascent + namePaint.fontMetrics.descent) / 2f,
-            namePaint
+            footY - (textPaint.fontMetrics.ascent + textPaint.fontMetrics.descent) / 2f,
+            textPaint
         )
 
         return bitmap
     }
+
 
     /** 信息面板：两列网格 */
     private fun drawInfoPanel(

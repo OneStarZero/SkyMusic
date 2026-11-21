@@ -8,6 +8,109 @@
 </head>
 <body>
 
+<script>
+(function () {
+  var shown = {};
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function showErrorBox(kind, message, detail) {
+    var key = kind + '|' + message;
+    if (shown[key]) return;
+    shown[key] = true;
+
+    var box = document.getElementById('__err_box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = '__err_box';
+      box.style.cssText =
+        'position:fixed;left:0;right:0;top:0;z-index:2147483647;' +
+        'background:linear-gradient(180deg,#7F1D1D,#450A0A);' +
+        'color:#FEE2E2;font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;' +
+        'padding:12px 14px;max-height:50vh;overflow:auto;' +
+        'border-bottom:2px solid #F87171;' +
+        'box-shadow:0 8px 24px rgba(0,0,0,.6);' +
+        'white-space:pre-wrap;word-break:break-all;';
+      document.body.appendChild(box);
+    }
+
+    var html = '';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">';
+    html += '<span style="font-weight:700;font-size:13px;color:#FCA5A5;">' + esc(kind) + '</span>';
+    html += '<span id="__err_close" style="cursor:pointer;padding:2px 8px;border-radius:6px;' +
+            'background:rgba(255,255,255,.12);font-size:11px;">关闭</span>';
+    html += '</div>';
+    html += '<div style="color:#FECACA;margin-bottom:6px;">' + esc(message) + '</div>';
+    if (detail) {
+      html += '<div style="color:#FCA5A5;font-size:11px;opacity:.85;">' + esc(detail) + '</div>';
+    }
+
+    box.innerHTML = html;
+
+    var closeBtn = document.getElementById('__err_close');
+    if (closeBtn) {
+      closeBtn.onclick = function () {
+        box.remove();
+        delete shown[key];
+      };
+    }
+  }
+
+  window.addEventListener('error', function (e) {
+    var file = (e.filename || '').split('/').pop() || 'unknown';
+    var line = e.lineno || '?';
+    var col = e.colno || '?';
+    var msg = e.message || 'unknown error';
+
+    // 资源加载失败（img/script/link）
+    if (e.target && e.target !== window && e.target.tagName) {
+      var tag = e.target.tagName.toLowerCase();
+      var src = e.target.src || e.target.href || '';
+      showErrorBox(
+        '资源加载失败',
+        '<' + tag + '> ' + src,
+        '请检查文件是否存在'
+      );
+      return;
+    }
+
+    showErrorBox(
+      '脚本错误',
+      msg,
+      '文件: ' + file + '  行: ' + line + '  列: ' + col
+    );
+  }, true);
+
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason;
+    var msg = r && r.message ? r.message : String(r);
+    var stack = r && r.stack ? r.stack : '';
+    showErrorBox('未处理的 Promise 拒绝', msg, stack);
+  });
+
+  // 捕获 console.error
+  var origError = console.error;
+  console.error = function () {
+    var args = Array.prototype.slice.call(arguments);
+    var msg = args.map(function (a) {
+      if (a instanceof Error) return a.message;
+      if (typeof a === 'object') {
+        try { return JSON.stringify(a); } catch (e) { return String(a); }
+      }
+      return String(a);
+    }).join(' ');
+    showErrorBox('console.error', msg, '');
+    origError.apply(console, arguments);
+  };
+})();
+</script>
+
+
 <!-- 🌟 沉浸式加载界面 -->
 <div id="loading-screen">
     <div class="loader-container">

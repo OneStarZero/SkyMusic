@@ -45,13 +45,12 @@ export function createZipWriter() {
     const crc = crc32(bytes);
     const now = dosTime(new Date());
 
-    // 本地文件头
     const local = new Uint8Array(30 + nameBytes.length);
     const lv = new DataView(local.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0x0800, true); // UTF-8 文件名
-    lv.setUint16(8, 0, true);      // store
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
     lv.setUint16(10, now.time, true);
     lv.setUint16(12, now.date, true);
     lv.setUint32(14, crc, true);
@@ -63,7 +62,6 @@ export function createZipWriter() {
 
     chunks.push(local, bytes);
 
-    // 中央目录记录
     const cd = new Uint8Array(46 + nameBytes.length);
     const cv = new DataView(cd.buffer);
     cv.setUint32(0, 0x02014b50, true);
@@ -128,7 +126,7 @@ export function canvasToBytes(canvas) {
   });
 }
 
-/** 多张 canvas 上下拼接成一张长图 canvas */
+/** 多张 canvas 上下拼接成一张长图 canvas（同步版，仅用于小图） */
 export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
   if (!canvases.length) return null;
 
@@ -167,4 +165,100 @@ export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
   }
 
   return out;
+}
+
+/**
+ * 分块生成长图 PNG 字节，避免一次性持有整张大图
+ * @param {HTMLCanvasElement[]} canvases
+ * @param {number} gapPx
+ * @param {string} bgColor
+ * @param {number} maxPixels
+ * @param {function} onProgress (percent) => void
+ * @returns {Promise<Uint8Array>}
+ */
+export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onProgress) {
+  if (!canvases.length) throw new Error('没有可用的页面');
+
+  let maxW = 0;
+  let totalH = 0;
+  for (let i = 0; i < canvases.length; i++) {
+    if (canvases[i].width > maxW) maxW = canvases[i].width;
+    totalH += canvases[i].height;
+  }
+  totalH += gapPx * (canvases.length - 1);
+
+  let scale = 1;
+  if (maxW * totalH > maxPixels) {
+    scale = Math.sqrt(maxPixels / (maxW * totalH));
+  }
+
+  const outW = Math.max(1, Math.round(maxW * scale));
+  const outH = Math.max(1, Math.round(totalH * scale));
+
+  const CHUNK_H = 2000;
+  const chunkCount = Math.ceil(outH / CHUNK_H);
+
+  const out = document.createElement('canvas');
+  out.width = outW;
+  out.height = outH;
+  const ctx = out.getContext('2d', { alpha: false });
+
+  ctx.fillStyle = bgColor;
+  ctx.fillRect(0, 0, outW, outH);
+
+  const placements = [];
+  let y = 0;
+  for (let i = 0; i < canvases.length; i++) {
+    const c = canvases[i];
+    const dw = c.width * scale;
+    const dh = c.height * scale;
+    const dx = (outW - dw) / 2;
+    placements.push({ canvas: c, dx: dx, dy: y, dw: dw, dh: dh });
+    y += dh + gapPx * scale;
+  }
+
+  for (let chunk = 0; chunk < chunkCount; chunk++) {
+    const chunkTop = chunk * CHUNK_H;
+    const chunkBottom = Math.min(outH, chunkTop + CHUNK_H);
+
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      const pTop = p.dy;
+      const pBottom = p.dy + p.dh;
+      if (pBottom < chunkTop || pTop > chunkBottom) continue;
+
+      const srcTop = Math.max(0, (chunkTop - pTop) / scale);
+      const srcBottom = Math.min(p.canvas.height, (chunkBottom - pTop) / scale);
+      if (srcBottom <= srcTop) continue;
+
+      const srcH = srcBottom - srcTop;
+      const dstY = pTop + srcTop * scale;
+      const dstH = srcH * scale;
+
+      ctx.drawImage(
+        p.canvas,
+        0, srcTop, p.canvas.width, srcH,
+        p.dx, dstY, p.dw, dstH
+      );
+    }
+
+    if (onProgress) {
+      onProgress(Math.round(((chunk + 1) / chunkCount) * 90));
+    }
+
+    await new Promise(r => requestAnimationFrame(r));
+  }
+
+  if (onProgress) onProgress(95);
+
+  const blob = await new Promise((resolve, reject) => {
+    out.toBlob(b => b ? resolve(b) : reject(new Error('PNG 编码失败')), 'image/png');
+  });
+
+  out.width = 0;
+  out.height = 0;
+
+  const buf = await blob.arrayBuffer();
+  if (onProgress) onProgress(100);
+  return new Uint8Array(buf);
 }
