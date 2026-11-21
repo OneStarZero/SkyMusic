@@ -44,7 +44,6 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.util.LinkedHashMap
-import java.util.Map
 import kotlin.concurrent.thread
 import kotlin.math.abs
 
@@ -105,7 +104,7 @@ class FloatingWindowService : Service() {
     private val maxCachedSheets = FloatingWindowConstants.MAX_CACHED_SHEETS
     private val sheetCacheLock = Any()
     private val sheetCachePool = object : LinkedHashMap<String, LoadedSheetEntry>(maxCachedSheets, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, LoadedSheetEntry>?): Boolean {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LoadedSheetEntry>?): Boolean {
             return size > maxCachedSheets
         }
     }
