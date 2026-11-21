@@ -22,8 +22,8 @@ import kotlin.math.sqrt
 /**
  * SkyMusic 0.0.9 · 谱面图片导出器
  * ------------------------------------------------------------------
- * 接收前端 sheet-image.js 计算好的 layout，用 Canvas 逐页绘制成
- * Sky Studio 风格方块谱 PNG，写入 <baseDir>/谱面名称/。
+ * 接收前端 sheet-image 模块计算好的 layout，用 Canvas 逐页绘制成
+ * Sky Studio 风格方块谱 PNG，写入 <baseDir>/<谱面名>/。
  *
  * 支持：
  *   · 只导出用户勾选的页（pages 数组已由前端过滤）
@@ -38,7 +38,6 @@ object SheetImageExporter {
     private const val FONT_STACK = "sans-serif"
     private const val WATERMARK_TEXT = "Bilibili@_OneStar"
     private const val APP_NAME = "SkyMusic"
-    private const val IMAGE_FOLDER_NAME = "谱面名称"
     private const val LONG_SUFFIX = "-Full"
 
     // ============================ 对外入口 ============================
@@ -58,12 +57,13 @@ object SheetImageExporter {
                 return fail("没有选中任何页面")
             }
 
-            val dir = File(baseDir, IMAGE_FOLDER_NAME)
+            // 子目录名 = 谱面名（保留 " || 模型名"），只做非法字符替换
+            val safeName = sanitize(songName)
+            val dir = File(baseDir, safeName)
             if (!dir.exists() && !dir.mkdirs()) {
                 return fail("无法创建目录：" + dir.absolutePath)
             }
 
-            val safeName = sanitize(songName)
             val files = ArrayList<String>()
             val pageCount = if (totalPages > 0) totalPages else pagesArr.length()
 
@@ -127,10 +127,6 @@ object SheetImageExporter {
 
     // ============================ 长图拼接 ============================
 
-    /**
-     * 把所有页上下拼接成一张长图。
-     * 若总像素超过 MAX_LONG_PIXELS，则整体等比降采样。
-     */
     private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
         if (pages.isEmpty()) return null
 
@@ -145,7 +141,6 @@ object SheetImageExporter {
 
         if (maxW <= 0 || totalH <= 0) return null
 
-        // 像素上限保护
         var scale = 1f
         val pixels = maxW.toDouble() * totalH.toDouble()
         if (pixels > MAX_LONG_PIXELS) {
@@ -157,8 +152,6 @@ object SheetImageExporter {
 
         val longBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(longBitmap)
-
-        // 底色，避免降采样后边缘透出
         canvas.drawColor(argb(st.bg, 1f))
 
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -175,15 +168,15 @@ object SheetImageExporter {
         return longBitmap
     }
 
-    // ============================ 尺寸计算 ============================
+        // ============================ 尺寸计算 ============================
 
     private fun gridColsFor(rows: Int): Int = if (rows == 9) 3 else 5
 
-    private fun gridRowsFor(rows: Int): Int = 3
+    private fun gridRowsFor(): Int = 3
 
     private fun measure(rows: Int, st: Style, infoItemCount: Int): Size {
         val gCols = gridColsFor(rows)
-        val gRows = gridRowsFor(rows)
+        val gRows = gridRowsFor()
         val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
         val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
         val timeH = st.timeSize * 2.2f
@@ -194,7 +187,7 @@ object SheetImageExporter {
         if (st.showInfoPanel && infoItemCount > 0) {
             val infoRows = (infoItemCount + 1) / 2
             val infoRowH = st.infoSize * 2.0f
-            infoH = infoRows * infoRowH + 18f
+            infoH = infoRows * infoRowH + 28f
         }
 
         val footerH = st.watermarkSize * 2.6f
@@ -603,10 +596,13 @@ object SheetImageExporter {
         return String.format(Locale.US, "%d:%02d", m, s)
     }
 
+    /**
+     * 文件名净化：只替换文件系统真正不允许的字符，保留 "||" 作为模型分隔符
+     */
     private fun sanitize(name: String): String {
         var s = name.trim()
         if (s.isEmpty()) return "未命名乐谱"
-        s = s.replace(Regex("[\\\\/:*?\"<>|\\r\\n\\t]"), "_")
+        s = s.replace(Regex("[\\\\/:*?\"<>\\r\\n\\t]"), "_")
         s = s.replace(Regex("\\s+"), " ").trim()
         if (s.length > MAX_NAME_LENGTH) s = s.substring(0, MAX_NAME_LENGTH).trim()
         if (s.isEmpty()) s = "未命名乐谱"

@@ -31,7 +31,7 @@ class MainActivity : AppCompatActivity() {
     private var btnAccessibility: TextView? = null
     private var btnRefreshBg: TextView? = null
     private var btnFloatBall: TextView? = null
-
+    private var topBarScroll: HorizontalScrollView? = null
     private val midiPickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             val midiPath = result.data?.getStringExtra("midiPath")
@@ -96,6 +96,8 @@ class MainActivity : AppCompatActivity() {
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
         }
+        topBarScroll = barScroll
+
 
         val barContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -287,6 +289,11 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openMidiPicker() {
             runOnUiThread { midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java)) }
+        }
+        
+        @JavascriptInterface
+        fun setTopBarVisible(visible: Boolean) = runOnUiThread {
+            topBarScroll?.visibility = if (visible) View.VISIBLE else View.GONE
         }
 
         @JavascriptInterface
