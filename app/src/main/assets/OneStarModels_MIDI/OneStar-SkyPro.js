@@ -1,20 +1,31 @@
+export const meta = {
+    mode: 'pro',
+    name: 'OneStar-SkyPro',
+    fidelity: 75,
+    filterLongNotes: true,
+    maxDurationMs: 1000,
+    desc: '全景还原。提取主旋律，智能拆分和弦为琶音，保留丰富听感。'
+};
+
 export function process(mappedNotes, logFn) {
-    logFn(`[3] 执行 OneStar-SkyPro 全景智能还原...`);
-    
-    const GRID_STEP = 20;           
-    const MIN_GAP = 45;             
-    const SAFE_PLAY_GAP = 75;       
-    const MAX_CHORD_KEYS = 4;       
-    const MIN_VELOCITY = 0.2;       
+    if (typeof logFn === 'function') {
+        logFn(`[3] 执行 OneStar-SkyPro 全景智能还原...`);
+    }
+
+    const GRID_STEP = 20;
+    const MIN_GAP = 45;
+    const SAFE_PLAY_GAP = 75;
+    const MAX_CHORD_KEYS = 4;
+    const MIN_VELOCITY = 0.2;
 
     let processedNotes = [];
 
     let rawNotes = mappedNotes
-        .filter(n => n.velocity >= MIN_VELOCITY) 
+        .filter(n => n.velocity >= MIN_VELOCITY)
         .sort((a, b) => a.time - b.time);
 
     let quantized = rawNotes.map(n => ({ ...n, time: Math.round(n.time / GRID_STEP) * GRID_STEP }));
-    
+
     let grouped = [];
     quantized.forEach(note => {
         let existing = grouped.find(g => g.time === note.time);
@@ -27,10 +38,10 @@ export function process(mappedNotes, logFn) {
         g.accompaniment = g.notes.slice(1);
         g.finalKeys = [g.melody.key];
         let usedKeys = new Set([g.melody.key]);
-        
+
         for (let acc of g.accompaniment) {
             if (g.finalKeys.length >= MAX_CHORD_KEYS) break;
-            if (usedKeys.has(acc.key)) continue; 
+            if (usedKeys.has(acc.key)) continue;
             if (Math.abs(g.melody.origMidi - acc.origMidi) <= 24) {
                 g.finalKeys.push(acc.key);
                 usedKeys.add(acc.key);
@@ -46,7 +57,7 @@ export function process(mappedNotes, logFn) {
                 g.accompaniment.forEach(acc => {
                     if (!prev.finalKeys.includes(acc.key) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(acc.key);
                 });
-                return; 
+                return;
             }
         }
         deduplicated.push(g);
@@ -87,7 +98,7 @@ export function process(mappedNotes, logFn) {
             group.finalKeys.forEach(k => {
                 if (!prev.finalKeys.includes(k) && prev.finalKeys.length < MAX_CHORD_KEYS) prev.finalKeys.push(k);
             });
-            prev.time = Math.max(prev.time, currentTime); 
+            prev.time = Math.max(prev.time, currentTime);
         } else {
             alignedGroups.push({ time: currentTime, finalKeys: [...group.finalKeys] });
             lastTime = currentTime;

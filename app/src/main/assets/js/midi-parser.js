@@ -1,10 +1,6 @@
 import { Midi } from '@tonejs/midi';
 import { showToast } from './ui.js';
 
-import { process as processFast } from '../OneStarModels_MIDI/OneStar-SkyFast.js';
-import { process as processPro } from '../OneStarModels_MIDI/OneStar-SkyPro.js';
-import { process as processFastPro } from '../OneStarModels_MIDI/OneStar-SkyFastPro.js';
-
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
 const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
 
@@ -20,15 +16,57 @@ export function mapPitchToSky(midiPitch, shift = 0) {
     return KEY_MAP[best];
 }
 
-export function initMidi() {
-    const container = document.getElementById('modelContainer');
-    if (container) {
-        const cards = Array.from(container.querySelectorAll('.model-card'));
-        cards.sort((a, b) => parseInt(a.getAttribute('data-order') || "99") - parseInt(b.getAttribute('data-order') || "99"));
-        container.innerHTML = '';
-        cards.forEach(card => container.appendChild(card));
+function resolveActiveModel(mode) {
+    const registry = window.SkyMusicModels;
+    if (registry && typeof registry.getByMode === 'function') {
+        const found = registry.getByMode(mode);
+        if (found && typeof found.process === 'function') return found;
+    }
+    if (registry && registry.map && registry.map[mode] && typeof registry.map[mode].process === 'function') {
+        return registry.map[mode];
+    }
+    if (registry && registry.selected && typeof registry.selected.process === 'function') {
+        return registry.selected;
+    }
+    if (registry && Array.isArray(registry.list) && registry.list.length > 0) {
+        return registry.list[0];
+    }
+    return null;
+}
+
+function applyLongNoteFilterIfEnabled(notes, model, logFn) {
+    const shouldFilter = Boolean(model && model.filterLongNotes === true);
+    if (!shouldFilter) {
+        if (typeof logFn === 'function') {
+            logFn(`[2] 自动检测 filterLongNotes=false：保留全部长音（${notes.length} 个）`);
+        }
+        return notes;
     }
 
+    const maxDurMs = (typeof model.maxDurationMs === 'number' && model.maxDurationMs > 0)
+        ? model.maxDurationMs
+        : 1000;
+
+    let removedCount = 0;
+    const kept = notes.filter(n => {
+        const durMs = typeof n.durationMs === 'number'
+            ? n.durationMs
+            : (typeof n.duration === 'number' ? n.duration * 1000 : 0);
+        if (durMs > maxDurMs) {
+            removedCount++;
+            return false;
+        }
+        return true;
+    });
+
+    if (typeof logFn === 'function') {
+        logFn(`[2] 自动检测 filterLongNotes=true（>${maxDurMs}ms）：剔除长音 -${removedCount} 个，剩余 ${kept.length} 个`);
+    }
+
+    return kept;
+}
+
+export function initMidi() {
     const midiInput = document.getElementById('midiFile');
     const dropZone = document.getElementById('dropZone');
     const dropText = document.getElementById('dropText');
@@ -41,14 +79,14 @@ export function initMidi() {
 
     let currentMidiData = null;
     let pendingTxtContent = null;
-    let selectedTrackIndices = new Set(); 
+    let selectedTrackIndices = new Set();
     let hideResultTimeout = null;
 
     function hideResultSmoothly() {
         if (resultCard.style.display === 'none') return;
         resultCard.classList.remove('fade-in');
         resultCard.classList.add('fade-out');
-        
+
         clearTimeout(hideResultTimeout);
         hideResultTimeout = setTimeout(() => {
             resultCard.style.display = 'none';
@@ -56,21 +94,24 @@ export function initMidi() {
         }, 300);
     }
 
-    document.querySelectorAll('.model-card').forEach(card => {
-        card.addEventListener('click', () => {
-            if(card.classList.contains('active')) return;
-            document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-            
+    const modelContainer = document.getElementById('modelContainer');
+    if (modelContainer) {
+        modelContainer.addEventListener('click', (e) => {
+            const card = e.target.closest('.model-card');
+            if (!card) return;
+            const mode = card.dataset.mode;
+            if (window.SkyMusicModels?.map?.[mode]) {
+                window.SkyMusicModels.selected = window.SkyMusicModels.map[mode];
+            }
             hideResultSmoothly();
             logDiv.style.display = 'none';
-            statusDiv.textContent = '已切换提取模型，准备就绪';
+            statusDiv.textContent = `已切换至 ${card.querySelector('.model-name')?.textContent || mode}，准备就绪`;
         });
-    });
+    }
 
     dropZone.addEventListener('click', (e) => {
         if (typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge.openMidiPicker) {
-            e.preventDefault(); 
+            e.preventDefault();
             window.AndroidBridge.openMidiPicker();
         }
     });
@@ -104,7 +145,7 @@ export function initMidi() {
 
         dropZone.classList.add('has-file');
         dropText.innerHTML = `✅ 已选择：<br><span class="filename">${fileName}</span>`;
-        
+
         let rawName = fileName.replace(/\.[^.]+$/, '');
         let songTitle = rawName, originalAuthor = '';
         const separators = [' - ', ' -', '- ', '-', '_', '—'];
@@ -115,7 +156,7 @@ export function initMidi() {
             }
         }
         document.getElementById('songNameInput').value = songTitle;
-        document.getElementById('authorInput').value = originalAuthor; 
+        document.getElementById('authorInput').value = originalAuthor;
 
         statusDiv.textContent = '正在读取文件...';
         configPanel.style.display = 'none';
@@ -140,7 +181,7 @@ export function initMidi() {
                     totalNotes += track.notes.length;
                     const instName = track.instrument.name || '未知乐器';
                     instrumentsSet.add(instName);
-                    
+
                     let displayName = track.name && track.name.trim() !== "" ? track.name.trim() : `轨道 ${index + 1}`;
 
                     track.notes.forEach(n => {
@@ -155,7 +196,7 @@ export function initMidi() {
                     item.className = `track-item ${selectedTrackIndices.has(index) ? 'active' : ''}`;
                     item.innerHTML = `<div class="track-info"><span class="track-name">${displayName}</span><span class="track-notes">${track.notes.length} 音符 - ${instName}</span></div><div class="check-circle"></div>`;
                     item.addEventListener('click', () => {
-                        if (selectedTrackIndices.has(index)) { selectedTrackIndices.delete(index); item.classList.remove('active'); } 
+                        if (selectedTrackIndices.has(index)) { selectedTrackIndices.delete(index); item.classList.remove('active'); }
                         else { selectedTrackIndices.add(index); item.classList.add('active'); }
                     });
                     trackListContainer.appendChild(item);
@@ -175,12 +216,12 @@ export function initMidi() {
             document.getElementById('infoTotalNotes').textContent = totalNotes;
 
             configPanel.style.display = 'block';
-            convertBtn.disabled = false; 
+            convertBtn.disabled = false;
             statusDiv.textContent = '准备就绪';
         } catch (err) {
             statusDiv.textContent = '❌ 解析失败';
             showToast('解析失败: ' + err.message, 'error');
-            dropZone.classList.remove('has-file'); 
+            dropZone.classList.remove('has-file');
             dropText.textContent = "点击选择或拖拽 MIDI 文件";
         }
     }
@@ -188,28 +229,33 @@ export function initMidi() {
     convertBtn.addEventListener('click', (e) => {
         e.preventDefault();
         if (!currentMidiData) return;
-        
+
         if (selectedTrackIndices.size === 0) { showToast('请至少选择一个音轨！', 'error'); return; }
 
         const activeCard = document.querySelector('.model-card.active');
-        const currentMode = activeCard ? activeCard.getAttribute('data-mode') : 'fastpro';
-        const isMelody = (currentMode === 'fast');
-        const isFastPro = (currentMode === 'fastpro');
+        const currentMode = activeCard ? activeCard.getAttribute('data-mode') : (window.SkyMusicModels?.selected?.mode || 'fastpro');
+        const activeModel = resolveActiveModel(currentMode);
 
-        convertBtn.disabled = true; 
+        if (!activeModel || typeof activeModel.process !== 'function') {
+            showToast('未找到可用的提取模型', 'error');
+            return;
+        }
+
+        const modelName = activeModel.shortName || activeModel.name.replace(/^OneStar-/i, '');
+
+        convertBtn.disabled = true;
         convertBtn.querySelector('.btn-text').textContent = '正在提取中...';
-        
+
         hideResultSmoothly();
-        logDiv.style.display = 'block'; 
+        logDiv.style.display = 'block';
         logDiv.textContent = '';
-        
-        statusDiv.textContent = isMelody ? '正在加载 SkyFast...' : (isFastPro ? '正在加载 SkyFastPro...' : '正在加载 SkyPro...');
+
+        statusDiv.textContent = `正在使用 ${activeModel.name}...`;
 
         setTimeout(() => {
             try {
                 let rawNotes = [];
                 let extractedCount = 0;
-                let longNoteCount = 0;
 
                 const selectedArr = Array.from(selectedTrackIndices);
                 let tracksToProcess = currentMidiData.tracks.filter((t, i) => selectedArr.includes(i));
@@ -217,52 +263,61 @@ export function initMidi() {
                 tracksToProcess.forEach(track => {
                     track.notes.forEach(note => {
                         extractedCount++;
-                        if (note.duration * 1000 > 1000) {
-                            longNoteCount++;
-                            return;
-                        }
-                        rawNotes.push({ time: Math.round(note.time * 1000), midi: note.midi, velocity: note.velocity });
+                        rawNotes.push({
+                            time: Math.round(note.time * 1000),
+                            duration: note.duration || 0,
+                            midi: note.midi,
+                            velocity: note.velocity
+                        });
                     });
                 });
 
                 if (rawNotes.length === 0) throw new Error('无有效音符');
 
-                rawNotes.sort((a, b) => a.time - b.time);
-                
-                let pitches = rawNotes.map(n => n.midi).sort((a, b) => a - b);
+                logDiv.textContent += `[1] 原始识别: ${extractedCount} 个\n`;
+
+                const logger = (msg) => logDiv.textContent += msg + '\n';
+                const filteredRawNotes = applyLongNoteFilterIfEnabled(rawNotes, activeModel, logger);
+
+                if (filteredRawNotes.length === 0) throw new Error('过滤长音后无有效音符');
+
+                filteredRawNotes.sort((a, b) => a.time - b.time);
+
+                let pitches = filteredRawNotes.map(n => n.midi).sort((a, b) => a - b);
                 let medianPitch = pitches[Math.floor(pitches.length / 2)];
                 const shift = Math.round((68 - medianPitch) / 12) * 12;
 
-                let mappedNotes = rawNotes.map(n => ({
-                    time: n.time, key: mapPitchToSky(n.midi, shift), velocity: n.velocity, origMidi: n.midi
+                let mappedNotes = filteredRawNotes.map(n => ({
+                    time: n.time,
+                    duration: n.duration,
+                    key: mapPitchToSky(n.midi, shift),
+                    velocity: n.velocity,
+                    origMidi: n.midi
                 }));
 
-                logDiv.textContent += `[1] 原始识别: ${extractedCount} 个\n`;
-                logDiv.textContent += `[2] 剔除长音: -${longNoteCount} 个\n`;
+                let processedNotes = activeModel.process(mappedNotes, logger);
 
-                let processedNotes = [];
-                const logger = (msg) => logDiv.textContent += msg + '\n';
-                
-                if (isMelody) {
-                    processedNotes = processFast(mappedNotes, logger);
-                } else if (isFastPro) {
-                    processedNotes = processFastPro(mappedNotes, logger);
-                } else {
-                    processedNotes = processPro(mappedNotes, logger);
-                }
+                const mergeWindowMs = (typeof activeModel.mergeChordWindowMs === 'number' && activeModel.mergeChordWindowMs >= 0)
+                    ? activeModel.mergeChordWindowMs
+                    : 15;
 
                 let allNotes = [];
-                let finalNotes = [], lastT = -9999;
-                processedNotes.forEach(n => {
-                    if (n.time - lastT < 15) {
-                         let prev = finalNotes[finalNotes.length - 1];
-                         if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
-                    } else {
-                         finalNotes.push({ time: n.time, keys: [n.key] });
-                         lastT = n.time;
-                    }
-                });
-                finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
+                if (mergeWindowMs <= 0) {
+                    // 零合并模式（如 SkyRaw）：1:1 完整保留模型输出的每一个音符
+                    allNotes = processedNotes.map(n => ({ time: n.time, key: n.key }));
+                } else {
+                    let finalNotes = [], lastT = -9999;
+                    processedNotes.forEach(n => {
+                        if (n.time - lastT < mergeWindowMs) {
+                            let prev = finalNotes[finalNotes.length - 1];
+                            if (prev && !prev.keys.includes(n.key)) prev.keys.push(n.key);
+                        } else {
+                            finalNotes.push({ time: n.time, keys: [n.key] });
+                            lastT = n.time;
+                        }
+                    });
+                    finalNotes.forEach(g => g.keys.forEach(k => allNotes.push({ time: g.time, key: k })));
+                }
 
                 logDiv.textContent += `✅ 最终输出音符: ${allNotes.length} 个\n`;
 
@@ -271,14 +326,11 @@ export function initMidi() {
                 if (studioSpeed < 100) studioSpeed = 100;
                 if (studioSpeed > 4000) studioSpeed = 4000;
 
-                let modelName = isMelody ? "SkyFast" : (isFastPro ? "SkyFastPro" : "SkyPro");
-                
-                // 🌟 核心修复：强制清理旧后缀，保证模型名加在最后面
                 let baseSongName = document.getElementById('songNameInput').value.trim() || '未命名曲目';
                 if (baseSongName.includes(" || ")) {
                     baseSongName = baseSongName.split(" || ")[0].trim();
                 }
-                const finalSongName = `${baseSongName} || ${modelName}`; 
+                const finalSongName = `${baseSongName} || ${modelName}`;
 
                 const finalAuthor = document.getElementById('authorInput').value.trim() || '未知作者';
                 const finalTranscriber = document.getElementById('transcriberInput').value.trim() || '_OneStar';
@@ -286,7 +338,7 @@ export function initMidi() {
                 const skyStudioData = [{
                     name: finalSongName, author: finalAuthor, transcribedBy: finalTranscriber,
                     isComposed: false, bpm: studioSpeed, bitsPerPage: 16, pitchLevel: 0, isEncrypted: false,
-                    songNotes: allNotes, model: modelName 
+                    songNotes: allNotes, model: modelName
                 }];
 
                 pendingTxtContent = JSON.stringify(skyStudioData);
@@ -299,7 +351,7 @@ export function initMidi() {
                 document.getElementById('outDuration').textContent = `${totalDurationSec}s`;
                 document.getElementById('outSpeed').textContent = studioSpeed;
                 document.getElementById('outShift').textContent = (shift > 0 ? '+' : '') + shift;
-                
+
                 document.getElementById('outSongName').textContent = finalSongName;
                 document.getElementById('outAuthor').textContent = finalAuthor;
                 document.getElementById('outModel').textContent = modelName;
@@ -310,9 +362,9 @@ export function initMidi() {
                 resultCard.classList.remove('fade-out');
                 resultCard.classList.add('fade-in');
                 setTimeout(() => resultCard.classList.remove('fade-in'), 500);
-                
+
                 statusDiv.textContent = '✅ 提取完成！';
-                
+
                 setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 
                 const isApp = typeof window.AndroidBridge !== 'undefined';
@@ -330,15 +382,12 @@ export function initMidi() {
                     };
                 } else {
                     document.getElementById('btnDownload').onclick = () => {
-    const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    
-    // 🌟 浏览器下载也严格按照 歌曲名-作者 || 模型名.txt 命名
-    a.download = `${baseSongName}-${finalAuthor} || ${modelName}.txt`;
-    
-    a.click();
-};
+                        const blob = new Blob([pendingTxtContent], { type: 'text/plain;charset=utf-8' });
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = `${baseSongName}-${finalAuthor} || ${modelName}.txt`;
+                        a.click();
+                    };
                 }
 
             } catch (err) {

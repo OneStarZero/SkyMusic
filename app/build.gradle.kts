@@ -8,11 +8,11 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.skymusic" // 🌟 回归主分支包名
+        applicationId = "com.skymusic"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8                // 🌟 版本号
-        versionName = "0.0.8"          // 🌟 正式版
+        versionCode = 9
+        versionName = "0.0.9"
 
         resourceConfigurations += listOf("zh", "en")
     }

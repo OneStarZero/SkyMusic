@@ -36,11 +36,34 @@ import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.core.app.NotificationCompat
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.charset.StandardCharsets
+import java.util.LinkedHashMap
 import java.util.Locale
 import kotlin.concurrent.thread
 import kotlin.math.abs
 
 class FloatingWindowService : Service() {
+
+    private data class LoadedSheetEntry(
+        val cacheKey: String,
+        val sizeBytes: Long,
+        val lastModified: Long,
+        val songName: String,
+        val author: String,
+        val duration: String,
+        val notesCount: Int,
+        val bpm: String,
+        val model: String,
+        val notes: List<Pair<Long, Int>>
+    )
+
+    private data class FileMetaCacheEntry(
+        val sizeBytes: Long,
+        val lastModified: Long,
+        val info: List<String>
+    )
+
     private lateinit var windowManager: WindowManager
     private lateinit var floatView: FrameLayout
 
@@ -92,6 +115,16 @@ class FloatingWindowService : Service() {
     private var density = 1.0f
     private var cachedSongList: List<Triple<File, List<String>, String>>? = null
     private var refreshSessionId = 0
+
+    // 多谱面缓存池（最多缓存 8 首完整解析谱面）与文件元信息缓存
+    private val maxCachedSheets = 8
+    private val sheetCacheLock = Any()
+    private val sheetCachePool = object : LinkedHashMap<String, LoadedSheetEntry>(maxCachedSheets, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.Entry<String, LoadedSheetEntry>?): Boolean {
+            return size > maxCachedSheets
+        }
+    }
+    private val fileMetaCache = HashMap<String, FileMetaCacheEntry>()
 
     private val playBgDrawable = GradientDrawable().apply { cornerRadius = 6f }
     private val pauseBgDrawable = GradientDrawable().apply { cornerRadius = 6f }
@@ -378,21 +411,65 @@ class FloatingWindowService : Service() {
         dialog.show()
     }
 
+    private fun putSheetToPool(entry: LoadedSheetEntry) {
+        synchronized(sheetCacheLock) {
+            sheetCachePool[entry.cacheKey] = entry
+        }
+    }
+
+    private fun getSheetFromPoolIfValid(file: File): LoadedSheetEntry? {
+        if (!file.exists() || !file.isFile) return null
+        val len = file.length()
+        val mod = file.lastModified()
+        synchronized(sheetCacheLock) {
+            val hit = sheetCachePool[file.absolutePath]
+            if (hit != null && hit.sizeBytes == len && hit.lastModified == mod) {
+                return hit
+            }
+        }
+        return null
+    }
+
+    private fun applyLoadedSheetToCurrent(entry: LoadedSheetEntry) {
+        stopPlayback()
+        songData = entry.notes
+        currentIndex = 0
+        lastRenderedNoteIndex = -1
+        currentSongName = entry.songName
+        currentAuthor = entry.author
+        currentBpm = entry.bpm
+        currentModel = entry.model
+        currentNotesCount = entry.notesCount
+        currentDuration = entry.duration
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.getBooleanExtra("is_new_data", false) == true) {
             intent.getSerializableExtra("song_data")?.let {
                 try {
                     @Suppress("UNCHECKED_CAST")
-                    songData = it as ArrayList<Pair<Long, Int>>
-                    stopPlayback()
-                    currentIndex = 0
-                    lastRenderedNoteIndex = -1
-                    currentSongName = intent.getStringExtra("song_name") ?: "App 发送谱面"
-                    currentAuthor = intent.getStringExtra("song_author") ?: "未知作者"
-                    currentModel = intent.getStringExtra("song_model") ?: ""
-                    currentNotesCount = songData.size
-                    currentDuration = calculateDuration(songData)
-                    currentBpm = intent.getStringExtra("song_bpm") ?: "0"
+                    val notes = (it as ArrayList<Pair<Long, Int>>).toList()
+                    val name = intent.getStringExtra("song_name") ?: "App 发送谱面"
+                    val author = intent.getStringExtra("song_author") ?: "未知作者"
+                    val model = intent.getStringExtra("song_model") ?: ""
+                    val bpm = intent.getStringExtra("song_bpm") ?: "0"
+                    val duration = calculateDuration(notes)
+
+                    val memEntry = LoadedSheetEntry(
+                        cacheKey = "__app_sent__:${name}_${author}_${notes.size}",
+                        sizeBytes = -1L,
+                        lastModified = -1L,
+                        songName = name,
+                        author = author,
+                        duration = duration,
+                        notesCount = notes.size,
+                        bpm = bpm,
+                        model = model,
+                        notes = notes
+                    )
+                    putSheetToPool(memEntry)
+                    applyLoadedSheetToCurrent(memEntry)
+
                     if (!this::floatView.isInitialized) createFloatingWindow()
                     if (!isMiniMode && !isPlayerMode) {
                         currentPage = 1
@@ -510,7 +587,6 @@ class FloatingWindowService : Service() {
             setTextColor(c("#FDE047"))
             setShadowLayer(6f, 0f, 0f, c("#EAB308"))
         }
-        // 44dp 精巧尺寸，无外圈描边，纯深空圆盘
         val wrap = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -717,7 +793,9 @@ class FloatingWindowService : Service() {
                 thread {
                     try {
                         val folder = File(localSheetsPath)
-                        val files = folder.listFiles { f -> f.extension.equals("txt", true) }?.toList() ?: emptyList()
+                        val files = folder.listFiles { f -> f.extension.equals("txt", true) }
+                            ?.sortedByDescending { it.lastModified() }
+                            ?: emptyList()
                         val list = files.map { Triple(it, readLocalFileInfo(it), "") }
                         cachedSongList = list
                         handler.post {
@@ -736,7 +814,9 @@ class FloatingWindowService : Service() {
                     addSongToList(currentSongName, currentAuthor, currentDuration, currentNotesCount, currentBpm, currentModel, null) { preparePlay() }
                     addDivider()
                 }
-                val files = File(appSheetsPath).listFiles { f -> f.extension.equals("txt", true) }?.toList() ?: emptyList()
+                val files = File(appSheetsPath).listFiles { f -> f.extension.equals("txt", true) }
+                    ?.sortedByDescending { it.lastModified() }
+                    ?: emptyList()
                 if (files.isEmpty() && songData.isEmpty()) {
                     val emptyTv = TextView(this).apply {
                         text = "暂无发送的谱面"; setTextColor(c(themeTextSoft)); textSize = 12.5f
@@ -1037,6 +1117,10 @@ class FloatingWindowService : Service() {
                 .setTitle("删除").setMessage(file.name)
                 .setPositiveButton("删除") { _, _ ->
                     if (file.delete()) {
+                        synchronized(sheetCacheLock) {
+                            sheetCachePool.remove(file.absolutePath)
+                            fileMetaCache.remove(file.absolutePath)
+                        }
                         if (currentPage == 0) cachedSongList = null
                         showFullPanel(currentPage, resetScroll = false)
                     }
@@ -1414,29 +1498,92 @@ class FloatingWindowService : Service() {
         playRunnable = null
     }
 
+    private fun readSliceClean(file: File, startOffset: Long, maxBytes: Int): String {
+        val len = file.length()
+        if (len <= 0L || startOffset >= len) return ""
+        val size = minOf(len - startOffset, maxBytes.toLong()).toInt()
+        if (size <= 0) return ""
+        val buf = ByteArray(size)
+        RandomAccessFile(file, "r").use { raf ->
+            raf.seek(startOffset)
+            raf.readFully(buf, 0, size)
+        }
+        val isUtf16Le = buf.size >= 2 && buf[1].toInt() == 0 && buf[0].toInt() != 0
+        val rawStr = if (isUtf16Le) {
+            String(buf, StandardCharsets.UTF_16LE)
+        } else {
+            String(buf, StandardCharsets.UTF_8)
+        }
+        return rawStr.replace("\u0000", "").replace("\uFEFF", "")
+    }
+
     private fun readLocalFileInfo(file: File): List<String> {
+        if (!file.exists() || !file.isFile) {
+            return listOf(file.nameWithoutExtension, "未知作者", "0:00", "0", "", "0", "")
+        }
+        val len = file.length()
+        val mod = file.lastModified()
+        synchronized(sheetCacheLock) {
+            val cachedMeta = fileMetaCache[file.absolutePath]
+            if (cachedMeta != null && cachedMeta.sizeBytes == len && cachedMeta.lastModified == mod) {
+                return cachedMeta.info
+            }
+            val cachedFull = sheetCachePool[file.absolutePath]
+            if (cachedFull != null && cachedFull.sizeBytes == len && cachedFull.lastModified == mod) {
+                val info = listOf(
+                    cachedFull.songName,
+                    cachedFull.author,
+                    cachedFull.duration,
+                    cachedFull.notesCount.toString(),
+                    "",
+                    cachedFull.bpm,
+                    cachedFull.model
+                )
+                fileMetaCache[file.absolutePath] = FileMetaCacheEntry(len, mod, info)
+                return info
+            }
+        }
+
         try {
-            var text = file.readText(Charsets.UTF_8)
-            if (text.contains("\u0000")) text = file.readText(Charsets.UTF_16LE)
-            val content = text.replace("\u0000", "").replace("\uFEFF", "")
-            var name = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1)
+            val headText = readSliceClean(file, 0L, 4096)
+            val tailStart = maxOf(0L, len - 1024L)
+            val tailText = readSliceClean(file, tailStart, 1024)
+
+            val rawName = Regex("\"(?:Name|name)\"\\s*:\\s*\"([^\"]*)\"").find(headText)?.groupValues?.getOrNull(1)
+                ?.ifBlank { null }
                 ?: file.nameWithoutExtension.substringBefore("-")
-            var author = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1)
+            var author = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"").find(headText)?.groupValues?.getOrNull(1)
                 ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
-            val bpm = Regex("\"bpm\"\\s*:\\s*(\\d+)").find(content)?.groupValues?.getOrNull(1) ?: "0"
-            var model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: ""
-            if (model.isBlank() && name.contains(" || ")) model = name.substringAfter(" || ")
+            val bpm = Regex("\"bpm\"\\s*:\\s*(\\d+)").find(headText)?.groupValues?.getOrNull(1) ?: "0"
+
+            var model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(tailText)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            if (model.isBlank()) {
+                model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(headText)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            }
+            if (model.isBlank() && rawName.contains(" || ")) {
+                model = rawName.substringAfter(" || ").trim()
+            }
+
+            val name = if (rawName.contains(" || ")) rawName.substringBefore(" || ").trim() else rawName.trim()
             if (author.isBlank()) author = "未知作者"
-            if (name.isBlank()) name = file.nameWithoutExtension
-            val notes = Regex("\"time\"\\s*:\\s*\\d+").findAll(content).count()
+            val finalName = name.ifBlank { file.nameWithoutExtension }
+
+            val notes = Regex("\"time\"\\s*:\\s*\\d+").findAll(headText).count()
             val duration = if (notes > 0) {
-                val last = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(content).lastOrNull()?.groupValues?.getOrNull(1) ?: "0"
-                val sec = last.toLong() / 1000
-                String.format(Locale.getDefault(), "%d:%02d", sec / 60, sec % 60)
+                val last = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(tailText).lastOrNull()?.groupValues?.getOrNull(1)
+                    ?: Regex("\"time\"\\s*:\\s*(\\d+)").findAll(headText).lastOrNull()?.groupValues?.getOrNull(1)
+                    ?: "0"
+                val sec = (last.toLongOrNull() ?: 0L) / 1000L
+                String.format(Locale.getDefault(), "%d:%02d", sec / 60L, sec % 60L)
             } else {
                 "0:00"
             }
-            return listOf(name, author, duration, notes.toString(), "", bpm, model)
+
+            val result = listOf(finalName, author, duration, notes.toString(), "", bpm, model)
+            synchronized(sheetCacheLock) {
+                fileMetaCache[file.absolutePath] = FileMetaCacheEntry(len, mod, result)
+            }
+            return result
         } catch (_: Exception) {
             return listOf(file.nameWithoutExtension, "未知作者", "0:00", "0", "", "0", "")
         }
@@ -1449,6 +1596,15 @@ class FloatingWindowService : Service() {
     }
 
     private fun directLoadLocalFile(file: File) {
+        val cached = getSheetFromPoolIfValid(file)
+        if (cached != null) {
+            applyLoadedSheetToCurrent(cached)
+            val mode = songKeyModeMap[file.absolutePath] ?: keyMode
+            if (keyPositions.size != mode) loadKeyPositions(mode)
+            preparePlay()
+            return
+        }
+
         thread {
             try {
                 var content = file.readText(Charsets.UTF_8)
@@ -1456,24 +1612,43 @@ class FloatingWindowService : Service() {
                 content = content.replace("\u0000", "").replace("\uFEFF", "")
                 val times = Regex("\"time\"\\s*:\\s*(\\d+)").findAll(content).map { it.groupValues[1].toLong() }.toList()
                 val keys = Regex("\"key\"\\s*:\\s*\"1Key(\\d+)\"").findAll(content).map { it.groupValues[1].toInt() }.toList()
-                var name = Regex("\"name\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1)
+                val rawName = Regex("\"(?:Name|name)\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1)
+                    ?.ifBlank { null }
                     ?: file.nameWithoutExtension.substringBefore("-")
                 var author = Regex("\"author\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1)
                     ?: file.nameWithoutExtension.substringAfter("-", "未知作者")
                 val bpm = Regex("\"bpm\"\\s*:\\s*(\\d+)").find(content)?.groupValues?.getOrNull(1) ?: "0"
-                var model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1) ?: ""
-                if (model.isBlank() && name.contains(" || ")) model = name.substringAfter(" || ")
+                var model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(content.takeLast(1024))?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                if (model.isBlank()) {
+                    model = Regex("\"model\"\\s*:\\s*\"([^\"]*)\"").find(content)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+                }
+                if (model.isBlank() && rawName.contains(" || ")) {
+                    model = rawName.substringAfter(" || ").trim()
+                }
+                val name = if (rawName.contains(" || ")) rawName.substringBefore(" || ").trim() else rawName.trim()
                 if (author.isBlank()) author = "未知作者"
-                if (name.isBlank()) name = file.nameWithoutExtension
+                val finalName = name.ifBlank { file.nameWithoutExtension }
                 if (times.isEmpty() || keys.isEmpty()) {
                     handler.post { Toast.makeText(this, "空乐谱", Toast.LENGTH_SHORT).show() }
                     return@thread
                 }
                 val notes = times.indices.mapNotNull { i -> if (i < keys.size) Pair(times[i], keys[i]) else null }.sortedBy { it.first }
+                val entry = LoadedSheetEntry(
+                    cacheKey = file.absolutePath,
+                    sizeBytes = file.length(),
+                    lastModified = file.lastModified(),
+                    songName = finalName,
+                    author = author,
+                    duration = calculateDuration(notes),
+                    notesCount = notes.size,
+                    bpm = bpm,
+                    model = model,
+                    notes = notes
+                )
+                putSheetToPool(entry)
+
                 handler.post {
-                    songData = notes; currentIndex = 0; currentSongName = name; currentAuthor = author
-                    currentBpm = bpm; currentModel = model; currentNotesCount = notes.size
-                    currentDuration = calculateDuration(notes)
+                    applyLoadedSheetToCurrent(entry)
                     val mode = songKeyModeMap[file.absolutePath] ?: keyMode
                     if (keyPositions.size != mode) loadKeyPositions(mode)
                     preparePlay()
@@ -1657,6 +1832,10 @@ class FloatingWindowService : Service() {
 
     override fun onDestroy() {
         super.onDestroy(); stopPlayback(); handler.removeCallbacksAndMessages(null)
+        synchronized(sheetCacheLock) {
+            sheetCachePool.clear()
+            fileMetaCache.clear()
+        }
         if (this::floatView.isInitialized) {
             try { windowManager.removeView(floatView) } catch (_: Exception) {}
         }
