@@ -201,4 +201,15 @@ export function initRandomBackground() {
         lastTime = performance.now();
         animationId = requestAnimationFrame(draw);
     };
+    window.onNativeStateSync = function (rawState) {
+    try {
+        const state = typeof rawState === 'string' ? JSON.parse(rawState) : rawState;
+        if (!state) return;
+        document.documentElement.dataset.hasOverlay = String(!!state.hasOverlay);
+        document.documentElement.dataset.hasAccessibility = String(!!state.hasAccessibility);
+        if (state.accent) {
+            document.documentElement.style.setProperty('--cloud-blue', state.accent);
+        }
+    } catch (_) {}
+};
 }
