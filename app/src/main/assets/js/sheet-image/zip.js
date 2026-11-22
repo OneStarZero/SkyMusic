@@ -176,6 +176,10 @@ export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
  * @param {function} onProgress (percent) => void
  * @returns {Promise<Uint8Array>}
  */
+/**
+ * 分块生成长图 PNG 字节数组
+ * 超过 16384px 时自动拆成多张，返回 [{name, bytes}, ...]
+ */
 export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onProgress) {
   if (!canvases.length) throw new Error('没有可用的页面');
 
@@ -187,6 +191,7 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
   }
   totalH += gapPx * (canvases.length - 1);
 
+  // 降采样：像素总量控制在 maxPixels 内
   let scale = 1;
   if (maxW * totalH > maxPixels) {
     scale = Math.sqrt(maxPixels / (maxW * totalH));
@@ -195,70 +200,78 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
   const outW = Math.max(1, Math.round(maxW * scale));
   const outH = Math.max(1, Math.round(totalH * scale));
 
-  const CHUNK_H = 2000;
-  const chunkCount = Math.ceil(outH / CHUNK_H);
+  // 浏览器 canvas 单边上限
+  const MAX_DIM = 16384;
 
-  const out = document.createElement('canvas');
-  out.width = outW;
-  out.height = outH;
-  const ctx = out.getContext('2d', { alpha: false });
+  // 计算需要拆成几张
+  const partCount = Math.ceil(outH / MAX_DIM);
+  const partH = Math.ceil(outH / partCount);
 
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, outW, outH);
+  const results = [];
 
-  const placements = [];
-  let y = 0;
-  for (let i = 0; i < canvases.length; i++) {
-    const c = canvases[i];
-    const dw = c.width * scale;
-    const dh = c.height * scale;
-    const dx = (outW - dw) / 2;
-    placements.push({ canvas: c, dx: dx, dy: y, dw: dw, dh: dh });
-    y += dh + gapPx * scale;
-  }
+  for (let part = 0; part < partCount; part++) {
+    const partTop = part * partH;
+    const partBottom = Math.min(outH, partTop + partH);
+    const thisH = partBottom - partTop;
 
-  for (let chunk = 0; chunk < chunkCount; chunk++) {
-    const chunkTop = chunk * CHUNK_H;
-    const chunkBottom = Math.min(outH, chunkTop + CHUNK_H);
+    const out = document.createElement('canvas');
+    out.width = outW;
+    out.height = thisH;
+    const ctx = out.getContext('2d', { alpha: false });
 
-    for (let i = 0; i < placements.length; i++) {
-      const p = placements[i];
-      const pTop = p.dy;
-      const pBottom = p.dy + p.dh;
-      if (pBottom < chunkTop || pTop > chunkBottom) continue;
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, outW, thisH);
 
-      const srcTop = Math.max(0, (chunkTop - pTop) / scale);
-      const srcBottom = Math.min(p.canvas.height, (chunkBottom - pTop) / scale);
-      if (srcBottom <= srcTop) continue;
+    // 绘制与当前分块重叠的页
+    let curY = 0;
+    for (let i = 0; i < canvases.length; i++) {
+      const c = canvases[i];
+      const dw = c.width * scale;
+      const dh = c.height * scale;
+      const pageTop = curY;
+      const pageBottom = curY + dh;
 
-      const srcH = srcBottom - srcTop;
-      const dstY = pTop + srcTop * scale;
-      const dstH = srcH * scale;
+      if (pageBottom >= partTop && pageTop <= partBottom) {
+        const srcTop = Math.max(0, (partTop - pageTop) / scale);
+        const srcBottom = Math.min(c.height, (partBottom - pageTop) / scale);
+        if (srcBottom > srcTop) {
+          const srcH = srcBottom - srcTop;
+          const dstY = pageTop + srcTop * scale - partTop;
+          const dstH = srcH * scale;
+          const dx = (outW - dw) / 2;
 
-      ctx.drawImage(
-        p.canvas,
-        0, srcTop, p.canvas.width, srcH,
-        p.dx, dstY, p.dw, dstH
-      );
+          ctx.drawImage(
+            c,
+            0, srcTop, c.width, srcH,
+            dx, dstY, dw, dstH
+          );
+        }
+      }
+
+      curY += dh + gapPx * scale;
     }
 
     if (onProgress) {
-      onProgress(Math.round(((chunk + 1) / chunkCount) * 90));
+      onProgress(Math.round(((part + 1) / partCount) * 90));
     }
 
     await new Promise(r => requestAnimationFrame(r));
+
+    const blob = await new Promise((resolve, reject) => {
+      out.toBlob(b => b ? resolve(b) : reject(new Error('PNG 编码失败')), 'image/png');
+    });
+
+    out.width = 0;
+    out.height = 0;
+
+    const buf = await blob.arrayBuffer();
+    results.push({
+      part: part + 1,
+      total: partCount,
+      bytes: new Uint8Array(buf)
+    });
   }
 
-  if (onProgress) onProgress(95);
-
-  const blob = await new Promise((resolve, reject) => {
-    out.toBlob(b => b ? resolve(b) : reject(new Error('PNG 编码失败')), 'image/png');
-  });
-
-  out.width = 0;
-  out.height = 0;
-
-  const buf = await blob.arrayBuffer();
   if (onProgress) onProgress(100);
-  return new Uint8Array(buf);
+  return results;
 }

@@ -36,13 +36,14 @@ export function openSheetImagePreview(data, options) {
     if (!model) model = fullName.slice(sep + 4).trim();
   }
 
-  view.title = fullName.trim() || '未命名乐谱';
+    view.title = fullName.trim() || '未命名乐谱';
   view.model = model;
   view.transcriber = opts.transcriber || '';
   view.author = opts.author || (function () {
     const dash = baseName.lastIndexOf('-');
     return dash > 0 ? baseName.slice(dash + 1).trim() : '';
   })();
+
 
   ensureOverlay();
   openOverlay();

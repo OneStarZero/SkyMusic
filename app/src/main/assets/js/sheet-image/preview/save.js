@@ -8,6 +8,7 @@ import { getBridge } from './bridge.js';
 import { showToast } from './toast.js';
 import { showProgress, hideProgress } from './progress.js';
 import { createZipWriter, canvasToBytes, buildLongPngBytes } from '../zip.js';
+import { renderPageAt } from './render.js';
 
 export function buildPayload(longOnly) {
   const selectedPages = [];
@@ -77,6 +78,9 @@ export function saveImages(longOnly, onClose) {
       if (res && res.ok) {
         const files = (res.files && res.files.length) || 1;
         showToast('已保存 ' + files + ' 张图片到 ' + (res.dir || 'SkyMusic-OneStar'), 'success');
+        if (res.debug) {
+          alert('DEBUG:\n' + res.debug);
+        }
         if (onClose) onClose();
       } else {
         showToast('保存失败：' + ((res && res.error) || '未知错误'), 'error');
@@ -94,31 +98,54 @@ async function exportInBrowser(longOnly, onClose) {
   try {
     const fileNameBase = sanitizeFileName(view.title);
 
+    // 确保所有页已渲染
+    const meta = {
+      rows: view.rows,
+      title: view.title,
+      infoItems: view.infoItems
+    };
+    for (let i = 0; i < view.pages.length; i++) {
+      renderPageAt(i, meta);
+    }
+
     if (longOnly) {
       showProgress('正在准备长图…', 5);
       const canvases = [];
       for (let i = 0; i < view.pages.length; i++) {
         const page = view.pages[i];
-        if (page && page._canvas) canvases.push(page._canvas);
+        if (page && page._canvas && page._canvas.width > 1) {
+          canvases.push(page._canvas);
+        }
       }
       if (!canvases.length) throw new Error('没有可用的页面');
 
       const gapPx = Math.round(view.style.pad * 0.6);
-      const bytes = await buildLongPngBytes(
+      const parts = await buildLongPngBytes(
         canvases, gapPx, view.style.bg, MAX_LONG_PIXELS,
         function (p) { showProgress('正在生成长图 ' + p + '%', p); }
       );
 
-      const blob = new Blob([bytes], { type: 'image/png' });
-      downloadBlob(blob, fileNameBase + '-Full.png');
+      if (parts.length === 1) {
+        const blob = new Blob([parts[0].bytes], { type: 'image/png' });
+        downloadBlob(blob, fileNameBase + '-Full.png');
+      } else {
+        const zip = createZipWriter();
+        for (let i = 0; i < parts.length; i++) {
+          zip.addFile(fileNameBase + '-Full-' + parts[i].part + '.png', parts[i].bytes);
+        }
+        const blob = zip.finish();
+        downloadBlob(blob, fileNameBase + '-Full.zip');
+      }
 
       showProgress('完成', 100);
       setTimeout(hideProgress, 600);
       view.busy = false;
-      showToast('长图已保存', 'success');
+      showToast('长图已保存（' + parts.length + ' 张）', 'success');
       if (onClose) onClose();
       return;
     }
+
+
 
     const targets = [];
     for (let i = 0; i < view.pages.length; i++) {
@@ -147,12 +174,18 @@ async function exportInBrowser(longOnly, onClose) {
 
     if (view.mergeLong && selectedCanvases.length > 0) {
       const gapPx = Math.round(view.style.pad * 0.6);
-      const bytes = await buildLongPngBytes(
+      const parts = await buildLongPngBytes(
         selectedCanvases, gapPx, view.style.bg, MAX_LONG_PIXELS,
         function (p) { showProgress('正在生成长图 ' + p + '%', 60 + Math.round(p * 0.3)); }
       );
-      zip.addFile(fileNameBase + '-Full.png', bytes);
+      for (let i = 0; i < parts.length; i++) {
+        const name = parts.length === 1
+          ? fileNameBase + '-Full.png'
+          : fileNameBase + '-Full-' + parts[i].part + '.png';
+        zip.addFile(name, parts[i].bytes);
+      }
     }
+
 
     showProgress('正在生成 zip…', 94);
     const blob = zip.finish();

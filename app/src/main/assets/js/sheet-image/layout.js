@@ -170,8 +170,7 @@ export function computeInfo(layout, rows, tol) {
     tol: tol
   };
 }
-
-/** 生成信息面板条目 */
+/** 生成信息面板条目（16 项） */
 export function buildInfoItems(info, rows, bpm, model, author, transcriber) {
   const items = [];
 
@@ -193,6 +192,8 @@ export function buildInfoItems(info, rows, bpm, model, author, transcriber) {
 
   if (info.topKey >= 0) {
     items.push({ label: '最常用键', value: '1Key' + info.topKey + '（' + info.topCount + ' 次）' });
+  } else {
+    items.push({ label: '最常用键', value: '—' });
   }
 
   return items;

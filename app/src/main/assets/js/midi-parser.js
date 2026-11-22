@@ -366,7 +366,7 @@ export function initMidi() {
                 pendingTxtContent = JSON.stringify(skyStudioData);
 
                 // 记录本次转换上下文，供「生成谱面图片」使用
-                    lastConvertContext = {
+                                    lastConvertContext = {
                     sheet: skyStudioData[0],
                     songName: finalSongName,
                     baseSongName: baseSongName,
@@ -376,6 +376,7 @@ export function initMidi() {
                     bpm: studioSpeed,
                     toleranceMs: mergeWindowMs > 0 ? mergeWindowMs : 25
                 };
+
 
 
 

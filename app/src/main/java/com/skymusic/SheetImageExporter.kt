@@ -12,6 +12,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.Random
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -22,18 +23,20 @@ import kotlin.math.sqrt
 /**
  * SkyMusic 0.0.9 · 谱面图片导出器
  * ------------------------------------------------------------------
- * 接收前端 sheet-image 模块计算好的 layout，用 Canvas 逐页绘制成
- * Sky Studio 风格方块谱 PNG，写入 <baseDir>/<谱面名>/。
- *
- * 支持：
- *   · 只导出用户勾选的页（pages 数组已由前端过滤）
- *   · 可选额外输出一张「所有页上下拼接」的完整长图（-Full.png）
- *   · 信息面板（infoItems）逐页绘制在标题正下方
+ * 内存安全策略：
+ *   · 单页像素上限 800 万（约 32MB ARGB_8888）
+ *   · 逐页绘制 → 立即写盘 → 立即 recycle
+ *   · 长图流式分块写入，每块 1500px
+ *   · 长图总像素上限 5000 万
+ *   · 绘制失败自动降采样重试
+ *   · 导出时在目录写入 debug.txt 记录尺寸信息
  */
 object SheetImageExporter {
 
-    private const val MAX_PIXELS = 40_000_000L
-    private const val MAX_LONG_PIXELS = 120_000_000L
+    private const val MAX_PAGE_PIXELS = 8_000_000f
+    private const val MAX_LONG_PIXELS = 50_000_000.0
+    private const val LONG_CHUNK_H = 1500
+
     private const val MAX_NAME_LENGTH = 60
     private const val FONT_STACK = "sans-serif"
     private const val WATERMARK_TEXT = "Bilibili@_OneStar"
@@ -42,7 +45,7 @@ object SheetImageExporter {
 
     // ============================ 对外入口 ============================
 
-             fun export(
+    fun export(
         baseDir: File,
         payloadJson: String,
         onProgress: ((String, Int) -> Unit)? = null
@@ -68,82 +71,154 @@ object SheetImageExporter {
                 return fail("无法创建目录：" + rootDir.absolutePath)
             }
 
-            // 多图保存时，逐页 PNG 放进「分页」子文件夹；仅长图时直接放根目录
             val pageDir = if (longOnly) rootDir else File(rootDir, "分页")
             if (!longOnly && !pageDir.exists() && !pageDir.mkdirs()) {
-                return fail("无法创建目录：" + pageDir.absolutePath)
+                return fail("无法创建分页目录：" + pageDir.absolutePath)
             }
 
             val files = ArrayList<String>()
             val pageCount = if (totalPages > 0) totalPages else pagesArr.length()
             val total = pagesArr.length()
 
-            // 预解析所有页数据，避免绘制时反复解析 JSON
             val parsedPages = ArrayList<PageData>(total)
             for (i in 0 until total) {
                 val pageObj = pagesArr.optJSONObject(i) ?: continue
                 parsedPages.add(parsePage(pageObj, rows))
             }
 
-            // 预计算尺寸（所有页尺寸相同）
             val size = measure(rows, st, infoItems.size)
             val scale = computeScale(size.width, size.height)
 
-            val rendered = ArrayList<Bitmap>(parsedPages.size)
+            // 调试信息
+            val debugInfo = buildString {
+                append("size=").append(size.width).append("x").append(size.height).append('\n')
+                append("scale=").append(scale).append('\n')
+                append("cols=").append(st.cols).append('\n')
+                append("rowsPerPage=").append(st.rowsPerPage).append('\n')
+                append("cell=").append(st.cell).append('\n')
+                append("cellGap=").append(st.cellGap).append('\n')
+                append("pad=").append(st.pad).append('\n')
+                append("gridGapX=").append(st.gridGapX).append('\n')
+                append("gridGapY=").append(st.gridGapY).append('\n')
+                append("infoItems=").append(infoItems.size).append('\n')
+                append("pages=").append(parsedPages.size).append('\n')
+                append("rows=").append(rows).append('\n')
+                append("showInfoPanel=").append(st.showInfoPanel).append('\n')
+                append("showTime=").append(st.showTime).append('\n')
+                append("noteShape=").append(st.noteShape).append('\n')
+                append("decoType=").append(st.decoType).append('\n')
+                append("bgPattern=").append(st.bgPattern).append('\n')
+            }
+
+            // 写 debug.txt
             try {
+                File(rootDir, "debug.txt").writeText(debugInfo, Charsets.UTF_8)
+            } catch (_: Exception) { }
+
+            if (mergeLong || longOnly) {
+                val pageFiles = ArrayList<File>(parsedPages.size)
                 for (i in parsedPages.indices) {
                     val pageIndex = pagesArr.optJSONObject(i)?.optInt("index", i) ?: i
-
-                    onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 80) / total)
+                    onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 60) / total)
 
                     val bitmap = drawPageFast(
                         parsedPages[i], songName, rows, st, pageIndex, pageCount,
                         infoItems, size, scale
-                    ) ?: return fail("第 " + (pageIndex + 1) + " 页绘制失败")
+                    ) ?: return fail("第 ${pageIndex + 1} 页绘制失败（内存不足）")
 
-                    if (!longOnly) {
-                        val fileName = if (pageIndex == 0) {
-                            "$safeName.png"
-                        } else {
-                            "$safeName-${pageIndex + 1}.png"
-                        }
-                        writeBitmap(bitmap, File(pageDir, fileName))
-                        files.add(fileName)
+                    if (bitmap.width <= 1 || bitmap.height <= 1) {
+                        bitmap.recycle()
+                        return fail("第 ${pageIndex + 1} 页绘制失败（尺寸异常）")
                     }
 
-                    if (mergeLong || longOnly) rendered.add(bitmap) else bitmap.recycle()
+                    val fileName = if (pageIndex == 0) {
+                        "$safeName.png"
+                    } else {
+                        "$safeName-${pageIndex + 1}.png"
+                    }
+                    val target = File(pageDir, fileName)
+                    writeBitmap(bitmap, target)
+                    pageFiles.add(target)
+
+                    if (!longOnly) files.add(fileName)
+                    bitmap.recycle()
                 }
 
-                if ((mergeLong || longOnly) && rendered.isNotEmpty()) {
-                    onProgress?.invoke("正在拼接长图…", 85)
-                    val longBitmap = mergePages(rendered, st)
-                    if (longBitmap != null) {
-                        val longName = "$safeName$LONG_SUFFIX.png"
-                        writeBitmap(longBitmap, File(rootDir, longName))
-                        files.add(longName)
-                        longBitmap.recycle()
+                               onProgress?.invoke("正在拼接长图…", 70)
+
+                // 先算一下会不会拆成多张
+                var willSplit = false
+                run {
+                    var mw = 0
+                    var th = 0L
+                    for (f in pageFiles) {
+                        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        android.graphics.BitmapFactory.decodeFile(f.absolutePath, o)
+                        if (o.outWidth > mw) mw = o.outWidth
+                        th += o.outHeight.toLong()
                     }
+                    th += ((st.pad * 0.6f).roundToInt().coerceAtLeast(8)).toLong() * (pageFiles.size - 1)
+                    var sc = 1f
+                    val px = mw.toDouble() * th.toDouble()
+                    if (px > MAX_LONG_PIXELS) sc = sqrt(MAX_LONG_PIXELS / px).toFloat()
+                    val h = (th * sc).roundToInt()
+                    willSplit = h > 16384
                 }
+
+                val targetDir = if (willSplit) {
+                    if (!longDir.exists() && !longDir.mkdirs()) {
+                        return fail("无法创建长图目录：" + longDir.absolutePath)
+                    }
+                    longDir
+                } else {
+                    rootDir
+                }
+
+                val longFiles = mergePagesStreaming(pageFiles, targetDir, safeName, st, onProgress)
+                    ?: return fail("长图拼接失败（内存不足）")
+
+                for (f in longFiles) {
+                    files.add(f.name)
+                }
+
 
                 onProgress?.invoke("完成", 100)
-            } finally {
-                for (bmp in rendered) {
-                    if (!bmp.isRecycled) bmp.recycle()
-                }
-            }
+            } else {
+                for (i in parsedPages.indices) {
+                    val pageIndex = pagesArr.optJSONObject(i)?.optInt("index", i) ?: i
+                    onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 90) / total)
 
-            if (files.isEmpty()) return fail("没有生成任何图片")
+                    val bitmap = drawPageFast(
+                        parsedPages[i], songName, rows, st, pageIndex, pageCount,
+                        infoItems, size, scale
+                    ) ?: return fail("第 ${pageIndex + 1} 页绘制失败（内存不足）")
+
+                    if (bitmap.width <= 1 || bitmap.height <= 1) {
+                        bitmap.recycle()
+                        return fail("第 ${pageIndex + 1} 页绘制失败（尺寸异常）")
+                    }
+
+                    val fileName = if (pageIndex == 0) {
+                        "$safeName.png"
+                    } else {
+                        "$safeName-${pageIndex + 1}.png"
+                    }
+                    writeBitmap(bitmap, File(pageDir, fileName))
+                    files.add(fileName)
+                    bitmap.recycle()
+                }
+                onProgress?.invoke("完成", 100)
+            }
 
             return JSONObject()
                 .put("ok", true)
                 .put("dir", rootDir.absolutePath)
                 .put("files", JSONArray(files))
+                .put("debug", debugInfo)
         } catch (t: Throwable) {
             return fail(t.message ?: t.javaClass.simpleName)
         }
     }
-
-
 
     private fun fail(message: String): JSONObject =
         JSONObject().put("ok", false).put("error", message)
@@ -155,61 +230,144 @@ object SheetImageExporter {
         }
     }
 
-    // ============================ 长图拼接 ============================
+        /**
+     * 流式拼接长图，超过 MAX_DIM 时拆成多张
+     * @return 生成的文件列表，失败返回 null
+     */
+    private fun mergePagesStreaming(
+        pageFiles: List<File>,
+        targetDir: File,
+        baseName: String,
+        st: Style,
+        onProgress: ((String, Int) -> Unit)?
+    ): List<File>? {
+        if (pageFiles.isEmpty()) return null
 
-        private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
-        if (pages.isEmpty()) return null
-
-        val gap = (st.pad * 0.6f).roundToInt().coerceAtLeast(8)
+        val bounds = ArrayList<Pair<Int, Int>>(pageFiles.size)
         var maxW = 0
         var totalH = 0L
-        for (bmp in pages) {
-            if (bmp.width > maxW) maxW = bmp.width
-            totalH += bmp.height.toLong()
+        val gap = (st.pad * 0.6f).roundToInt().coerceAtLeast(8)
+
+        for (f in pageFiles) {
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(f.absolutePath, opts)
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
+            bounds.add(Pair(opts.outWidth, opts.outHeight))
+            if (opts.outWidth > maxW) maxW = opts.outWidth
+            totalH += opts.outHeight.toLong()
         }
-        totalH += gap.toLong() * (pages.size - 1)
+        totalH += gap.toLong() * (pageFiles.size - 1)
 
         if (maxW <= 0 || totalH <= 0) return null
 
-        // 降采样：像素总量控制在 4000 万内
         var scale = 1f
         val pixels = maxW.toDouble() * totalH.toDouble()
-        val limit = 40_000_000.0
-        if (pixels > limit) {
-            scale = sqrt(limit / pixels).toFloat()
+        if (pixels > MAX_LONG_PIXELS) {
+            scale = sqrt(MAX_LONG_PIXELS / pixels).toFloat()
         }
 
         val outW = max(1, (maxW * scale).roundToInt())
         val outH = max(1, (totalH * scale).roundToInt())
 
-        val longBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(longBitmap)
-        canvas.drawColor(argb(st.bg, 1f))
+        // 单边上限 16384，超过拆成多张
+        val MAX_DIM = 16384
+        val partCount = (outH + MAX_DIM - 1) / MAX_DIM
+        val partH = (outH + partCount - 1) / partCount
 
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        var y = 0f
-        for (bmp in pages) {
-            val dstW = bmp.width * scale
-            val dstH = bmp.height * scale
-            val left = (outW - dstW) / 2f
-            val rect = RectF(left, y, left + dstW, y + dstH)
-            canvas.drawBitmap(bmp, null, rect, paint)
-            y += dstH + gap * scale
+        val results = ArrayList<File>(partCount)
+
+        try {
+            for (part in 0 until partCount) {
+                val partTop = part * partH
+                val partBottom = min(outH, partTop + partH)
+                val thisH = partBottom - partTop
+                if (thisH <= 0) continue
+
+                val needBytes = outW.toLong() * thisH.toLong() * 4L
+                val availBytes = Runtime.getRuntime().maxMemory() -
+                        Runtime.getRuntime().totalMemory() +
+                        Runtime.getRuntime().freeMemory()
+                if (needBytes > availBytes * 0.5) {
+                    return null
+                }
+
+                val partBitmap = Bitmap.createBitmap(outW, thisH, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(partBitmap)
+                canvas.drawColor(argb(st.bg, 1f))
+
+                val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+                var curY = 0f
+                for (i in 0 until pageFiles.size) {
+                    val (pw, ph) = bounds[i]
+                    val dstW = pw * scale
+                    val dstH = ph * scale
+                    val pageTop = curY
+                    val pageBottom = curY + dstH
+
+                    if (pageBottom >= partTop && pageTop <= partBottom) {
+                        val pageBmp = decodeScaled(pageFiles[i], dstW.toInt(), dstH.toInt())
+                        if (pageBmp != null) {
+                            val left = (outW - dstW) / 2f
+                            val drawY = pageTop - partTop
+                            canvas.drawBitmap(pageBmp, null, RectF(left, drawY, left + dstW, drawY + dstH), paint)
+                            pageBmp.recycle()
+                        }
+                    }
+
+                    curY += dstH + gap * scale
+                }
+
+                val fileName = if (partCount == 1) {
+                    "$baseName$LONG_SUFFIX.png"
+                } else {
+                    "$baseName$LONG_SUFFIX-${part + 1}.png"
+                }
+                val target = File(targetDir, fileName)
+                writeBitmap(partBitmap, target)
+                partBitmap.recycle()
+                results.add(target)
+
+                onProgress?.invoke(
+                    "正在拼接长图 ${part + 1} / $partCount",
+                    70 + (part * 25) / partCount
+                )
+            }
+
+            return results
+        } catch (e: OutOfMemoryError) {
+            return null
         }
-
-        return longBitmap
     }
 
 
-        // ============================ 尺寸计算 ============================
+    private fun decodeScaled(file: File, targetW: Int, targetH: Int): Bitmap? {
+        return try {
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts)
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null
 
-    private fun gridColsFor(rows: Int): Int = if (rows == 9) 3 else 5
+            var sample = 1
+            while (opts.outWidth / (sample * 2) >= targetW && opts.outHeight / (sample * 2) >= targetH) {
+                sample *= 2
+            }
 
-    private fun gridRowsFor(): Int = 3
+            val decodeOpts = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+    }
 
-    private fun measure(rows: Int, st: Style, infoItemCount: Int): Size {
-        val gCols = gridColsFor(rows)
-        val gRows = gridRowsFor()
+    // ============================ 尺寸计算 ============================
+
+    private fun measure(rows: Int, st: Style, infoCount: Int): Size {
+        val gCols = if (rows == 9) 3 else 5
+        val gRows = 3
+
         val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
         val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
         val timeH = st.timeSize * 2.2f
@@ -217,30 +375,21 @@ object SheetImageExporter {
         val headerH = st.titleSize * 1.4f + 10f + st.metaSize * 1.5f + 26f
 
         var infoH = 0f
-        if (st.showInfoPanel && infoItemCount > 0) {
-            val infoRows = (infoItemCount + 1) / 2
-            val infoRowH = st.infoSize * 2.0f
-            infoH = infoRows * infoRowH + 28f
+        if (st.showInfoPanel && infoCount > 0) {
+            infoH = ((infoCount + 1) / 2) * (st.infoSize * 2.0f) + 28f
         }
 
         val footerH = st.watermarkSize * 2.6f
-
         val bodyW = st.cols * gridW + (st.cols - 1) * st.gridGapX
         val bodyH = st.rowsPerPage * (gridH + timeH) + (st.rowsPerPage - 1) * st.gridGapY
 
         return Size(
             width = st.pad * 2f + bodyW,
             height = st.pad * 2f + headerH + infoH + bodyH + footerH,
-            headerH = headerH,
-            infoH = infoH,
-            footerH = footerH,
-            bodyW = bodyW,
-            bodyH = bodyH,
-            gridW = gridW,
-            gridH = gridH,
-            timeH = timeH,
-            gCols = gCols,
-            gRows = gRows
+            headerH = headerH, infoH = infoH, footerH = footerH,
+            bodyW = bodyW, bodyH = bodyH,
+            gridW = gridW, gridH = gridH, timeH = timeH,
+            gCols = gCols, gRows = gRows
         )
     }
 
@@ -248,144 +397,219 @@ object SheetImageExporter {
         var scale = 2f
         val base = width * height
         if (base <= 0f) return 1f
-        while (scale > 0.5f && base * scale * scale > MAX_PIXELS) {
+
+        val availBytes = Runtime.getRuntime().maxMemory() -
+                Runtime.getRuntime().totalMemory() +
+                Runtime.getRuntime().freeMemory()
+        val maxBytes = (availBytes * 0.15).toLong()
+
+        while (scale > 0.5f) {
+            val pixels = base * scale * scale
+            val bytes = pixels.toLong() * 4L
+            if (pixels <= MAX_PAGE_PIXELS && bytes <= maxBytes) break
             scale -= 0.1f
         }
-        return max(0.4f, scale)
+        return max(0.5f, scale)
     }
 
     // ============================ 绘制 ============================
 
-      /** 高性能绘制：Paint 复用，尺寸预计算 */
     private fun drawPageFast(
-        page: PageData,
-        songName: String,
-        rows: Int,
-        st: Style,
-        pageIndex: Int,
-        pageCount: Int,
-        infoItems: List<Pair<String, String>>,
-        size: Size,
-        scale: Float
+        page: PageData, songName: String, rows: Int, st: Style,
+        pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
+        size: Size, scale: Float
+    ): Bitmap? {
+        var bitmap = tryDrawPage(page, songName, rows, st, pageIndex, pageCount, infoItems, size, scale)
+        if (bitmap != null && bitmap.width > 1 && bitmap.height > 1) return bitmap
+
+        bitmap?.recycle()
+        val retryScale = max(0.5f, scale * 0.7f)
+        bitmap = tryDrawPage(page, songName, rows, st, pageIndex, pageCount, infoItems, size, retryScale)
+        if (bitmap != null && bitmap.width > 1 && bitmap.height > 1) return bitmap
+
+        bitmap?.recycle()
+        return null
+    }
+
+    private fun tryDrawPage(
+        page: PageData, songName: String, rows: Int, st: Style,
+        pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
+        size: Size, scale: Float
     ): Bitmap? {
         val outW = max(1, (size.width * scale).roundToInt())
         val outH = max(1, (size.height * scale).roundToInt())
 
-        val bitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.scale(scale, scale)
-
-        // 复用 Paint 对象
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-        val block = RectF()
-
-        // 背景
-        drawVerticalGradient(canvas, size.width, size.height, st.bg, st.bgGlow)
-        if (st.showStars) drawStars(canvas, size.width, size.height)
-        drawWatermark(canvas, size.width, size.height, st)
-
-        // 标题
-        textPaint.apply {
-            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-            textSize = st.titleSize
-            color = argb(st.titleColor, 1f)
-            textAlign = Paint.Align.CENTER
-        }
-        canvas.drawText(songName, size.width / 2f, st.pad - textPaint.fontMetrics.top, textPaint)
-
-        // 页码
-        textPaint.apply {
-            typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
-            textSize = st.metaSize
-            color = argb(st.metaColor, 1f)
-            textAlign = Paint.Align.LEFT
-        }
-        canvas.drawText(
-            "${pageIndex + 1} / $pageCount",
-            st.pad,
-            st.pad + st.titleSize * 1.4f + 10f - textPaint.fontMetrics.top,
-            textPaint
-        )
-
-        // 信息面板
-        val infoTop = st.pad + size.headerH
-        if (st.showInfoPanel && infoItems.isNotEmpty()) {
-            drawInfoPanel(canvas, st.pad, infoTop, size.bodyW, infoItems, st)
+        val bitmap = try {
+            Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        } catch (e: OutOfMemoryError) {
+            return null
         }
 
-        // 正文
-        val bodyTop = infoTop + size.infoH
-        val bodyLeft = st.pad
+        try {
+            val canvas = Canvas(bitmap)
+            canvas.scale(scale, scale)
 
-        textPaint.apply {
-            typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
-            textSize = st.timeSize
-            color = argb(st.timeColor, st.timeAlpha)
-            textAlign = Paint.Align.CENTER
-        }
+            val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+            val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        for (i in page.columns.indices) {
-            val col = page.columns[i]
-            val gx = bodyLeft + (i % st.cols) * (size.gridW + st.gridGapX)
-            val gy = bodyTop + (i / st.cols) * (size.gridH + size.timeH + st.gridGapY)
+            drawVerticalGradient(canvas, size.width, size.height, st.bg, st.bgGlow)
+            if (st.showStars) drawStars(canvas, size.width, size.height)
+            drawBgPattern(canvas, size.width, size.height, st, fill, stroke)
+            drawDeco(canvas, size.width, size.height, st, fill, stroke)
+            drawWatermark(canvas, size.width, size.height, st)
 
-            val activeCells = ArrayList<Int>(col.rows.size)
-            for (r in col.rows) {
-                if (r < 0 || r >= rows) continue
-                val gridRow = r / size.gCols
-                val gridCol = r % size.gCols
-                if (gridRow < size.gRows) activeCells.add(gridRow * size.gCols + gridCol)
+            textPaint.apply {
+                typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+                textSize = st.titleSize
+                color = argb(st.titleColor, 1f)
+                textAlign = Paint.Align.CENTER
             }
+            canvas.drawText(songName, size.width / 2f, st.pad - textPaint.fontMetrics.top, textPaint)
 
-            drawKeyGrid(canvas, gx, gy, size.gCols, size.gRows, st, activeCells, fill, stroke)
-
+            textPaint.apply {
+                typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+                textSize = st.metaSize
+                color = argb(st.metaColor, 1f)
+                textAlign = Paint.Align.LEFT
+            }
             canvas.drawText(
-                formatMs(col.timeMs),
-                gx + size.gridW / 2f,
-                gy + size.gridH + 8f - textPaint.fontMetrics.top,
+                "${pageIndex + 1} / $pageCount",
+                st.pad,
+                st.pad + st.titleSize * 1.4f + 10f - textPaint.fontMetrics.top,
                 textPaint
             )
+
+            val infoTop = st.pad + size.headerH
+            if (st.showInfoPanel && infoItems.isNotEmpty()) {
+                drawInfoPanel(canvas, st.pad, infoTop, size.bodyW, infoItems, st)
+            }
+
+            val bodyTop = infoTop + size.infoH
+            val bodyLeft = st.pad
+
+            textPaint.apply {
+                typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+                textSize = st.timeSize
+                color = argb(st.timeColor, st.timeAlpha)
+                textAlign = Paint.Align.CENTER
+            }
+
+            for (i in page.columns.indices) {
+                val col = page.columns[i]
+                val gx = bodyLeft + (i % st.cols) * (size.gridW + st.gridGapX)
+                val gy = bodyTop + (i / st.cols) * (size.gridH + size.timeH + st.gridGapY)
+
+                val activeCells = ArrayList<Int>(col.rows.size)
+                for (r in col.rows) {
+                    if (r < 0 || r >= rows) continue
+                    val gridRow = r / size.gCols
+                    val gridCol = r % size.gCols
+                    if (gridRow < size.gRows) activeCells.add(gridRow * size.gCols + gridCol)
+                }
+
+                drawKeyGrid(canvas, gx, gy, size.gCols, size.gRows, st, activeCells, fill, stroke)
+
+                if (st.showTime) {
+                    canvas.drawText(
+                        formatMs(col.timeMs),
+                        gx + size.gridW / 2f,
+                        gy + size.gridH + 8f - textPaint.fontMetrics.top,
+                        textPaint
+                    )
+                }
+            }
+
+            val footY = st.pad + size.headerH + size.infoH + size.bodyH + size.footerH / 2f
+            val logoSize = st.logoSize * 1.6f
+            val nameWidth = 90f
+            val startX = (size.width - (logoSize + 8f + nameWidth)) / 2f
+
+            drawLogo(canvas, startX, footY - logoSize / 2f, logoSize, st, fill, stroke)
+
+            textPaint.apply {
+                typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+                textSize = st.logoSize
+                color = argb(st.logoColor, 1f)
+                textAlign = Paint.Align.LEFT
+            }
+            canvas.drawText(
+                APP_NAME,
+                startX + logoSize + 8f,
+                footY - (textPaint.fontMetrics.ascent + textPaint.fontMetrics.descent) / 2f,
+                textPaint
+            )
+
+            drawAntiTheftNoise(canvas, size.width, size.height, fill)
+
+            return bitmap
+        } catch (e: OutOfMemoryError) {
+            bitmap.recycle()
+            return null
+        } catch (e: Throwable) {
+            bitmap.recycle()
+            return null
         }
-
-        // 页脚
-        val footY = st.pad + size.headerH + size.infoH + size.bodyH + size.footerH / 2f
-        val logoSize = st.logoSize * 1.6f
-        val nameWidth = 90f
-        val totalW = logoSize + 8f + nameWidth
-        val startX = (size.width - totalW) / 2f
-
-        drawLogo(canvas, startX, footY - logoSize / 2f, logoSize, st, fill, stroke)
-
-        textPaint.apply {
-            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-            textSize = st.logoSize
-            color = argb(st.logoColor, 1f)
-            textAlign = Paint.Align.LEFT
-        }
-        canvas.drawText(
-            APP_NAME,
-            startX + logoSize + 8f,
-            footY - (textPaint.fontMetrics.ascent + textPaint.fontMetrics.descent) / 2f,
-            textPaint
-        )
-
-        return bitmap
     }
 
+    private fun drawBgPattern(canvas: Canvas, w: Float, h: Float, st: Style, fill: Paint, stroke: Paint) {
+        if (st.bgPattern == "none") return
+        stroke.color = argb(st.gridLine, 0.05f)
+        stroke.strokeWidth = 1f
+        val step = 40f
+        if (st.bgPattern == "grid") {
+            var x = 0f
+            while (x < w) { canvas.drawLine(x, 0f, x, h, stroke); x += step }
+            var y = 0f
+            while (y < h) { canvas.drawLine(0f, y, w, y, stroke); y += step }
+        } else if (st.bgPattern == "dots") {
+            fill.color = argb(st.gridLine, 0.05f)
+            var x = 0f
+            while (x < w) {
+                var y = 0f
+                while (y < h) { canvas.drawCircle(x, y, 1.5f, fill); y += 30f }
+                x += 30f
+            }
+        } else if (st.bgPattern == "diagonal") {
+            for (i in -(w.toInt())..h.toInt() step 30) {
+                canvas.drawLine(i.toFloat(), 0f, i + h, h, stroke)
+            }
+        }
+    }
 
-    /** 信息面板：两列网格 */
+    private fun drawDeco(canvas: Canvas, w: Float, h: Float, st: Style, fill: Paint, stroke: Paint) {
+        if (st.decoType == "none") return
+        val rnd = Random(20260101L + w.toLong())
+        fill.color = argb(st.gridLine, 0.1f)
+        stroke.color = argb(st.gridLine, 0.15f)
+        stroke.strokeWidth = 1f
+
+        for (i in 0 until 50) {
+            val x = rnd.nextFloat() * w
+            val y = rnd.nextFloat() * h
+            if (st.decoType == "stars") {
+                canvas.drawCircle(x, y, rnd.nextFloat() * 1.5f + 0.5f, fill)
+            } else if (st.decoType == "snow") {
+                canvas.drawLine(x - 4f, y, x + 4f, y, stroke)
+                canvas.drawLine(x, y - 4f, x, y + 4f, stroke)
+            } else if (st.decoType == "bubbles") {
+                canvas.drawCircle(x, y, rnd.nextFloat() * 6f + 2f, stroke)
+            } else if (st.decoType == "geometric") {
+                val path = Path()
+                path.moveTo(x, y - 3f)
+                path.lineTo(x + 3f, y + 2f)
+                path.lineTo(x - 3f, y + 2f)
+                path.close()
+                canvas.drawPath(path, fill)
+            }
+        }
+    }
+
     private fun drawInfoPanel(
-        canvas: Canvas,
-        x: Float,
-        y: Float,
-        width: Float,
-        items: List<Pair<String, String>>,
-        st: Style
+        canvas: Canvas, x: Float, y: Float, width: Float,
+        items: List<Pair<String, String>>, st: Style
     ) {
         if (items.isEmpty()) return
-
         val colCount = 2
         val rowCount = (items.size + colCount - 1) / colCount
         val colW = width / colCount
@@ -414,10 +638,18 @@ object SheetImageExporter {
 
             canvas.drawText(item.first, ix, baseline, labelPaint)
             val labelW = labelPaint.measureText(item.first)
-            canvas.drawText(item.second, ix + labelW + 8f, baseline, valuePaint)
+
+            val maxValueW = colW - labelW - 16f
+            var value = item.second
+            if (valuePaint.measureText(value) > maxValueW) {
+                while (value.length > 1 && valuePaint.measureText(value + "…") > maxValueW) {
+                    value = value.substring(0, value.length - 1)
+                }
+                value += "…"
+            }
+            canvas.drawText(value, ix + labelW + 8f, baseline, valuePaint)
         }
 
-        // 分割线
         val lineY = y + rowCount * rowH + 6f
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -428,37 +660,43 @@ object SheetImageExporter {
     }
 
     private fun drawKeyGrid(
-        canvas: Canvas,
-        x: Float,
-        y: Float,
-        gCols: Int,
-        gRows: Int,
-        st: Style,
-        activeCells: List<Int>,
-        fill: Paint,
-        stroke: Paint
+        canvas: Canvas, x: Float, y: Float, gCols: Int, gRows: Int,
+        st: Style, activeCells: List<Int>, fill: Paint, stroke: Paint
     ) {
         val block = RectF()
-
         for (r in 0 until gRows) {
             for (c in 0 until gCols) {
                 val bx = x + c * (st.cell + st.cellGap)
                 val by = y + r * (st.cell + st.cellGap)
                 val isActive = activeCells.contains(r * gCols + c)
-
                 block.set(bx, by, bx + st.cell, by + st.cell)
+
+                val path = Path()
+                if (st.noteShape == "circle") {
+                    path.addCircle(bx + st.cell / 2f, by + st.cell / 2f, st.cell / 2f, Path.Direction.CW)
+                } else if (st.noteShape == "diamond") {
+                    path.moveTo(bx + st.cell / 2f, by)
+                    path.lineTo(bx + st.cell, by + st.cell / 2f)
+                    path.lineTo(bx + st.cell / 2f, by + st.cell)
+                    path.lineTo(bx, by + st.cell / 2f)
+                    path.close()
+                } else {
+                    path.addRoundRect(block, st.gridRadius, st.gridRadius, Path.Direction.CW)
+                }
 
                 if (isActive) {
                     val t = if (gRows > 1) r.toFloat() / (gRows - 1) else 0f
                     fill.color = argb(mix(st.noteFill, st.noteFillAlt, t), 1f)
-                    canvas.drawRoundRect(block, st.gridRadius, st.gridRadius, fill)
-                    stroke.color = argb(st.noteStroke, st.noteStrokeAlpha)
-                    stroke.strokeWidth = 1f
-                    canvas.drawRoundRect(block, st.gridRadius, st.gridRadius, stroke)
+                    canvas.drawPath(path, fill)
+                    if (st.noteStrokeAlpha > 0) {
+                        stroke.color = argb(st.noteStroke, st.noteStrokeAlpha)
+                        stroke.strokeWidth = 1f
+                        canvas.drawPath(path, stroke)
+                    }
                 } else {
                     stroke.color = argb(st.gridLine, st.gridLineAlpha)
                     stroke.strokeWidth = 1.2f
-                    canvas.drawRoundRect(block, st.gridRadius, st.gridRadius, stroke)
+                    canvas.drawPath(path, stroke)
                 }
             }
         }
@@ -466,25 +704,20 @@ object SheetImageExporter {
 
     private fun drawWatermark(canvas: Canvas, width: Float, height: Float, st: Style) {
         if (!st.showWatermark) return
-
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
             textSize = st.watermarkSize
             color = argb(st.watermarkColor, st.watermarkAlpha)
             textAlign = Paint.Align.CENTER
         }
-
         val stepX = st.watermarkSize * 11f
         val stepY = st.watermarkSize * 7f
-
         canvas.save()
         canvas.translate(width / 2f, height / 2f)
         canvas.rotate(-45f)
-
         val diag = sqrt(width * width + height * height)
         val halfW = diag / 2f + stepX
         val halfH = diag / 2f + stepY
-
         var rowIndex = 0
         var y = -halfH
         while (y <= halfH) {
@@ -497,27 +730,19 @@ object SheetImageExporter {
             y += stepY
             rowIndex += 1
         }
-
         canvas.restore()
     }
 
     private fun drawLogo(
-        canvas: Canvas,
-        x: Float,
-        y: Float,
-        size: Float,
-        st: Style,
-        fill: Paint,
-        stroke: Paint
+        canvas: Canvas, x: Float, y: Float, size: Float,
+        st: Style, fill: Paint, stroke: Paint
     ) {
         val cx = x + size / 2f
         val cy = y + size / 2f
         val r = size / 2f
-
         stroke.color = argb(st.logoColor, 0.85f)
         stroke.strokeWidth = 1.6f
         canvas.drawCircle(cx, cy, r - 1f, stroke)
-
         val path = Path()
         val spikes = 4
         val outer = r * 0.62f
@@ -534,13 +759,7 @@ object SheetImageExporter {
         canvas.drawPath(path, fill)
     }
 
-    private fun drawVerticalGradient(
-        canvas: Canvas,
-        width: Float,
-        height: Float,
-        from: Int,
-        to: Int
-    ) {
+    private fun drawVerticalGradient(canvas: Canvas, width: Float, height: Float, from: Int, to: Int) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val steps = 32
         val stepH = height / steps
@@ -555,7 +774,7 @@ object SheetImageExporter {
         val band = min(height, 900f)
         val area = width * band
         val count = max(12, min(220, (area / 4200f).roundToInt()))
-        val rnd = java.util.Random(20260101L)
+        val rnd = Random(20260101L)
         val starPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         for (i in 0 until count) {
             val x = rnd.nextFloat() * width
@@ -567,28 +786,33 @@ object SheetImageExporter {
         }
     }
 
+    private fun drawAntiTheftNoise(c: Canvas, w: Float, h: Float, paint: Paint) {
+        paint.style = Paint.Style.FILL
+        val rnd = Random(20260101L)
+        val colors = intArrayOf(Color.WHITE, Color.BLACK, Color.RED, Color.BLUE)
+        for (i in 0 until 3000) {
+            val x = rnd.nextFloat() * w
+            val y = rnd.nextFloat() * h
+            paint.color = colors[i % 4]
+            paint.alpha = 12
+            c.drawRect(x, y, x + 2f, y + 2f, paint)
+        }
+    }
+
     // ============================ 数据解析 ============================
 
     private class PageData(val columns: List<ColumnData>)
-
     private class ColumnData(val timeMs: Long, val rows: IntArray)
 
-    private fun parsePage(pageObj: JSONObject, rows: Int): PageData {
+        private fun parsePage(pageObj: JSONObject, rows: Int): PageData {
         val arr = pageObj.optJSONArray("columns") ?: JSONArray()
         val columns = ArrayList<ColumnData>(arr.length())
-
         for (i in 0 until arr.length()) {
             val colObj = arr.optJSONObject(i) ?: continue
             val rowsArr = colObj.optJSONArray("rows") ?: JSONArray()
             val values = IntArray(rowsArr.length()) { idx -> rowsArr.optInt(idx, -1) }
-            columns.add(
-                ColumnData(
-                    timeMs = colObj.optLong("t", 0L),
-                    rows = values.filter { it in 0 until rows }.toIntArray()
-                )
-            )
+            columns.add(ColumnData(colObj.optLong("t", 0L), values.filter { it in 0 until rows }.toIntArray()))
         }
-
         return PageData(columns)
     }
 
@@ -633,35 +857,24 @@ object SheetImageExporter {
         return String.format(Locale.US, "%d:%02d", m, s)
     }
 
-    /**
-     * 文件名净化：只替换文件系统真正不允许的字符，保留 "||" 作为模型分隔符
-     */
     private fun sanitize(name: String): String {
         var s = name.trim()
         if (s.isEmpty()) return "未命名乐谱"
         s = s.replace(Regex("[\\\\/:*?\"<>\\r\\n\\t]"), "_")
         s = s.replace(Regex("\\s+"), " ").trim()
         if (s.length > MAX_NAME_LENGTH) s = s.substring(0, MAX_NAME_LENGTH).trim()
-        if (s.isEmpty()) s = "未命名乐谱"
-        if (s == "." || s == "..") s = "未命名乐谱"
+        if (s.isEmpty() || s == "." || s == "..") s = "未命名乐谱"
         return s
     }
 
     // ============================ 样式 ============================
 
     private class Size(
-        val width: Float,
-        val height: Float,
-        val headerH: Float,
-        val infoH: Float,
-        val footerH: Float,
-        val bodyW: Float,
-        val bodyH: Float,
-        val gridW: Float,
-        val gridH: Float,
-        val timeH: Float,
-        val gCols: Int,
-        val gRows: Int
+        val width: Float, val height: Float,
+        val headerH: Float, val infoH: Float, val footerH: Float,
+        val bodyW: Float, val bodyH: Float,
+        val gridW: Float, val gridH: Float, val timeH: Float,
+        val gCols: Int, val gRows: Int
     )
 
     private class Style {
@@ -704,6 +917,11 @@ object SheetImageExporter {
         var showStars: Boolean = true
         var showWatermark: Boolean = true
         var showInfoPanel: Boolean = true
+        var showTime: Boolean = true
+
+        var noteShape: String = "square"
+        var decoType: String = "none"
+        var bgPattern: String = "none"
 
         companion object {
             fun from(o: JSONObject?): Style {
@@ -749,6 +967,12 @@ object SheetImageExporter {
                 s.showStars = o.optBoolean("showStars", s.showStars)
                 s.showWatermark = o.optBoolean("showWatermark", s.showWatermark)
                 s.showInfoPanel = o.optBoolean("showInfoPanel", s.showInfoPanel)
+                s.showTime = o.optBoolean("showTime", s.showTime)
+
+                s.noteShape = o.optString("noteShape", s.noteShape)
+                s.decoType = o.optString("decoType", s.decoType)
+                s.bgPattern = o.optString("bgPattern", s.bgPattern)
+
                 return s
             }
 

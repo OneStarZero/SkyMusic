@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SkyMusic 0.0.9</title>
     <link rel="stylesheet" href="./css/style.css">
+    <link rel="stylesheet" href="./css/loading.css">
 </head>
 <body>
 
@@ -111,27 +112,37 @@
 </script>
 
 
-<!-- 🌟 沉浸式加载界面 -->
+<!-- 沉浸式加载界面 -->
 <div id="loading-screen">
+    <!-- 背景流星与星轨 -->
+    <div class="loading-bg">
+        <div class="meteor m1"></div>
+        <div class="meteor m2"></div>
+        <div class="meteor m3"></div>
+        <div class="grid-overlay"></div>
+    </div>
+
     <div class="loader-container">
-        <!-- 多层星轨动画 -->
-        <div class="star-orbit">
-            <div class="ring ring-1"></div>
-            <div class="ring ring-2"></div>
-            <div class="ring ring-3"></div>
-            <div class="star-core">✨</div>
-        </div>
+        <!-- 呼吸光球 -->
+        <div class="core-glow"></div>
         
-        <!-- 状态文字 -->
-        <div class="loading-title">SkyMusic 正在唤醒星灵</div>
+        <!-- 状态文字与百分比 -->
+        <h2 class="loading-title">SkyMusic 0.0.9</h2>
         <div class="loading-status" id="loadStatus">正在初始化核心模块...</div>
         
-        <!-- 进度条 -->
-        <div class="progress-bar-container">
-            <div class="progress-bar" id="loadProgressBar"></div>
+        <!-- 直线进度条 -->
+        <div class="progress-track">
+            <div class="progress-fill" id="loadProgressBar"></div>
+            <div class="progress-glow" id="loadProgressGlow"></div>
         </div>
 
-        <!-- 跳动的小星星 -->
+        <!-- 双行进度数据 -->
+        <div class="progress-info">
+            <span id="loadSubStatus">连接星灵网络</span>
+            <span id="loadProgressText" class="percent">0%</span>
+        </div>
+
+        <!-- 底部跳动圆点 -->
         <div class="loading-dots">
             <span></span><span></span><span></span>
         </div>

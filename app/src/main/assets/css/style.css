@@ -236,6 +236,77 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
 .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; box-shadow: 0 0 10px var(--cloud-blue); } }
+/* --- 主题选择弹窗动画优化 --- */
+.smsi-theme-picker {
+    position: absolute; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+    display: flex; justify-content: center; align-items: flex-end;
+    opacity: 0; transition: opacity 0.3s ease;
+}
+.smsi-theme-picker.smsi-show { opacity: 1; }
+.smsi-theme-picker.smsi-hidden { display: none; }
+
+.smsi-theme-content {
+    width: 100%; background: #0F172A; border-radius: 24px 24px 0 0;
+    max-height: 75%; display: flex; flex-direction: column;
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.6);
+    transform: translateY(100%); 
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); /* 丝滑回弹曲线 */
+}
+.smsi-theme-picker.smsi-show .smsi-theme-content { transform: translateY(0); }
+
+.smsi-theme-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.08);
+    font-weight: 700; color: #FFF; font-size: 16px;
+}
+
+.smsi-theme-list {
+    overflow-y: auto; padding: 16px 24px 30px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
+}
+
+.smsi-theme-item {
+    display: flex; align-items: center; gap: 12px; padding: 16px;
+    background: rgba(255,255,255,0.04); border-radius: 16px;
+    color: #F8FAFC; font-size: 14px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.08); 
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0; transform: translateY(10px);
+}
+.smsi-theme-picker.smsi-show .smsi-theme-item {
+    animation: itemFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+/* 列表错位浮现动画 */
+.smsi-theme-item:nth-child(1) { animation-delay: 0.05s; }
+.smsi-theme-item:nth-child(2) { animation-delay: 0.10s; }
+.smsi-theme-item:nth-child(3) { animation-delay: 0.15s; }
+.smsi-theme-item:nth-child(4) { animation-delay: 0.20s; }
+.smsi-theme-item:nth-child(5) { animation-delay: 0.25s; }
+.smsi-theme-item:nth-child(6) { animation-delay: 0.30s; }
+.smsi-theme-item:nth-child(7) { animation-delay: 0.35s; }
+.smsi-theme-item:nth-child(8) { animation-delay: 0.40s; }
+
+@keyframes itemFadeIn {
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.smsi-theme-item:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); }
+.smsi-theme-item:active { transform: scale(0.96); }
+
+.smsi-theme-swatch { 
+    width: 28px; height: 28px; border-radius: 8px; 
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+.smsi-theme-item.random {
+    grid-column: span 2; justify-content: center; font-weight: 700; padding: 18px;
+    background: linear-gradient(135deg, rgba(56,189,248,0.15), rgba(167,139,250,0.15));
+    border-color: rgba(56,189,248,0.4); color: #38BDF8;
+}
+.smsi-theme-item.random:hover {
+    background: linear-gradient(135deg, rgba(56,189,248,0.25), rgba(167,139,250,0.25));
+    box-shadow: 0 0 20px rgba(56,189,248,0.2);
+}
 /* ================= 谱面图片按钮 ================= */
 .btn-image {
     background: linear-gradient(135deg, #7DD3FC, #A78BFA);
