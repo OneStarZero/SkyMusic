@@ -1,5 +1,5 @@
 /**
- * SkyMusic · 按键样式列表构建 + 应用
+ * SkyMusic · 主题配色 + 按键样式列表构建 + 应用
  */
 
 import {
@@ -28,8 +28,57 @@ export const themeState = {
 /* ========================== 列表构建 ========================== */
 
 export function buildThemeLists() {
-  if (!view.cornerList) return;
+  if (!view.themeList || !view.cornerList) return;
+  buildThemeList();
   buildCornerList();
+}
+
+function buildThemeList() {
+  const host = view.themeList;
+  host.innerHTML = '';
+
+  const keys = Object.keys(THEMES);
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const t = THEMES[key];
+    if (!t) continue;
+
+    const item = document.createElement('div');
+    item.className = 'smsi-theme-item' + (themeState.themeKey === key && !themeState.isRandom ? ' smsi-selected' : '');
+    item.dataset.role = 'theme-item';
+    item.dataset.key = key;
+
+    // 三色圆嵌套预览
+    const swatch = document.createElement('div');
+    swatch.className = 'smsi-theme-swatch';
+
+    const c1 = document.createElement('span');
+    c1.className = 'smsi-swatch-dot smsi-swatch-bg';
+    c1.style.background = t.bg || '#0B1120';
+
+    const c2 = document.createElement('span');
+    c2.className = 'smsi-swatch-dot smsi-swatch-fill';
+    c2.style.background = t.noteFill || '#7DD3FC';
+
+    const c3 = document.createElement('span');
+    c3.className = 'smsi-swatch-dot smsi-swatch-alt';
+    c3.style.background = t.noteFillAlt || t.noteFill || '#A78BFA';
+
+    swatch.appendChild(c1);
+    swatch.appendChild(c2);
+    swatch.appendChild(c3);
+
+    const label = document.createElement('span');
+    label.className = 'smsi-theme-name'
+    label.textContent = t.name || key;
+    item.appendChild(swatch);
+    item.appendChild(label);
+    frag.appendChild(item);
+  }
+
+  host.appendChild(frag);
 }
 
 function buildCornerList() {

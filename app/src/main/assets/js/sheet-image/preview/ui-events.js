@@ -6,7 +6,7 @@ import { view, DEFAULT_ZOOM } from './state.js';
 import { setZoom, currentZoom } from './zoom.js';
 import { saveImages } from './save.js';
 import { togglePageSelection, toggleSelectAll } from './ui-selection.js';
-import { applyCorner, applyRandom } from './ui-theme.js';
+import { applyTheme, applyCorner, applyRandom } from './ui-theme.js';
 import { switchTab, closeOverlay, toggleThemePanel } from './ui-overlay.js';
 import { switchKeyCount } from './ui-rebuild.js';
 
@@ -30,6 +30,13 @@ export function onOverlayClick(ev) {
   const selectAllSwitch = target.closest('[data-act="select-all"]');
   if (selectAllSwitch) {
     toggleSelectAll();
+    return;
+  }
+
+  // 主题配色选择
+  const themeItem = target.closest('[data-role="theme-item"]');
+  if (themeItem) {
+    applyTheme(themeItem.dataset.key);
     return;
   }
 

@@ -41,13 +41,19 @@ export function switchTab(tab) {
 export function openOverlay() {
   const overlay = view.overlay;
   if (!overlay) return;
+
+  // 先显示但透明，避免闪烁
   overlay.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
+  overlay.style.opacity = '0';
+  // 强制 reflow
+  void overlay.offsetHeight;
+  // 下一帧再加 show 类
   requestAnimationFrame(function () {
     overlay.classList.add('smsi-show');
+    overlay.style.opacity = '';
   });
-  setNativeTopBarVisible(false);
 }
+
 
 export function closeOverlay() {
   if (!view.overlay) return;

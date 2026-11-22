@@ -9,7 +9,8 @@ export const OVERLAY_CSS = [
   '.smsi-overlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;',
   'background:rgba(8,12,24,.9);',
   'opacity:0;transition:opacity .2s ease;font-family:' + FONT_STACK + ';',
-  'overscroll-behavior:contain;touch-action:none;}',
+  'overscroll-behavior:contain;touch-action:none;',
+  'will-change:opacity;}',
   '.smsi-overlay.smsi-show{opacity:1;}',
 
   '.smsi-window{width:min(92vw,760px);height:min(88vh,900px);display:flex;flex-direction:column;',
@@ -142,11 +143,30 @@ export const OVERLAY_CSS = [
 
   '.smsi-theme-section{padding:12px 16px;}',
   '.smsi-theme-label{font-size:11.5px;color:#94A3B8;margin-bottom:8px;font-weight:600;letter-spacing:.5px;}',
-  'border-radius:10px;border:1px solid rgba(125,211,252,.08);',
+
+  /* ========================== 主题配色列表（胶囊） ========================== */
+  '.smsi-theme-list{display:flex;flex-direction:column;gap:8px;}',
+  '.smsi-theme-item{display:flex;align-items:center;gap:10px;padding:8px 12px;',
+  'border-radius:12px;border:1px solid rgba(125,211,252,.08);',
   'background:rgba(30,41,59,.45);',
-  'cursor:pointer;transition:border-color .15s ease,background .15s ease;font-size:11px;color:#CBD5E1;}',
+  'cursor:pointer;transition:border-color .15s ease,background .15s ease;',
+  'font-size:12px;color:#CBD5E1;}',
+  '.smsi-theme-item.smsi-selected{border-color:rgba(125,211,252,.65);',
   'background:rgba(125,211,252,.14);color:#7DD3FC;}',
 
+  /* 三色圆嵌套预览 */
+  '.smsi-theme-swatch{position:relative;width:34px;height:34px;flex:0 0 auto;}',
+  '.smsi-swatch-dot{position:absolute;border-radius:50%;display:block;}',
+  '.smsi-swatch-bg{width:34px;height:34px;left:0;top:0;',
+  'box-shadow:0 0 0 1px rgba(255,255,255,.12) inset;}',
+  '.smsi-swatch-fill{width:22px;height:22px;left:6px;top:6px;',
+  'box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;}',
+  '.smsi-swatch-alt{width:12px;height:12px;left:11px;top:11px;',
+  'box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;}',
+
+  '.smsi-theme-name{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+
+  /* ========================== 按键样式 ========================== */
   '.smsi-corner-row{display:flex;gap:8px;}',
   '.smsi-corner-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;',
   'border-radius:10px;border:1px solid rgba(125,211,252,.08);',

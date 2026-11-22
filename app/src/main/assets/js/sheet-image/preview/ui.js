@@ -2,7 +2,7 @@
  * SkyMusic · 预览层入口
  * ------------------------------------------------------------------
  * 实际实现已拆分到：
- *   ui-theme.js      按键样式列表构建 + 应用
+ *   ui-theme.js      主题配色 + 按键样式列表构建 + 应用
  *   ui-selection.js  勾选逻辑 + 保存进度
  *   ui-overlay.js    打开/关闭/标签页
  *   ui-rebuild.js    重建 + 键位切换
@@ -51,6 +51,7 @@ export function ensureOverlay() {
 
   view.themeBtn = overlay.querySelector('[data-act="theme"]');
   view.themePanel = overlay.querySelector('[data-role="theme-panel"]');
+  view.themeList = overlay.querySelector('[data-role="theme-list"]');
   view.cornerList = overlay.querySelector('[data-role="corner-list"]');
   view.themeCloseBtn = overlay.querySelector('[data-act="theme-close"]');
 
