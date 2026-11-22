@@ -7,7 +7,7 @@ import kotlin.math.sin
 
 /**
  * MIDI 音符 → PCM 合成器
- * 纯正弦波 + 谐波 + ADSR 包络，无 Android 依赖
+ * 支持按采样区间合成（流式），无 Android 依赖
  */
 object MidiSynth {
 
@@ -21,50 +21,73 @@ object MidiSynth {
     )
 
     /**
-     * 合成 PCM
-     * @param notes 音符列表
-     * @param totalMs 总时长
+     * 合成指定采样区间 [fromSample, toSample)
+     * @param notes 音符列表（需按 startMs 排序）
+     * @param fromSample 起始采样（含）
+     * @param toSample 结束采样（不含）
      * @param volume 总音量 0-1
+     * @return 该区间的 PCM 数据
      */
-    fun synthesize(notes: List<Note>, totalMs: Long, volume: Float = 0.6f): ShortArray {
-        val totalSamples = ((totalMs / 1000.0) * SAMPLE_RATE).toInt().coerceAtLeast(1)
-        val buffer = FloatArray(totalSamples)
+    fun synthesizeRange(
+        notes: List<Note>,
+        fromSample: Int,
+        toSample: Int,
+        volume: Float = 0.6f
+    ): ShortArray {
+        val len = (toSample - fromSample).coerceAtLeast(0)
+        if (len == 0) return ShortArray(0)
 
+        val buffer = FloatArray(len)
         val attackSamples = (SAMPLE_RATE * 0.008).toInt()
         val releaseSamples = (SAMPLE_RATE * 0.12).toInt()
 
         for (note in notes) {
+            val noteStart = ((note.startMs / 1000.0) * SAMPLE_RATE).toInt()
+            val noteDur = ((note.durationMs / 1000.0) * SAMPLE_RATE).toInt()
+            if (noteDur <= 0) continue
+
+            val noteEnd = noteStart + noteDur
+
+            // 跳过不重叠的音符
+            if (noteEnd <= fromSample) continue
+            if (noteStart >= toSample) break  // notes 已排序，后面都不重叠
+
             val freq = midiToFreq(note.midi)
-            val startSample = ((note.startMs / 1000.0) * SAMPLE_RATE).toInt()
-            val durSamples = ((note.durationMs / 1000.0) * SAMPLE_RATE).toInt()
-            if (durSamples <= 0) continue
-            if (startSample >= totalSamples) continue
-
-            val endSample = (startSample + durSamples).coerceAtMost(totalSamples)
             val amp = note.velocity * volume
-            val relStart = durSamples - releaseSamples
+            val relStart = noteDur - releaseSamples
 
-            for (i in startSample until endSample) {
-                val local = i - startSample
+            // 计算重叠区间
+            val overlapStart = maxOf(noteStart, fromSample)
+            val overlapEnd = minOf(noteEnd, toSample)
+
+            for (i in overlapStart until overlapEnd) {
+                val local = i - noteStart
                 val t = local.toDouble() / SAMPLE_RATE
 
-                val wave = sin(2 * PI * freq * t) * 0.75 +
-                           sin(2 * PI * freq * 2 * t) * 0.18 +
-                           sin(2 * PI * freq * 3 * t) * 0.07
+                // 音色：基频 + 谐波（更柔和，接近钢琴）
+                val wave = sin(2 * PI * freq * t) * 0.62 +
+                           sin(2 * PI * freq * 2 * t) * 0.22 +
+                           sin(2 * PI * freq * 3 * t) * 0.10 +
+                           sin(2 * PI * freq * 4 * t) * 0.04 +
+                           sin(2 * PI * freq * 5 * t) * 0.02
 
+                // ADSR 包络
                 val env = when {
                     local < attackSamples -> local.toFloat() / attackSamples
-                    local > relStart -> ((durSamples - local).toFloat() / releaseSamples).coerceIn(0f, 1f)
+                    local > relStart -> ((noteDur - local).toFloat() / releaseSamples).coerceIn(0f, 1f)
                     else -> 1f
                 }
 
-                val decay = exp(-t * 1.8).toFloat()
-                buffer[i] += (wave * env * decay * amp).toFloat()
+                // 指数衰减（更慢，更自然）
+                val decay = exp(-t * 1.2).toFloat()
+
+                buffer[i - fromSample] += (wave * env * decay * amp).toFloat()
             }
         }
 
-        val out = ShortArray(totalSamples)
-        for (i in 0 until totalSamples) {
+        // 转 ShortArray，软限幅
+        val out = ShortArray(len)
+        for (i in 0 until len) {
             val v = buffer[i].coerceIn(-1f, 1f)
             out[i] = (v * Short.MAX_VALUE).toInt().toShort()
         }

@@ -352,7 +352,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /* ==================== 试听（转发给 PreviewBridge） ==================== */
+                /* ==================== 试听（转发给 PreviewBridge） ==================== */
 
         @JavascriptInterface
         fun playPreview(payloadJson: String): Boolean = PreviewBridge.play(payloadJson)
@@ -365,6 +365,9 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun stopPreview() = PreviewBridge.stop()
+
+        @JavascriptInterface
+        fun seekPreview(ms: Long) = PreviewBridge.seek(ms)
 
         @JavascriptInterface
         fun isPreviewPlaying(): Boolean = PreviewBridge.isPlaying()

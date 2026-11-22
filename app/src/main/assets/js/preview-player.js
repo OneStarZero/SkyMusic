@@ -11,17 +11,11 @@ function getBridge() {
   return window.AndroidBridge || null;
 }
 
-/** 是否支持原生试听 */
 export function isPreviewSupported() {
   const bridge = getBridge();
   return !!(bridge && typeof bridge.playPreview === 'function');
 }
 
-/**
- * 播放
- * @param {Array} notes [{midi, startMs, durationMs, velocity}]
- * @param {number} totalMs 总时长
- */
 export function playPreview(notes, totalMs) {
   const bridge = getBridge();
   if (!bridge || typeof bridge.playPreview !== 'function') {
@@ -51,61 +45,36 @@ export function playPreview(notes, totalMs) {
   }
 }
 
-/** 暂停 */
 export function pausePreview() {
   const bridge = getBridge();
-  if (bridge && typeof bridge.pausePreview === 'function') {
-    bridge.pausePreview();
-  }
+  if (bridge && typeof bridge.pausePreview === 'function') bridge.pausePreview();
 }
 
-/** 恢复 */
 export function resumePreview() {
   const bridge = getBridge();
-  if (bridge && typeof bridge.resumePreview === 'function') {
-    bridge.resumePreview();
-  }
+  if (bridge && typeof bridge.resumePreview === 'function') bridge.resumePreview();
 }
 
-/** 停止 */
 export function stopPreview() {
   const bridge = getBridge();
-  if (bridge && typeof bridge.stopPreview === 'function') {
-    bridge.stopPreview();
+  if (bridge && typeof bridge.stopPreview === 'function') bridge.stopPreview();
+}
+
+/** 跳转到指定毫秒 */
+export function seekPreview(ms) {
+  const bridge = getBridge();
+  if (bridge && typeof bridge.seekPreview === 'function') {
+    bridge.seekPreview(Math.max(0, ms | 0));
   }
 }
 
-/** 是否正在播放（不含暂停） */
-export function isPlaying() {
-  return currentState === 'playing';
-}
+export function isPlaying() { return currentState === 'playing'; }
+export function isPaused() { return currentState === 'paused'; }
+export function isActive() { return currentState === 'playing' || currentState === 'paused'; }
+export function getProgress() { return currentProgress; }
+export function getTotal() { return currentTotal; }
+export function getState() { return currentState; }
 
-/** 是否暂停 */
-export function isPaused() {
-  return currentState === 'paused';
-}
-
-/** 是否活跃（播放或暂停） */
-export function isActive() {
-  return currentState === 'playing' || currentState === 'paused';
-}
-
-/** 当前进度（毫秒） */
-export function getProgress() {
-  return currentProgress;
-}
-
-/** 当前总时长（毫秒） */
-export function getTotal() {
-  return currentTotal;
-}
-
-/** 当前状态 */
-export function getState() {
-  return currentState;
-}
-
-/** 格式化时间 mm:ss */
 export function formatTime(ms) {
   const t = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(t / 60);
@@ -113,7 +82,7 @@ export function formatTime(ms) {
   return m + ':' + (s < 10 ? '0' + s : s);
 }
 
-/** 原生回调入口（MainActivity 调用） */
+/** 原生回调入口 */
 window.onPreviewState = function (state, progressMs, totalMs) {
   currentState = state;
   currentProgress = progressMs;

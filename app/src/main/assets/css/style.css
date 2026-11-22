@@ -332,6 +332,14 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
     border-color: rgba(125, 211, 252, 0.2);
 }
 
+.preview-inline {
+    background: rgba(0, 0, 0, 0.12);
+    border: 1px solid rgba(52, 211, 153, 0.18);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    margin-bottom: 20px;
+}
+
 .preview-head {
     display: flex;
     justify-content: space-between;
@@ -396,7 +404,6 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 .preview-btn-src { background: linear-gradient(135deg, #38BDF8, #6366F1); }
 .preview-btn-sheet { background: linear-gradient(135deg, #34D399, #10B981); }
 
-/* 暂停/继续：图标 + 状态色 */
 .preview-btn-toggle {
     flex: 0 0 auto;
     padding: 12px 18px;
@@ -423,7 +430,29 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
     text-align: center;
     line-height: 1.5;
 }
-
+.preview-progress {
+    position: relative;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(148, 163, 184, 0.18);
+    overflow: hidden;
+    margin-bottom: 14px;
+    cursor: pointer;
+    touch-action: none;
+}
+.preview-progress::after {
+    content: '';
+    position: absolute;
+    inset: -8px 0;
+}
+.preview-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #7DD3FC, #A78BFA);
+    transition: width 0.2s linear;
+    will-change: width;
+    pointer-events: none;
 }
 
 /* ================= 操作按钮区 ================= */

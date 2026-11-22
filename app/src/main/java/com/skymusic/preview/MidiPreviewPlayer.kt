@@ -9,19 +9,23 @@ import kotlin.concurrent.thread
 
 /**
  * App 端原生 MIDI 试听播放器
- * 支持：播放 / 暂停 / 恢复 / 停止 / 进度回调
+ * 流式合成：边合成边写入 AudioTrack，内存占用固定
+ * 支持：播放 / 暂停 / 恢复 / 停止 / seek / 进度回调
  */
 object MidiPreviewPlayer {
 
     private var audioTrack: AudioTrack? = null
     private var playThread: Thread? = null
-    private var pcmData: ShortArray? = null
 
     @Volatile private var isPlaying = false
     @Volatile private var isPaused = false
-    @Volatile private var writeOffset = 0
+    @Volatile private var seekRequestSample = -1
 
+    private var notes: List<MidiSynth.Note> = emptyList()
     private var currentTotalMs = 0L
+    private var totalSamples = 0
+    private var currentSample = 0
+
     private var startTimeMs = 0L
     private var pausedElapsedMs = 0L
 
@@ -32,31 +36,31 @@ object MidiPreviewPlayer {
 
     /**
      * 播放
-     * @param notes 音符列表
-     * @param totalMs 总时长
      */
-    fun play(notes: List<MidiSynth.Note>, totalMs: Long): Boolean {
+    fun play(noteList: List<MidiSynth.Note>, totalMs: Long): Boolean {
         stop()
-        if (notes.isEmpty() || totalMs <= 0) return false
+        if (noteList.isEmpty() || totalMs <= 0) return false
 
+        // 按开始时间排序（合成时依赖有序）
+        notes = noteList.sortedBy { it.startMs }
         currentTotalMs = totalMs
+        totalSamples = ((totalMs / 1000.0) * MidiSynth.SAMPLE_RATE).toInt().coerceAtLeast(1)
+        currentSample = 0
+        seekRequestSample = -1
+
         isPlaying = true
         isPaused = false
-        writeOffset = 0
         pausedElapsedMs = 0L
         startTimeMs = System.currentTimeMillis()
 
         playThread = thread(name = "MidiPreviewPlayer") {
             try {
-                val pcm = MidiSynth.synthesize(notes, totalMs)
-                pcmData = pcm
-
                 val minBuf = AudioTrack.getMinBufferSize(
                     MidiSynth.SAMPLE_RATE,
                     AudioFormat.CHANNEL_OUT_MONO,
                     AudioFormat.ENCODING_PCM_16BIT
                 )
-                val bufSize = maxOf(minBuf, 8192)
+                val bufSize = maxOf(minBuf, 16384)
 
                 val track = AudioTrack.Builder()
                     .setAudioAttributes(
@@ -80,22 +84,53 @@ object MidiPreviewPlayer {
                 track.play()
 
                 val chunk = 4096
-                while (writeOffset < pcm.size && isPlaying) {
+
+                while (isPlaying && currentSample < totalSamples) {
+                    // 处理 seek 请求
+                    val seekTo = seekRequestSample
+                    if (seekTo >= 0) {
+                        seekRequestSample = -1
+                        currentSample = seekTo.coerceIn(0, totalSamples)
+                        // 清空 AudioTrack 缓冲
+                        try {
+                            track.pause()
+                            track.flush()
+                            track.play()
+                        } catch (_: Throwable) {}
+                        // 重置计时
+                        startTimeMs = System.currentTimeMillis() - (currentSample * 1000L / MidiSynth.SAMPLE_RATE)
+                        pausedElapsedMs = 0L
+                    }
+
+                    // 暂停时等待
                     if (isPaused) {
                         Thread.sleep(30)
                         continue
                     }
-                    val len = minOf(chunk, pcm.size - writeOffset)
-                    track.write(pcm, writeOffset, len)
-                    writeOffset += len
+
+                    // 流式合成一块
+                    val to = minOf(currentSample + chunk, totalSamples)
+                    val pcm = MidiSynth.synthesizeRange(notes, currentSample, to)
+
+                    if (pcm.isNotEmpty()) {
+                        var written = 0
+                        while (written < pcm.size && isPlaying) {
+                            if (isPaused) {
+                                Thread.sleep(20)
+                                continue
+                            }
+                            val n = track.write(pcm, written, pcm.size - written)
+                            if (n < 0) break
+                            written += n
+                        }
+                    }
+
+                    currentSample = to
                 }
 
-                // 等待播放完成
-                while (isPlaying && !isPaused && track.playbackHeadPosition < pcm.size) {
-                    Thread.sleep(50)
-                }
-
+                // 等待缓冲播放完
                 if (isPlaying && !isPaused) {
+                    Thread.sleep(200)
                     notifyState("ended", currentTotalMs, currentTotalMs)
                 }
             } catch (t: Throwable) {
@@ -134,15 +169,26 @@ object MidiPreviewPlayer {
         notifyState("playing", pausedElapsedMs.coerceAtMost(currentTotalMs), currentTotalMs)
     }
 
+    /** 跳转到指定毫秒 */
+    fun seek(ms: Long) {
+        if (!isPlaying) return
+        val sample = ((ms.coerceIn(0, currentTotalMs) / 1000.0) * MidiSynth.SAMPLE_RATE).toInt()
+        seekRequestSample = sample
+        pausedElapsedMs = ms.coerceIn(0, currentTotalMs)
+        startTimeMs = System.currentTimeMillis() - pausedElapsedMs
+        notifyState(if (isPaused) "paused" else "playing", pausedElapsedMs, currentTotalMs)
+    }
+
     /** 停止 */
     fun stop() {
         isPlaying = false
         isPaused = false
+        seekRequestSample = -1
         playThread?.interrupt()
         playThread = null
         releaseTrack()
-        pcmData = null
-        writeOffset = 0
+        notes = emptyList()
+        currentSample = 0
         pausedElapsedMs = 0L
         notifyState("stopped", 0, currentTotalMs)
     }

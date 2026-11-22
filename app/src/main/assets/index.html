@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0B1120">
-    <title>SkyMusic 0.0.9</title>
+    <title>SkyMusic 0.1.0</title>
     <link rel="stylesheet" href="./css/style.css">
     <link rel="stylesheet" href="./css/loading.css">
 </head>
@@ -22,7 +22,7 @@
     <div class="loader-container">
         <div class="core-glow"></div>
 
-        <h2 class="loading-title">SkyMusic 0.0.9</h2>
+        <h2 class="loading-title">SkyMusic 0.1.0</h2>
         <div class="loading-status" id="loadStatus">正在初始化核心模块...</div>
 
         <div class="progress-track">
@@ -49,7 +49,7 @@
 
     <header class="app-header fade-in-up">
         <h1>光遇 MIDI <span>✨OneStar</span></h1>
-        <p class="subtitle">愿星光指引你，SkyMusic 0.0.9</p>
+        <p class="subtitle">愿星光指引你，SkyMusic 0.1.0</p>
     </header>
 
     <div id="viewMidi">
@@ -111,29 +111,28 @@
             <div id="status">准备就绪</div>
         </div>
 
-        <!-- 试听面板（选 MIDI 后出现） -->
-        <div class="glass-card preview-card" id="previewPanel" hidden>
+        <!-- 原曲试听面板（选 MIDI 后出现，跟随轨道勾选） -->
+        <div class="glass-card preview-card" id="previewSrcPanel" hidden>
             <div class="section-title">
-                <span class="icon">🎧</span> 试听
+                <span class="icon">🎧</span> 试听原曲
             </div>
 
             <div class="preview-head">
-                <span class="preview-time" id="previewTime">0:00 / 0:00</span>
-                <span class="preview-source" id="previewSource">未播放</span>
+                <span class="preview-time" id="previewSrcTime">0:00 / 0:00</span>
+                <span class="preview-source" id="previewSrcState">未播放</span>
             </div>
 
-            <div class="preview-progress" id="previewProgress">
-                <div class="preview-progress-fill" id="previewProgressFill"></div>
+            <div class="preview-progress" id="previewSrcProgress">
+                <div class="preview-progress-fill" id="previewSrcFill"></div>
             </div>
 
             <div class="preview-controls">
-                <button id="btnPreviewBefore" class="preview-btn preview-btn-src">▶️ 原曲</button>
-                <button id="btnPreviewAfter" class="preview-btn preview-btn-sheet" hidden>▶️ 谱面</button>
-                <button id="btnPreviewToggle" class="preview-btn preview-btn-toggle" hidden>⏸</button>
-                <button id="btnPreviewStop" class="preview-btn preview-btn-stop" hidden>⏹</button>
+                <button id="btnPreviewSrcPlay" class="preview-btn preview-btn-src">▶️ 播放</button>
+                <button id="btnPreviewSrcToggle" class="preview-btn preview-btn-toggle" hidden>⏸</button>
+                <button id="btnPreviewSrcStop" class="preview-btn preview-btn-stop" hidden>⏹</button>
             </div>
 
-            <div class="preview-hint" id="previewHint">试听原曲将播放上方「提取音轨」中勾选的轨道</div>
+            <div class="preview-hint" id="previewSrcHint">播放上方「提取音轨」中勾选的轨道</div>
         </div>
 
         <div id="log" class="custom-scrollbar"></div>
@@ -169,6 +168,24 @@
                 <div class="info-row"><span class="info-label">原曲作者</span><span class="info-val" id="outAuthor">-</span></div>
                 <div class="info-row"><span class="info-label">提取模型</span><span class="info-val" id="outModel">-</span></div>
                 <div class="info-row"><span class="info-label">改编谱师</span><span class="info-val" id="outTranscriber">-</span></div>
+            </div>
+
+            <!-- 谱面试听面板（随结果卡片显隐） -->
+            <div class="preview-inline" id="previewSheetPanel">
+                <div class="preview-head">
+                    <span class="preview-time" id="previewSheetTime">0:00 / 0:00</span>
+                    <span class="preview-source" id="previewSheetState">未播放</span>
+                </div>
+
+                <div class="preview-progress" id="previewSheetProgress">
+                    <div class="preview-progress-fill" id="previewSheetFill"></div>
+                </div>
+
+                <div class="preview-controls">
+                    <button id="btnPreviewSheetPlay" class="preview-btn preview-btn-sheet">▶️ 试听谱面</button>
+                    <button id="btnPreviewSheetToggle" class="preview-btn preview-btn-toggle" hidden>⏸</button>
+                    <button id="btnPreviewSheetStop" class="preview-btn preview-btn-stop" hidden>⏹</button>
+                </div>
             </div>
 
             <div class="action-row" id="actionRow">

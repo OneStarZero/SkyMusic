@@ -6,7 +6,9 @@ import {
     pausePreview,
     resumePreview,
     stopPreview,
+    seekPreview,
     isPreviewSupported,
+    isActive,
     formatTime
 } from './preview-player.js';
 
@@ -104,11 +106,6 @@ function ensureSheetImageButton(container, onClick) {
 
 /* ==================== 试听数据收集 ==================== */
 
-/**
- * 收集原始 MIDI 音符（转换前）
- * @param {Midi} midiData
- * @param {Set<number>} selectedIndices 试听选中的轨道索引
- */
 function collectOriginalNotes(midiData, selectedIndices) {
     const notes = [];
     if (!midiData || !midiData.tracks) return notes;
@@ -130,9 +127,6 @@ function collectOriginalNotes(midiData, selectedIndices) {
     return notes;
 }
 
-/**
- * 收集转换后的谱面音符
- */
 function collectSheetNotes(allNotes) {
     const notes = [];
     if (!allNotes || !allNotes.length) return notes;
@@ -151,7 +145,6 @@ function collectSheetNotes(allNotes) {
     return notes;
 }
 
-/** 计算总时长 */
 function calcTotalMs(notes) {
     let max = 0;
     for (let i = 0; i < notes.length; i++) {
@@ -178,72 +171,146 @@ export function initMidi() {
     let pendingTxtContent = null;
     let selectedTrackIndices = new Set();
     let hideResultTimeout = null;
-
-    // 最近一次转换的上下文，供「生成谱面图片」和「试听谱面」复用
     let lastConvertContext = null;
 
-    /* ==================== 试听 UI ==================== */
+    /* ==================== 原曲试听 UI ==================== */
 
-    const previewPanel = document.getElementById('previewPanel');
-    const previewTime = document.getElementById('previewTime');
-    const previewSource = document.getElementById('previewSource');
-    const previewProgressFill = document.getElementById('previewProgressFill');
-    const previewHint = document.getElementById('previewHint');
-    const btnPreviewBefore = document.getElementById('btnPreviewBefore');
-    const btnPreviewAfter = document.getElementById('btnPreviewAfter');
-    const btnPreviewToggle = document.getElementById('btnPreviewToggle');
-    const btnPreviewStop = document.getElementById('btnPreviewStop');
+    const srcPanel = document.getElementById('previewSrcPanel');
+    const srcTime = document.getElementById('previewSrcTime');
+    const srcState = document.getElementById('previewSrcState');
+    const srcFill = document.getElementById('previewSrcFill');
+    const srcProgress = document.getElementById('previewSrcProgress');
+    const srcHint = document.getElementById('previewSrcHint');
+    const btnSrcPlay = document.getElementById('btnPreviewSrcPlay');
+    const btnSrcToggle = document.getElementById('btnPreviewSrcToggle');
+    const btnSrcStop = document.getElementById('btnPreviewSrcStop');
+
+    /* ==================== 谱面试听 UI ==================== */
+
+    const sheetPanel = document.getElementById('previewSheetPanel');
+    const sheetTime = document.getElementById('previewSheetTime');
+    const sheetState = document.getElementById('previewSheetState');
+    const sheetFill = document.getElementById('previewSheetFill');
+    const sheetProgress = document.getElementById('previewSheetProgress');
+    const btnSheetPlay = document.getElementById('btnPreviewSheetPlay');
+    const btnSheetToggle = document.getElementById('btnPreviewSheetToggle');
+    const btnSheetStop = document.getElementById('btnPreviewSheetStop');
 
     // 当前播放来源：'src' | 'sheet' | null
     let currentSource = null;
-    // 防连点锁
     let previewBusy = false;
+    let lastTotalMs = 0;
 
-    if (previewPanel && !isPreviewSupported()) {
-        previewPanel.hidden = true;
+    if (!isPreviewSupported()) {
+        if (srcPanel) srcPanel.hidden = true;
+        if (sheetPanel) sheetPanel.hidden = true;
     }
 
-    /** 更新进度条与时间 */
-    function updatePreviewUI(state, progressMs, totalMs) {
-        if (previewTime) {
-            previewTime.textContent = formatTime(progressMs) + ' / ' + formatTime(totalMs);
+    /* ==================== 进度条拖动 seek ==================== */
+
+    function bindSeek(progressEl) {
+        if (!progressEl) return;
+        let dragging = false;
+
+        function seekFromEvent(e) {
+            if (!isActive() || lastTotalMs <= 0) return;
+            const rect = progressEl.getBoundingClientRect();
+            const clientX = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
+            const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            const ms = Math.round(ratio * lastTotalMs);
+            seekPreview(ms);
         }
-        if (previewProgressFill) {
+
+        progressEl.addEventListener('touchstart', function (e) {
+            if (!isActive()) return;
+            dragging = true;
+            seekFromEvent(e);
+        }, { passive: true });
+
+        progressEl.addEventListener('touchmove', function (e) {
+            if (!dragging) return;
+            seekFromEvent(e);
+        }, { passive: true });
+
+        progressEl.addEventListener('touchend', function () {
+            dragging = false;
+        });
+
+        progressEl.addEventListener('click', function (e) {
+            if (!isActive()) return;
+            seekFromEvent(e);
+        });
+    }
+
+    bindSeek(srcProgress);
+    bindSeek(sheetProgress);
+
+    /* ==================== 面板 UI ==================== */
+
+    function resetPanelUI(which) {
+        if (which === 'src') {
+            if (srcTime) srcTime.textContent = '0:00 / 0:00';
+            if (srcFill) srcFill.style.width = '0%';
+            if (srcState) srcState.textContent = '未播放';
+            if (btnSrcToggle) { btnSrcToggle.hidden = true; btnSrcToggle.classList.remove('is-paused'); }
+            if (btnSrcStop) btnSrcStop.hidden = true;
+            if (btnSrcPlay) btnSrcPlay.disabled = false;
+        } else {
+            if (sheetTime) sheetTime.textContent = '0:00 / 0:00';
+            if (sheetFill) sheetFill.style.width = '0%';
+            if (sheetState) sheetState.textContent = '未播放';
+            if (btnSheetToggle) { btnSheetToggle.hidden = true; btnSheetToggle.classList.remove('is-paused'); }
+            if (btnSheetStop) btnSheetStop.hidden = true;
+            if (btnSheetPlay) btnSheetPlay.disabled = false;
+        }
+    }
+
+    function updatePanelUI(which, state, progressMs, totalMs) {
+        lastTotalMs = totalMs;
+
+        const timeEl = which === 'src' ? srcTime : sheetTime;
+        const fillEl = which === 'src' ? srcFill : sheetFill;
+        const stateEl = which === 'src' ? srcState : sheetState;
+        const toggleEl = which === 'src' ? btnSrcToggle : btnSheetToggle;
+        const stopEl = which === 'src' ? btnSrcStop : btnSheetStop;
+        const playEl = which === 'src' ? btnSrcPlay : btnSheetPlay;
+
+        if (timeEl) timeEl.textContent = formatTime(progressMs) + ' / ' + formatTime(totalMs);
+        if (fillEl) {
             const pct = totalMs > 0 ? Math.min(100, (progressMs / totalMs) * 100) : 0;
-            previewProgressFill.style.width = pct + '%';
+            fillEl.style.width = pct + '%';
         }
 
         const active = (state === 'playing' || state === 'paused');
 
-        if (btnPreviewToggle) {
-            btnPreviewToggle.hidden = !active;
+        if (toggleEl) {
+            toggleEl.hidden = !active;
             if (state === 'paused') {
-                btnPreviewToggle.textContent = '▶️';
-                btnPreviewToggle.classList.add('is-paused');
+                toggleEl.textContent = '▶️';
+                toggleEl.classList.add('is-paused');
             } else {
-                btnPreviewToggle.textContent = '⏸';
-                btnPreviewToggle.classList.remove('is-paused');
+                toggleEl.textContent = '⏸';
+                toggleEl.classList.remove('is-paused');
             }
         }
-        if (btnPreviewStop) {
-            btnPreviewStop.hidden = !active;
+        if (stopEl) stopEl.hidden = !active;
+        if (playEl) playEl.disabled = active;
+
+        if (stateEl) {
+            if (state === 'playing') stateEl.textContent = '播放中';
+            else if (state === 'paused') stateEl.textContent = '已暂停';
+            else stateEl.textContent = '未播放';
         }
 
-        // 播放中禁用「原曲/谱面」按钮，避免重复触发
-        if (btnPreviewBefore) btnPreviewBefore.disabled = active;
-        if (btnPreviewAfter) btnPreviewAfter.disabled = active;
-
-        if (previewSource) {
-            if (state === 'playing' || state === 'paused') {
-                previewSource.textContent = currentSource === 'sheet' ? '谱面' : '原曲';
-            } else {
-                previewSource.textContent = '未播放';
-            }
+        // 播放结束提示（在清空 currentSource 之前）
+        if (state === 'ended') {
+            showToast('播放结束', 'success');
         }
 
         if (state === 'stopped' || state === 'ended' || state === 'error') {
-            if (previewProgressFill) previewProgressFill.style.width = '0%';
-            if (previewTime) previewTime.textContent = '0:00 / 0:00';
+            if (fillEl) fillEl.style.width = '0%';
+            if (timeEl) timeEl.textContent = '0:00 / 0:00';
+            if (stateEl) stateEl.textContent = '未播放';
             currentSource = null;
         }
     }
@@ -251,8 +318,17 @@ export function initMidi() {
     // 监听原生播放状态
     window.addEventListener('skymusic:preview-state', function (e) {
         const d = e.detail;
-        updatePreviewUI(d.state, d.progressMs, d.totalMs);
+        if (!currentSource) return;
+        updatePanelUI(currentSource, d.state, d.progressMs, d.totalMs);
     });
+
+    /** 停止当前播放并重置两个面板 */
+    function stopAllPreview() {
+        stopPreview();
+        currentSource = null;
+        resetPanelUI('src');
+        resetPanelUI('sheet');
+    }
 
     /** 统一播放入口 */
     function startPreview(source) {
@@ -284,48 +360,60 @@ export function initMidi() {
                 }
             }
 
+            // 切换来源前先停掉旧的
+            stopPreview();
+            resetPanelUI(source === 'src' ? 'sheet' : 'src');
+
             const totalMs = calcTotalMs(notes);
             currentSource = source;
+            lastTotalMs = totalMs;
             const res = playPreview(notes, totalMs + 500);
             if (!res.ok) {
                 currentSource = null;
                 showToast(res.error || '播放失败', 'error');
             }
         } finally {
-            // 给原生一点时间，避免连点
             setTimeout(function () { previewBusy = false; }, 300);
         }
     }
 
-    // 试听原曲
-    if (btnPreviewBefore) {
-        btnPreviewBefore.addEventListener('click', function () {
+    // 原曲：播放
+    if (btnSrcPlay) {
+        btnSrcPlay.addEventListener('click', function () {
             startPreview('src');
         });
     }
+    // 原曲：暂停/继续
+    if (btnSrcToggle) {
+        btnSrcToggle.addEventListener('click', function () {
+            if (btnSrcToggle.classList.contains('is-paused')) resumePreview();
+            else pausePreview();
+        });
+    }
+    // 原曲：停止
+    if (btnSrcStop) {
+        btnSrcStop.addEventListener('click', function () {
+            stopAllPreview();
+        });
+    }
 
-    // 试听谱面
-    if (btnPreviewAfter) {
-        btnPreviewAfter.addEventListener('click', function () {
+    // 谱面：播放
+    if (btnSheetPlay) {
+        btnSheetPlay.addEventListener('click', function () {
             startPreview('sheet');
         });
     }
-
-    // 暂停 / 继续
-    if (btnPreviewToggle) {
-        btnPreviewToggle.addEventListener('click', function () {
-            if (btnPreviewToggle.classList.contains('is-paused')) {
-                resumePreview();
-            } else {
-                pausePreview();
-            }
+    // 谱面：暂停/继续
+    if (btnSheetToggle) {
+        btnSheetToggle.addEventListener('click', function () {
+            if (btnSheetToggle.classList.contains('is-paused')) resumePreview();
+            else pausePreview();
         });
     }
-
-    // 停止
-    if (btnPreviewStop) {
-        btnPreviewStop.addEventListener('click', function () {
-            stopPreview();
+    // 谱面：停止
+    if (btnSheetStop) {
+        btnSheetStop.addEventListener('click', function () {
+            stopAllPreview();
         });
     }
 
@@ -343,6 +431,8 @@ export function initMidi() {
         }, 300);
     }
 
+    /* ==================== 模型切换 ==================== */
+
     const modelContainer = document.getElementById('modelContainer');
     if (modelContainer) {
         modelContainer.addEventListener('click', (e) => {
@@ -351,6 +441,11 @@ export function initMidi() {
             const mode = card.dataset.mode;
             if (window.SkyMusicModels?.map?.[mode]) {
                 window.SkyMusicModels.selected = window.SkyMusicModels.map[mode];
+            }
+
+            // 模型变化 → 停止谱面试听 + 隐藏结果卡片
+            if (currentSource === 'sheet') {
+                stopAllPreview();
             }
             hideResultSmoothly();
             logDiv.style.display = 'none';
@@ -389,12 +484,22 @@ export function initMidi() {
         xhr.send();
     };
 
+    /** 更新原曲试听提示（显示选中轨道数） */
+    function updateSrcHint() {
+        if (!srcHint) return;
+        const count = selectedTrackIndices.size;
+        if (count === 0) {
+            srcHint.textContent = '未勾选任何轨道，无法试听';
+        } else {
+            srcHint.textContent = `将播放已勾选的 ${count} 个轨道`;
+        }
+    }
+
     async function processMidiData(arrayBuffer, fileName) {
         if (!arrayBuffer || arrayBuffer.byteLength === 0) { showToast('文件内容为空', 'error'); return; }
 
-        // 换文件时先停止试听
-        stopPreview();
-        currentSource = null;
+        // 换文件时先停止所有试听
+        stopAllPreview();
 
         dropZone.classList.add('has-file');
         dropText.innerHTML = `✅ 已选择：<br><span class="filename">${fileName}</span>`;
@@ -450,8 +555,19 @@ export function initMidi() {
                     item.className = `track-item ${selectedTrackIndices.has(index) ? 'active' : ''}`;
                     item.innerHTML = `<div class="track-info"><span class="track-name">${displayName}</span><span class="track-notes">${track.notes.length} 音符 - ${instName}</span></div><div class="check-circle"></div>`;
                     item.addEventListener('click', () => {
-                        if (selectedTrackIndices.has(index)) { selectedTrackIndices.delete(index); item.classList.remove('active'); }
-                        else { selectedTrackIndices.add(index); item.classList.add('active'); }
+                        if (selectedTrackIndices.has(index)) {
+                            selectedTrackIndices.delete(index);
+                            item.classList.remove('active');
+                        } else {
+                            selectedTrackIndices.add(index);
+                            item.classList.add('active');
+                        }
+
+                        // 轨道变化 → 停止原曲试听 + 刷新提示
+                        if (currentSource === 'src') {
+                            stopAllPreview();
+                        }
+                        updateSrcHint();
                     });
                     trackListContainer.appendChild(item);
                 }
@@ -473,20 +589,17 @@ export function initMidi() {
             convertBtn.disabled = false;
             statusDiv.textContent = '准备就绪';
 
-            // 选 MIDI 后显示试听面板（原曲可试听）
-            if (previewPanel && isPreviewSupported()) {
-                previewPanel.hidden = false;
+            // 选 MIDI 后显示原曲试听面板
+            if (srcPanel && isPreviewSupported()) {
+                srcPanel.hidden = false;
             }
-            if (btnPreviewBefore) btnPreviewBefore.disabled = false;
-            if (previewHint) {
-                previewHint.textContent = '试听原曲将播放上方「提取音轨」中勾选的轨道';
-            }
+            updateSrcHint();
         } catch (err) {
             statusDiv.textContent = '❌ 解析失败';
             showToast('解析失败: ' + err.message, 'error');
             dropZone.classList.remove('has-file');
             dropText.textContent = "点击选择或拖拽 MIDI 文件";
-            if (previewPanel) previewPanel.hidden = true;
+            if (srcPanel) srcPanel.hidden = true;
         }
     }
 
@@ -509,6 +622,11 @@ export function initMidi() {
 
         convertBtn.disabled = true;
         convertBtn.querySelector('.btn-text').textContent = '正在提取中...';
+
+        // 转谱前停止谱面试听
+        if (currentSource === 'sheet') {
+            stopAllPreview();
+        }
 
         hideResultSmoothly();
         logDiv.style.display = 'block';
@@ -644,14 +762,11 @@ export function initMidi() {
 
                 setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
 
-                // 转谱完成后显示「试听谱面」按钮
-                if (btnPreviewAfter) {
-                    btnPreviewAfter.hidden = false;
-                    btnPreviewAfter.disabled = false;
+                // 谱面试听面板随结果卡片一起显示
+                if (sheetPanel) {
+                    sheetPanel.hidden = false;
                 }
-                if (previewHint) {
-                    previewHint.textContent = '可试听原曲或转换后的谱面';
-                }
+                resetPanelUI('sheet');
 
                 const isApp = typeof window.AndroidBridge !== 'undefined';
                 const appActions = document.getElementById('appActions');
@@ -702,6 +817,8 @@ export function initMidi() {
                 statusDiv.textContent = '❌ 转换出错';
                 logDiv.textContent += '错误: ' + err.message;
                 showToast(err.message, 'error');
+                // 转换失败 → 隐藏谱面试听面板
+                if (sheetPanel) sheetPanel.hidden = true;
             } finally {
                 convertBtn.disabled = false;
                 convertBtn.querySelector('.btn-text').textContent = '✨ 开始提取';

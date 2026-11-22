@@ -4,14 +4,9 @@ import org.json.JSONObject
 
 /**
  * 试听桥接层：JSON 解析 + 转发给 MidiPreviewPlayer
- * 与 MainActivity 解耦，MainActivity 只调用这里
  */
 object PreviewBridge {
 
-    /**
-     * 播放
-     * payloadJson: { "notes": [{"midi":60,"startMs":0,"durationMs":500,"velocity":0.8}], "totalMs": 30000 }
-     */
     fun play(payloadJson: String): Boolean {
         return try {
             val root = JSONObject(payloadJson)
@@ -41,6 +36,7 @@ object PreviewBridge {
     fun pause() = MidiPreviewPlayer.pause()
     fun resume() = MidiPreviewPlayer.resume()
     fun stop() = MidiPreviewPlayer.stop()
+    fun seek(ms: Long) = MidiPreviewPlayer.seek(ms)
     fun isPlaying(): Boolean = MidiPreviewPlayer.isPlaying()
     fun isPaused(): Boolean = MidiPreviewPlayer.isPaused()
     fun isActive(): Boolean = MidiPreviewPlayer.isActive()
