@@ -48,18 +48,18 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => hideLoadingOverlay(loadingScreen), 1000);
     });
 
-    // 模拟真实感的前期加载进度跳跃
-    updateLoadState("正在唤醒 UI 核心模块...", "加载本地配置文件", 10);
+    // 本地初始化进度
+    updateLoadState("正在初始化核心模块...", "加载本地配置", 10);
     initMidi();
 
     setTimeout(() => {
-        updateLoadState("正在计算星体运行轨道...", "生成随机背景与光影", 40);
+        updateLoadState("正在生成背景光影...", "初始化本地渲染", 40);
         initRandomBackground();
         const canvas = document.getElementById('bgCanvas');
         if (canvas) canvas.classList.add('loaded');
 
         setTimeout(async () => {
-            updateLoadState("正在拉取 MIDI 解析引擎...", "连接 Tone.js 及动态模型", 75);
+            updateLoadState("正在加载 MIDI 解析引擎...", "初始化本地模型", 75);
 
             try {
                 const { models, modelMap } = await initAutoModels({
@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             setTimeout(() => {
-                updateLoadState("星门已开启", "欢迎回来", 100);
+                updateLoadState("准备就绪", "欢迎使用 SkyMusic", 100);
                 setTimeout(() => {
                     hideLoadingOverlay(loadingScreen);
                 }, 600);

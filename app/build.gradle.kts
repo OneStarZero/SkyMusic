@@ -11,8 +11,8 @@ android {
         applicationId = "com.skymusic"
         minSdk = 24
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.0.9"
+        versionCode = 10
+        versionName = "0.1.0"
 
         resourceConfigurations += listOf("zh", "en")
     }

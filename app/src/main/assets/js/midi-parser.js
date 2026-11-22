@@ -1,9 +1,27 @@
-import { Midi } from '@tonejs/midi';
+import ToneMidi from '@tonejs/midi';
 import { showToast } from './ui.js';
 import { openSheetImagePreview } from './sheet-image.js';
+import {
+    playPreview,
+    pausePreview,
+    resumePreview,
+    stopPreview,
+    isPreviewSupported,
+    formatTime
+} from './preview-player.js';
+
+// 兼容 UMD 打包的 default 导出
+const Midi = ToneMidi.Midi || ToneMidi.default || ToneMidi;
+
 
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
-const VALID_KEYS = [60,62,64,65,67,69,71,72,74,76];
+const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
+
+/** 反向映射：1Key0 → 60 */
+const KEY_TO_MIDI = {};
+for (const k in KEY_MAP) {
+    KEY_TO_MIDI[KEY_MAP[k]] = parseInt(k, 10);
+}
 
 export function mapPitchToSky(midiPitch, shift = 0) {
     let p = midiPitch + shift;
@@ -75,7 +93,7 @@ function ensureSheetImageButton(container, onClick) {
         btn.type = 'button';
         btn.className = 'action-btn btn-image';
         btn.setAttribute('data-role', 'sheet-image');
-        btn.textContent = '▣ 生成谱面图片';
+        btn.textContent = '🖼️ 生成谱面图片';
         container.appendChild(btn);
     }
     btn.onclick = (e) => {
@@ -84,6 +102,65 @@ function ensureSheetImageButton(container, onClick) {
     };
     return btn;
 }
+
+/* ==================== 试听数据收集 ==================== */
+
+/**
+ * 收集原始 MIDI 音符（转换前）
+ */
+function collectOriginalNotes(midiData, selectedIndices) {
+    const notes = [];
+    if (!midiData || !midiData.tracks) return notes;
+
+    for (let t = 0; t < midiData.tracks.length; t++) {
+        if (selectedIndices && !selectedIndices.has(t)) continue;
+        const track = midiData.tracks[t];
+        if (!track.notes) continue;
+        for (let i = 0; i < track.notes.length; i++) {
+            const n = track.notes[i];
+            notes.push({
+                midi: n.midi,
+                startMs: Math.round(n.time * 1000),
+                durationMs: Math.max(50, Math.round(n.duration * 1000)),
+                velocity: typeof n.velocity === 'number' ? n.velocity : 0.8
+            });
+        }
+    }
+    return notes;
+}
+
+/**
+ * 收集转换后的谱面音符
+ */
+function collectSheetNotes(allNotes) {
+    const notes = [];
+    if (!allNotes || !allNotes.length) return notes;
+
+    for (let i = 0; i < allNotes.length; i++) {
+        const n = allNotes[i];
+        const midi = KEY_TO_MIDI[n.key];
+        if (midi === undefined) continue;
+        notes.push({
+            midi: midi,
+            startMs: Math.max(0, n.time | 0),
+            durationMs: 300,
+            velocity: 0.8
+        });
+    }
+    return notes;
+}
+
+/** 计算总时长 */
+function calcTotalMs(notes) {
+    let max = 0;
+    for (let i = 0; i < notes.length; i++) {
+        const end = notes[i].startMs + notes[i].durationMs;
+        if (end > max) max = end;
+    }
+    return max;
+}
+
+/* ==================== 主入口 ==================== */
 
 export function initMidi() {
     const midiInput = document.getElementById('midiFile');
@@ -101,8 +178,109 @@ export function initMidi() {
     let selectedTrackIndices = new Set();
     let hideResultTimeout = null;
 
-    // 最近一次转换的上下文，供「生成谱面图片」复用
+    // 最近一次转换的上下文，供「生成谱面图片」和「试听」复用
     let lastConvertContext = null;
+
+    /* ==================== 试听 UI ==================== */
+
+    const previewPanel = document.getElementById('previewPanel');
+    const previewTime = document.getElementById('previewTime');
+    const previewProgressFill = document.getElementById('previewProgressFill');
+    const btnPreviewBefore = document.getElementById('btnPreviewBefore');
+    const btnPreviewAfter = document.getElementById('btnPreviewAfter');
+    const btnPreviewToggle = document.getElementById('btnPreviewToggle');
+    const btnPreviewStop = document.getElementById('btnPreviewStop');
+
+    if (previewPanel && isPreviewSupported()) {
+        previewPanel.hidden = false;
+    }
+
+    /** 更新进度条与时间 */
+    function updatePreviewUI(state, progressMs, totalMs) {
+        if (previewTime) {
+            previewTime.textContent = formatTime(progressMs) + ' / ' + formatTime(totalMs);
+        }
+        if (previewProgressFill) {
+            const pct = totalMs > 0 ? Math.min(100, (progressMs / totalMs) * 100) : 0;
+            previewProgressFill.style.width = pct + '%';
+        }
+
+        const active = (state === 'playing' || state === 'paused');
+        if (btnPreviewToggle) {
+            btnPreviewToggle.hidden = !active;
+            btnPreviewToggle.textContent = (state === 'paused') ? '▶️' : '⏸';
+        }
+        if (btnPreviewStop) {
+            btnPreviewStop.hidden = !active;
+        }
+
+        if (state === 'stopped' || state === 'ended' || state === 'error') {
+            if (previewProgressFill) previewProgressFill.style.width = '0%';
+            if (previewTime) previewTime.textContent = '0:00 / 0:00';
+        }
+    }
+
+    // 监听原生播放状态
+    window.addEventListener('skymusic:preview-state', function (e) {
+        const d = e.detail;
+        updatePreviewUI(d.state, d.progressMs, d.totalMs);
+    });
+
+    // 试听原曲
+    if (btnPreviewBefore) {
+        btnPreviewBefore.addEventListener('click', function () {
+            if (!currentMidiData) {
+                showToast('请先选择 MIDI 文件', 'error');
+                return;
+            }
+            const notes = collectOriginalNotes(currentMidiData, selectedTrackIndices);
+            if (!notes.length) {
+                showToast('没有可试听的音符', 'error');
+                return;
+            }
+            const totalMs = calcTotalMs(notes);
+            const res = playPreview(notes, totalMs + 500);
+            if (!res.ok) showToast(res.error || '播放失败', 'error');
+        });
+    }
+
+    // 试听谱面
+    if (btnPreviewAfter) {
+        btnPreviewAfter.addEventListener('click', function () {
+            if (!lastConvertContext || !lastConvertContext.allNotes) {
+                showToast('请先完成一次转谱', 'error');
+                return;
+            }
+            const notes = collectSheetNotes(lastConvertContext.allNotes);
+            if (!notes.length) {
+                showToast('没有可试听的音符', 'error');
+                return;
+            }
+            const totalMs = calcTotalMs(notes);
+            const res = playPreview(notes, totalMs + 500);
+            if (!res.ok) showToast(res.error || '播放失败', 'error');
+        });
+    }
+
+    // 暂停 / 恢复
+    if (btnPreviewToggle) {
+        btnPreviewToggle.addEventListener('click', function () {
+            if (btnPreviewToggle.textContent === '⏸') {
+                pausePreview();
+            } else {
+                resumePreview();
+            }
+        });
+    }
+
+    // 停止
+    if (btnPreviewStop) {
+        btnPreviewStop.addEventListener('click', function () {
+            stopPreview();
+        });
+    }
+
+    /* ==================== 结果卡片显隐 ==================== */
 
     function hideResultSmoothly() {
         if (resultCard.style.display === 'none') return;
@@ -145,18 +323,18 @@ export function initMidi() {
         processMidiData(arrayBuffer, file.name);
     });
 
-    window.onMidiPathReceived = function(midiPath, fileName) {
+    window.onMidiPathReceived = function (midiPath, fileName) {
         const xhr = new XMLHttpRequest();
         xhr.open('GET', 'file://' + midiPath, true);
         xhr.responseType = 'arraybuffer';
-        xhr.onload = function() {
+        xhr.onload = function () {
             if (xhr.status === 200 || xhr.status === 0) {
                 processMidiData(xhr.response, fileName);
             } else {
                 showToast('MIDI 文件读取失败', 'error');
             }
         };
-        xhr.onerror = function() {
+        xhr.onerror = function () {
             showToast('MIDI 文件网络读取异常', 'error');
         };
         xhr.send();
@@ -365,8 +543,8 @@ export function initMidi() {
 
                 pendingTxtContent = JSON.stringify(skyStudioData);
 
-                // 记录本次转换上下文，供「生成谱面图片」使用
-                                    lastConvertContext = {
+                // 记录本次转换上下文，供「生成谱面图片」和「试听」使用
+                lastConvertContext = {
                     sheet: skyStudioData[0],
                     songName: finalSongName,
                     baseSongName: baseSongName,
@@ -374,11 +552,9 @@ export function initMidi() {
                     model: modelName,
                     transcriber: finalTranscriber,
                     bpm: studioSpeed,
-                    toleranceMs: mergeWindowMs > 0 ? mergeWindowMs : 25
+                    toleranceMs: mergeWindowMs > 0 ? mergeWindowMs : 25,
+                    allNotes: allNotes
                 };
-
-
-
 
                 const firstNoteTime = allNotes[0].time;
                 const lastNoteTime = allNotes[allNotes.length - 1].time;
@@ -411,12 +587,12 @@ export function initMidi() {
                 browserActions.style.display = isApp ? 'none' : 'block';
 
                 // 生成谱面图片：App 内与浏览器内都可用
-                             const openImage = () => {
+                const openImage = () => {
                     if (!lastConvertContext) {
                         showToast('请先完成一次转谱', 'error');
                         return;
                     }
-                                        openSheetImagePreview(lastConvertContext.sheet, {
+                    openSheetImagePreview(lastConvertContext.sheet, {
                         songName: lastConvertContext.songName,
                         author: lastConvertContext.author,
                         model: lastConvertContext.model,
@@ -425,9 +601,7 @@ export function initMidi() {
                         keyCount: 15,
                         toleranceMs: lastConvertContext.toleranceMs
                     });
-
                 };
-
 
                 ensureSheetImageButton(appActions, openImage);
                 ensureSheetImageButton(browserActions, openImage);

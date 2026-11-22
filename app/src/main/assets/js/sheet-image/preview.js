@@ -5,7 +5,10 @@
 import { view, DEFAULT_ZOOM } from './preview/state.js';
 import { STYLE_DEFAULTS, clampInt } from './style.js';
 import { showToast } from './preview/toast.js';
-import { ensureOverlay, openOverlay, switchTab, rebuild, restoreProgress, updateSelectUI } from './preview/ui.js';
+import { ensureOverlay } from './preview/ui.js';
+import { openOverlay, switchTab } from './preview/ui-overlay.js';
+import { rebuild } from './preview/ui-rebuild.js';
+import { restoreProgress, updateSelectUI } from './preview/ui-selection.js';
 import { renderPages } from './preview/render.js';
 import { updateZoomLabel } from './preview/zoom.js';
 
@@ -36,14 +39,13 @@ export function openSheetImagePreview(data, options) {
     if (!model) model = fullName.slice(sep + 4).trim();
   }
 
-    view.title = fullName.trim() || '未命名乐谱';
+  view.title = fullName.trim() || '未命名乐谱';
   view.model = model;
   view.transcriber = opts.transcriber || '';
   view.author = opts.author || (function () {
     const dash = baseName.lastIndexOf('-');
     return dash > 0 ? baseName.slice(dash + 1).trim() : '';
   })();
-
 
   ensureOverlay();
   openOverlay();

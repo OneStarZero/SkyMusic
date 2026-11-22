@@ -20,6 +20,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.skymusic.preview.PreviewBridge
 import org.json.JSONObject
 import java.io.File
 
@@ -63,7 +64,7 @@ class MainActivity : AppCompatActivity() {
 
         webViewInstance = WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
-                        settings.apply {
+            settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 allowFileAccess = true
@@ -73,7 +74,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 cacheMode = WebSettings.LOAD_NO_CACHE
             }
-          
+
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
@@ -86,14 +87,13 @@ class MainActivity : AppCompatActivity() {
 
         rootLayout.addView(webViewInstance, FrameLayout.LayoutParams(-1, -1))
 
-        // 顶部状态与快捷操作胶囊栏（支持横向滚动防遮挡/溢出，视觉与 HTML 深空毛玻璃一致）
+        // 顶部状态与快捷操作胶囊栏
         val barScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
         }
         topBarScroll = barScroll
-
 
         val barContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -176,6 +176,16 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(rootLayout)
         refreshPermissionIndicators()
+
+        // 注册试听状态回调
+        PreviewBridge.setOnStateChange { state, progressMs, totalMs ->
+            runOnUiThread {
+                webViewInstance?.evaluateJavascript(
+                    "if (window.onPreviewState) window.onPreviewState('$state', $progressMs, $totalMs);",
+                    null
+                )
+            }
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -191,6 +201,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        PreviewBridge.stop()
+        PreviewBridge.setOnStateChange(null)
         webViewInstance?.apply {
             stopLoading()
             removeJavascriptInterface("AndroidBridge")
@@ -286,7 +298,7 @@ class MainActivity : AppCompatActivity() {
         fun openMidiPicker() {
             runOnUiThread { midiPickerLauncher.launch(Intent(this@MainActivity, MidiPickerActivity::class.java)) }
         }
-        
+
         @JavascriptInterface
         fun setTopBarVisible(visible: Boolean) = runOnUiThread {
             topBarScroll?.visibility = if (visible) View.VISIBLE else View.GONE
@@ -320,13 +332,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
 
-        /**
-         * 生成谱面图片并保存到 /storage/emulated/0/SkyMusic-OneStar/<乐谱名>/
-         * 同步返回 JSON 字符串：{"ok":true,"dir":"...","files":[...]} 或 {"ok":false,"error":"..."}
-         * 注意：@JavascriptInterface 方法在 WebView 的 JavaBridge 线程执行，
-         * 这里不能碰 UI，也不能 runOnUiThread（否则拿不到返回值）。
-         */
-                  @JavascriptInterface
+        @JavascriptInterface
         fun saveSheetImage(payloadJson: String): String {
             return try {
                 val baseDir = File("/storage/emulated/0/SkyMusic-OneStar/")
@@ -345,7 +351,31 @@ class MainActivity : AppCompatActivity() {
                 JSONObject().put("ok", false).put("error", e.message ?: "未知错误").toString()
             }
         }
+
+        /* ==================== 试听（转发给 PreviewBridge） ==================== */
+
+        @JavascriptInterface
+        fun playPreview(payloadJson: String): Boolean = PreviewBridge.play(payloadJson)
+
+        @JavascriptInterface
+        fun pausePreview() = PreviewBridge.pause()
+
+        @JavascriptInterface
+        fun resumePreview() = PreviewBridge.resume()
+
+        @JavascriptInterface
+        fun stopPreview() = PreviewBridge.stop()
+
+        @JavascriptInterface
+        fun isPreviewPlaying(): Boolean = PreviewBridge.isPlaying()
+
+        @JavascriptInterface
+        fun isPreviewPaused(): Boolean = PreviewBridge.isPaused()
+
+        @JavascriptInterface
+        fun isPreviewActive(): Boolean = PreviewBridge.isActive()
     }
+
     private fun handleSendApp(payloadStr: String) {
         try {
             val payload = JSONObject(payloadStr)

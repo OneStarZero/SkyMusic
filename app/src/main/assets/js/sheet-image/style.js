@@ -12,14 +12,12 @@ export const THEMES = {
   ocean: { name: '深海幽蓝', bg: '#020617', bgGlow: '#0F172A', gridLine: '#38BDF8', noteFill: '#38BDF8', noteFillAlt: '#818CF8', logoColor: '#38BDF8', watermarkColor: '#38BDF8' }
 };
 
-/** 圆角样式：三选一 */
 export const CORNER_STYLES = {
-  round: { name: '圆角', gridRadius: 5 },
-  square: { name: '直角', gridRadius: 0 },
-  skystudio: { name: 'SkyStudio', gridRadius: 2 }
+  round: { name: '圆角', gridRadius: 5, noteShape: 'square' },
+  square: { name: '直角', gridRadius: 0, noteShape: 'square' },
+  skystudio: { name: 'SkyStudio', gridRadius: 6, noteShape: 'skystudio' }
 };
 
-/** 随机样式：单独列出 */
 export const RANDOM_STYLE = {
   name: '随机幻彩',
   key: 'random'
@@ -55,25 +53,31 @@ export function getThemeStyle(themeKey, cornerKey = 'round') {
   if (themeKey === 'random') {
     const h1 = Math.floor(Math.random() * 360);
     const h2 = (h1 + 120 + Math.random() * 120) % 360;
+    const h3 = (h1 + 240 + Math.random() * 120) % 360;
 
-    const cellSize = [18, 22, 26, 30][Math.floor(Math.random() * 4)];
-    const gapSize = [2, 4, 6, 8][Math.floor(Math.random() * 4)];
-    const padSize = [30, 40, 50][Math.floor(Math.random() * 3)];
+    const cellSize = [18, 20, 22, 24, 26, 28, 30][Math.floor(Math.random() * 7)];
+    const gapSize = [2, 3, 4, 5, 6, 8][Math.floor(Math.random() * 6)];
+    const padSize = [28, 32, 36, 40, 44, 48, 52][Math.floor(Math.random() * 7)];
 
     const decoTypes = ['stars', 'snow', 'bubbles', 'geometric', 'none'];
     const bgPatterns = ['none', 'grid', 'dots', 'diagonal'];
     const noteShapes = ['square', 'circle', 'hexagon', 'diamond'];
     const titleAligns = ['center', 'left', 'right'];
 
+    const sat1 = 60 + Math.random() * 30;
+    const sat2 = 60 + Math.random() * 30;
+    const light1 = 55 + Math.random() * 15;
+    const light2 = 55 + Math.random() * 15;
+
     t = {
       name: '随机幻彩',
-      bg: `hsl(${h1}, ${Math.random() > 0.5 ? 60 : 40}%, 6%)`,
-      bgGlow: `hsl(${h1}, ${Math.random() > 0.5 ? 50 : 30}%, 12%)`,
-      gridLine: `hsl(${h1}, 80%, 60%)`,
-      noteFill: `hsl(${h1}, 85%, 65%)`,
-      noteFillAlt: `hsl(${h2}, 85%, 65%)`,
-      logoColor: `hsl(${h2}, 90%, 70%)`,
-      watermarkColor: `hsl(${h1}, 80%, 60%)`,
+      bg: `hsl(${h1}, ${sat1 * 0.6}%, ${4 + Math.random() * 4}%)`,
+      bgGlow: `hsl(${h1}, ${sat1 * 0.5}%, ${10 + Math.random() * 6}%)`,
+      gridLine: `hsl(${h1}, ${sat1}%, ${light1}%)`,
+      noteFill: `hsl(${h1}, ${sat1}%, ${light1}%)`,
+      noteFillAlt: `hsl(${h2}, ${sat2}%, ${light2}%)`,
+      logoColor: `hsl(${h3}, 90%, 70%)`,
+      watermarkColor: `hsl(${h1}, ${sat1}%, ${light1}%)`,
 
       cell: cellSize,
       cellGap: gapSize,
@@ -120,6 +124,7 @@ export function getThemeStyle(themeKey, cornerKey = 'round') {
     titleAlign: t.titleAlign || STYLE_DEFAULTS.titleAlign
   });
 }
+
 
 export function hexToRgb(hex) {
   let h = String(hex == null ? '' : hex).trim();

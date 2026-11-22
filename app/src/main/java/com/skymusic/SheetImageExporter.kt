@@ -664,11 +664,14 @@ object SheetImageExporter {
         canvas.drawLine(x, lineY, x + width, lineY, linePaint)
     }
 
-    private fun drawKeyGrid(
+                private fun drawKeyGrid(
         canvas: Canvas, x: Float, y: Float, gCols: Int, gRows: Int,
         st: Style, activeCells: List<Int>, fill: Paint, stroke: Paint
     ) {
         val block = RectF()
+        val isSkyStudio = st.noteShape == "skystudio"
+        val skyLetters = arrayOf("C", "D", "E", "F", "G", "A", "B", "C", "D", "E", "F", "G", "A", "B", "C")
+
         for (r in 0 until gRows) {
             for (c in 0 until gCols) {
                 val bx = x + c * (st.cell + st.cellGap)
@@ -676,36 +679,88 @@ object SheetImageExporter {
                 val isActive = activeCells.contains(r * gCols + c)
                 block.set(bx, by, bx + st.cell, by + st.cell)
 
-                val path = Path()
-                if (st.noteShape == "circle") {
-                    path.addCircle(bx + st.cell / 2f, by + st.cell / 2f, st.cell / 2f, Path.Direction.CW)
-                } else if (st.noteShape == "diamond") {
-                    path.moveTo(bx + st.cell / 2f, by)
-                    path.lineTo(bx + st.cell, by + st.cell / 2f)
-                    path.lineTo(bx + st.cell / 2f, by + st.cell)
-                    path.lineTo(bx, by + st.cell / 2f)
-                    path.close()
-                } else {
-                    path.addRoundRect(block, st.gridRadius, st.gridRadius, Path.Direction.CW)
-                }
+                if (isSkyStudio) {
+                    // 外框
+                    if (isActive) {
+                        val t = if (gRows > 1) r.toFloat() / (gRows - 1) else 0f
+                        fill.color = argb(mix(st.noteFill, st.noteFillAlt, t), 1f)
+                        canvas.drawRoundRect(block, st.gridRadius, st.gridRadius, fill)
+                    } else {
+                        stroke.color = argb(st.gridLine, st.gridLineAlpha)
+                        stroke.strokeWidth = 1.2f
+                        canvas.drawRoundRect(block, st.gridRadius, st.gridRadius, stroke)
+                    }
 
-                if (isActive) {
-                    val t = if (gRows > 1) r.toFloat() / (gRows - 1) else 0f
-                    fill.color = argb(mix(st.noteFill, st.noteFillAlt, t), 1f)
-                    canvas.drawPath(path, fill)
-                    if (st.noteStrokeAlpha > 0) {
-                        stroke.color = argb(st.noteStroke, st.noteStrokeAlpha)
-                        stroke.strokeWidth = 1f
-                        canvas.drawPath(path, stroke)
+                    // 内部菱形
+                    val cx = bx + st.cell / 2f
+                    val cy = by + st.cell / 2f
+                    val diamondR = st.cell * 0.32f
+
+                    val diamondPath = Path()
+                    diamondPath.moveTo(cx, cy - diamondR)
+                    diamondPath.lineTo(cx + diamondR, cy)
+                    diamondPath.lineTo(cx, cy + diamondR)
+                    diamondPath.lineTo(cx - diamondR, cy)
+                    diamondPath.close()
+
+                    if (isActive) {
+                        stroke.color = argb(0x0B1120, 0.6f)
+                        stroke.strokeWidth = 1.2f
+                        canvas.drawPath(diamondPath, stroke)
+                    } else {
+                        stroke.color = argb(st.gridLine, st.gridLineAlpha * 1.5f)
+                        stroke.strokeWidth = 1.2f
+                        canvas.drawPath(diamondPath, stroke)
+                    }
+
+                    // 字母
+                    val cellIndex = r * gCols + c
+                    val letter = if (cellIndex < skyLetters.size) skyLetters[cellIndex] else ""
+                    if (letter.isNotEmpty()) {
+                        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+                            textSize = st.cell * 0.32f
+                            textAlign = Paint.Align.CENTER
+                            color = if (isActive) argb(0x0B1120, 0.85f) else argb(st.gridLine, 0.7f)
+                        }
+                        val baseline = cy - (textPaint.fontMetrics.ascent + textPaint.fontMetrics.descent) / 2f
+                        canvas.drawText(letter, cx, baseline, textPaint)
                     }
                 } else {
-                    stroke.color = argb(st.gridLine, st.gridLineAlpha)
-                    stroke.strokeWidth = 1.2f
-                    canvas.drawPath(path, stroke)
+                    val path = Path()
+                    if (st.noteShape == "circle") {
+                        path.addCircle(bx + st.cell / 2f, by + st.cell / 2f, st.cell / 2f, Path.Direction.CW)
+                    } else if (st.noteShape == "diamond") {
+                        path.moveTo(bx + st.cell / 2f, by)
+                        path.lineTo(bx + st.cell, by + st.cell / 2f)
+                        path.lineTo(bx + st.cell / 2f, by + st.cell)
+                        path.lineTo(bx, by + st.cell / 2f)
+                        path.close()
+                    } else {
+                        path.addRoundRect(block, st.gridRadius, st.gridRadius, Path.Direction.CW)
+                    }
+
+                    if (isActive) {
+                        val t = if (gRows > 1) r.toFloat() / (gRows - 1) else 0f
+                        fill.color = argb(mix(st.noteFill, st.noteFillAlt, t), 1f)
+                        canvas.drawPath(path, fill)
+                        if (st.noteStrokeAlpha > 0) {
+                            stroke.color = argb(st.noteStroke, st.noteStrokeAlpha)
+                            stroke.strokeWidth = 1f
+                            canvas.drawPath(path, stroke)
+                        }
+                    } else {
+                        stroke.color = argb(st.gridLine, st.gridLineAlpha)
+                        stroke.strokeWidth = 1.2f
+                        canvas.drawPath(path, stroke)
+                    }
                 }
             }
         }
     }
+
+
+
 
     private fun drawWatermark(canvas: Canvas, width: Float, height: Float, st: Style) {
         if (!st.showWatermark) return

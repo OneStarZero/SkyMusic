@@ -113,43 +113,78 @@ export function createZipWriter() {
   return { addFile: addFile, finish: finish };
 }
 
-/** canvas → PNG 字节 */
+/** canvas → PNG 字节（直接用 blob.arrayBuffer，少一次拷贝） */
 export function canvasToBytes(canvas) {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
+    canvas.toBlob(function (blob) {
       if (!blob) { reject(new Error('canvas 转 PNG 失败')); return; }
-      const reader = new FileReader();
-      reader.onload = () => resolve(new Uint8Array(reader.result));
-      reader.onerror = () => reject(new Error('读取 PNG 数据失败'));
-      reader.readAsArrayBuffer(blob);
+      blob.arrayBuffer().then(function (buf) {
+        resolve(new Uint8Array(buf));
+      }).catch(function () {
+        reject(new Error('读取 PNG 数据失败'));
+      });
     }, 'image/png');
   });
 }
+
+/* ========================== 统一宽度工具 ========================== */
+
+/**
+ * 计算所有 canvas 的统一基准宽度。
+ * 取最大宽度作为基准，保证每页等比缩放后宽度一致。
+ */
+function computeBaseWidth(canvases) {
+  let maxW = 0;
+  for (let i = 0; i < canvases.length; i++) {
+    if (canvases[i].width > maxW) maxW = canvases[i].width;
+  }
+  return maxW;
+}
+
+/**
+ * 计算统一缩放比例。
+ * 所有页共用同一个 scale，保证宽度一致、左右对齐。
+ */
+function computeUniformScale(canvases, baseW, gapPx, maxPixels) {
+  let totalH = 0;
+  for (let i = 0; i < canvases.length; i++) {
+    totalH += canvases[i].height * (baseW / canvases[i].width);
+  }
+  totalH += gapPx * (canvases.length - 1);
+
+  let scale = 1;
+  if (baseW * totalH > maxPixels) {
+    scale = Math.sqrt(maxPixels / (baseW * totalH));
+  }
+  return scale;
+}
+
+/* ========================== 长图拼接（同步版） ========================== */
 
 /** 多张 canvas 上下拼接成一张长图 canvas（同步版，仅用于小图） */
 export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
   if (!canvases.length) return null;
 
-  let maxW = 0;
+  const baseW = computeBaseWidth(canvases);
+  if (baseW <= 0) return null;
+
+  const scale = computeUniformScale(canvases, baseW, gapPx, maxPixels);
+
+  const outW = Math.max(1, Math.round(baseW * scale));
+
+  // 统一缩放后每页高度
   let totalH = 0;
   for (let i = 0; i < canvases.length; i++) {
-    if (canvases[i].width > maxW) maxW = canvases[i].width;
-    totalH += canvases[i].height;
+    totalH += canvases[i].height * (baseW / canvases[i].width) * scale;
   }
-  totalH += gapPx * (canvases.length - 1);
+  totalH += gapPx * scale * (canvases.length - 1);
 
-  let scale = 1;
-  if (maxW * totalH > maxPixels) {
-    scale = Math.sqrt(maxPixels / (maxW * totalH));
-  }
-
-  const outW = Math.max(1, Math.round(maxW * scale));
-  const outH = Math.max(1, Math.round(totalH * scale));
+  const outH = Math.max(1, Math.round(totalH));
 
   const out = document.createElement('canvas');
   out.width = outW;
   out.height = outH;
-  const ctx = out.getContext('2d');
+  const ctx = out.getContext('2d', { alpha: false });
 
   ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, outW, outH);
@@ -157,8 +192,10 @@ export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
   let y = 0;
   for (let i = 0; i < canvases.length; i++) {
     const c = canvases[i];
-    const dw = c.width * scale;
-    const dh = c.height * scale;
+    // 每页按 baseW 等比缩放，宽度统一
+    const pageScale = (baseW / c.width) * scale;
+    const dw = c.width * pageScale;
+    const dh = c.height * pageScale;
     const dx = (outW - dw) / 2;
     ctx.drawImage(c, dx, y, dw, dh);
     y += dh + gapPx * scale;
@@ -166,6 +203,9 @@ export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
 
   return out;
 }
+
+/* ========================== 长图分块导出 ========================== */
+
 /**
  * 分块生成长图 PNG 字节数组
  * 超过 16384px 时自动拆成多张，返回 [{part, total, bytes}, ...]
@@ -173,21 +213,21 @@ export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
 export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onProgress) {
   if (!canvases.length) throw new Error('没有可用的页面');
 
-  let maxW = 0;
+  const baseW = computeBaseWidth(canvases);
+  if (baseW <= 0) throw new Error('页面宽度无效');
+
+  const scale = computeUniformScale(canvases, baseW, gapPx, maxPixels);
+
+  const outW = Math.max(1, Math.round(baseW * scale));
+
+  // 统一缩放后每页高度
   let totalH = 0;
   for (let i = 0; i < canvases.length; i++) {
-    if (canvases[i].width > maxW) maxW = canvases[i].width;
-    totalH += canvases[i].height;
+    totalH += canvases[i].height * (baseW / canvases[i].width) * scale;
   }
-  totalH += gapPx * (canvases.length - 1);
+  totalH += gapPx * scale * (canvases.length - 1);
 
-  let scale = 1;
-  if (maxW * totalH > maxPixels) {
-    scale = Math.sqrt(maxPixels / (maxW * totalH));
-  }
-
-  const outW = Math.max(1, Math.round(maxW * scale));
-  const outH = Math.max(1, Math.round(totalH * scale));
+  const outH = Math.max(1, Math.round(totalH));
 
   const MAX_DIM = 16384;
   const partCount = Math.ceil(outH / MAX_DIM);
@@ -211,18 +251,20 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
     let curY = 0;
     for (let i = 0; i < canvases.length; i++) {
       const c = canvases[i];
-      const dw = c.width * scale;
-      const dh = c.height * scale;
+      // 每页按 baseW 等比缩放，宽度统一
+      const pageScale = (baseW / c.width) * scale;
+      const dw = c.width * pageScale;
+      const dh = c.height * pageScale;
       const pageTop = curY;
       const pageBottom = curY + dh;
 
       if (pageBottom >= partTop && pageTop <= partBottom) {
-        const srcTop = Math.max(0, (partTop - pageTop) / scale);
-        const srcBottom = Math.min(c.height, (partBottom - pageTop) / scale);
+        const srcTop = Math.max(0, (partTop - pageTop) / pageScale);
+        const srcBottom = Math.min(c.height, (partBottom - pageTop) / pageScale);
         if (srcBottom > srcTop) {
           const srcH = srcBottom - srcTop;
-          const dstY = pageTop + srcTop * scale - partTop;
-          const dstH = srcH * scale;
+          const dstY = pageTop + srcTop * pageScale - partTop;
+          const dstH = srcH * pageScale;
           const dx = (outW - dw) / 2;
 
           ctx.drawImage(
@@ -240,12 +282,16 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
       onProgress(Math.round(((part + 1) / partCount) * 90));
     }
 
-    await new Promise(r => requestAnimationFrame(r));
+    // 让出主线程，避免长时间阻塞
+    await new Promise(function (r) { setTimeout(r, 0); });
 
-    const blob = await new Promise((resolve, reject) => {
-      out.toBlob(b => b ? resolve(b) : reject(new Error('PNG 编码失败')), 'image/png');
+    const blob = await new Promise(function (resolve, reject) {
+      out.toBlob(function (b) {
+        b ? resolve(b) : reject(new Error('PNG 编码失败'));
+      }, 'image/png');
     });
 
+    // 释放 canvas 内存
     out.width = 0;
     out.height = 0;
 

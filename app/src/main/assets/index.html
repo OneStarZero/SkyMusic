@@ -3,15 +3,196 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SkyMusic 0.0.9</title>
+    <meta name="theme-color" content="#0B1120">
+    <title>SkyMusic 0.1.0</title>
     <link rel="stylesheet" href="./css/style.css">
     <link rel="stylesheet" href="./css/loading.css">
 </head>
 <body>
 
+<!-- 沉浸式加载界面 -->
+<div id="loading-screen">
+    <div class="loading-bg">
+        <div class="meteor m1"></div>
+        <div class="meteor m2"></div>
+        <div class="meteor m3"></div>
+        <div class="grid-overlay"></div>
+    </div>
+
+    <div class="loader-container">
+        <div class="core-glow"></div>
+
+        <h2 class="loading-title">SkyMusic 0.1.0</h2>
+        <div class="loading-status" id="loadStatus">正在初始化核心模块...</div>
+
+        <div class="progress-track">
+            <div class="progress-fill" id="loadProgressBar"></div>
+            <div class="progress-glow" id="loadProgressGlow"></div>
+        </div>
+
+        <div class="progress-info">
+            <span id="loadSubStatus">加载本地资源</span>
+            <span id="loadProgressText" class="percent">0%</span>
+        </div>
+
+        <div class="loading-dots">
+            <span></span><span></span><span></span>
+        </div>
+    </div>
+</div>
+
+<!-- 柔和随机星光背景 Canvas -->
+<canvas id="bgCanvas"></canvas>
+
+<div class="content-wrapper">
+    <div id="toast-container"></div>
+
+    <header class="app-header fade-in-up">
+        <h1>光遇 MIDI <span>✨OneStar</span></h1>
+        <p class="subtitle">愿星光指引你，SkyMusic 0.1.0</p>
+    </header>
+
+    <div id="viewMidi">
+        <!-- 拖拽上传区 -->
+        <div class="glass-card upload-card fade-in-up">
+            <div class="drop-zone breathing-border" id="dropZone">
+                <div class="upload-icon soft-float">🎵</div>
+                <p id="dropText">点击选择或拖拽 MIDI 文件</p>
+                <span class="file-hint">支持 .mid / .midi</span>
+                <input type="file" id="midiFile" accept=".mid, .midi, audio/midi">
+            </div>
+        </div>
+
+        <!-- 配置与指标区 -->
+        <div class="glass-card" id="configPanel" hidden>
+            <div class="section-title">
+                <span class="icon">✨</span> 歌曲信息
+            </div>
+            <div class="info-list">
+                <div class="info-row"><span class="info-label">包含轨道 / 有效</span><span class="info-val"><span id="infoTotalTracks">-</span> / <span id="infoValidTracks">-</span></span></div>
+                <div class="info-row"><span class="info-label">包含乐器</span><span class="info-val wrap-text" id="infoInstruments">-</span></div>
+                <div class="info-row"><span class="info-label">原曲 BPM</span><span class="info-val" id="infoBpm">-</span></div>
+                <div class="info-row"><span class="info-label">原曲时长</span><span class="info-val" id="infoDuration">-</span></div>
+                <div class="info-row"><span class="info-label">音高范围</span><span class="info-val" id="infoPitchRange">-</span></div>
+                <div class="info-row"><span class="info-label">总音符量</span><span class="info-val" id="infoTotalNotes">-</span></div>
+            </div>
+
+            <div class="section-title section-gap">
+                <span class="icon">🎹</span> 提取音轨
+            </div>
+            <div class="track-list custom-scrollbar" id="trackListContainer"></div>
+
+            <div class="section-title section-gap">
+                <span class="icon">✏️</span> 谱面信息
+            </div>
+            <div class="meta-grid">
+                <div class="input-group">
+                    <label>歌曲名称</label>
+                    <input type="text" id="songNameInput" placeholder="未命名曲目">
+                </div>
+                <div class="input-group">
+                    <label>原曲作者</label>
+                    <input type="text" id="authorInput" placeholder="未知作者">
+                </div>
+                <div class="input-group">
+                    <label>改编者 / 谱师</label>
+                    <input type="text" id="transcriberInput" value="_OneStar">
+                </div>
+            </div>
+
+            <div class="section-title section-gap">
+                <span class="icon">🌌</span> 提取模式
+            </div>
+            <div id="modelContainer" class="model-grid"></div>
+
+            <button id="convertBtn" class="primary-btn">
+                <span class="btn-text">✨ 开始提取</span>
+            </button>
+            <div id="status">准备就绪</div>
+        </div>
+
+        <div id="log" class="custom-scrollbar"></div>
+
+        <!-- 结果展示区 -->
+        <div class="glass-card result-card" id="resultCard">
+            <div class="success-header">
+                <div class="success-icon">✨</div>
+                <div class="success-title">生成完成</div>
+            </div>
+
+            <div class="res-metrics">
+                <div class="res-item">
+                    <div class="res-label">输出音符数</div>
+                    <div class="res-value" id="stepFinalNotes">-</div>
+                </div>
+                <div class="res-item">
+                    <div class="res-label">时间跨度</div>
+                    <div class="res-value" id="outDuration">-</div>
+                </div>
+                <div class="res-item">
+                    <div class="res-label">Studio 速度</div>
+                    <div class="res-value" id="outSpeed">-</div>
+                </div>
+                <div class="res-item">
+                    <div class="res-label">音域平移</div>
+                    <div class="res-value" id="outShift">-</div>
+                </div>
+            </div>
+
+            <div class="info-list result-details">
+                <div class="info-row"><span class="info-label">最终谱名</span><span class="info-val wrap-text highlight-text" id="outSongName">-</span></div>
+                <div class="info-row"><span class="info-label">原曲作者</span><span class="info-val" id="outAuthor">-</span></div>
+                <div class="info-row"><span class="info-label">提取模型</span><span class="info-val" id="outModel">-</span></div>
+                <div class="info-row"><span class="info-label">改编谱师</span><span class="info-val" id="outTranscriber">-</span></div>
+            </div>
+
+            <!-- 试听区（含进度条） -->
+            <div class="preview-panel" id="previewPanel" hidden>
+                <div class="preview-head">
+                    <span class="preview-title">🎧 试听</span>
+                    <span class="preview-time" id="previewTime">0:00 / 0:00</span>
+                </div>
+
+                <div class="preview-progress" id="previewProgress">
+                    <div class="preview-progress-fill" id="previewProgressFill"></div>
+                </div>
+
+                <div class="preview-controls">
+                    <button id="btnPreviewBefore" class="preview-btn preview-btn-src">▶️ 原曲</button>
+                    <button id="btnPreviewAfter" class="preview-btn preview-btn-sheet">▶️ 谱面</button>
+                    <button id="btnPreviewToggle" class="preview-btn preview-btn-toggle" hidden>⏸</button>
+                    <button id="btnPreviewStop" class="preview-btn preview-btn-stop" hidden>⏹</button>
+                </div>
+            </div>
+
+            <div class="action-row" id="actionRow">
+                <div class="btn-group" id="appActions" hidden>
+                    <button id="btnSendApp" class="action-btn btn-send">🚀 发送至 App</button>
+                    <button id="btnSaveLocal" class="action-btn btn-save">📁 保存至本地</button>
+                </div>
+                <div id="browserActions" hidden>
+                    <button id="btnDownload" class="action-btn btn-download">⬇️ 浏览器直接下载</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@tonejs/midi": "./js/vendor/tonejs-midi.js"
+  }
+}
+</script>
+<script type="module" src="./js/main.js"></script>
+
+<!-- 错误捕获（移到末尾，不阻塞解析） -->
 <script>
 (function () {
   var shown = {};
+  var lastErrTime = 0;
+  var errCount = 0;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -63,28 +244,19 @@
   }
 
   window.addEventListener('error', function (e) {
+    if (e.target && e.target !== window && e.target.tagName) {
+      var tag = e.target.tagName.toLowerCase();
+      var src = e.target.src || e.target.href || '';
+      showErrorBox('资源加载失败', '<' + tag + '> ' + src, '请检查文件是否存在');
+      return;
+    }
+
     var file = (e.filename || '').split('/').pop() || 'unknown';
     var line = e.lineno || '?';
     var col = e.colno || '?';
     var msg = e.message || 'unknown error';
 
-    // 资源加载失败（img/script/link）
-    if (e.target && e.target !== window && e.target.tagName) {
-      var tag = e.target.tagName.toLowerCase();
-      var src = e.target.src || e.target.href || '';
-      showErrorBox(
-        '资源加载失败',
-        '<' + tag + '> ' + src,
-        '请检查文件是否存在'
-      );
-      return;
-    }
-
-    showErrorBox(
-      '脚本错误',
-      msg,
-      '文件: ' + file + '  行: ' + line + '  列: ' + col
-    );
+    showErrorBox('脚本错误', msg, '文件: ' + file + '  行: ' + line + '  列: ' + col);
   }, true);
 
   window.addEventListener('unhandledrejection', function (e) {
@@ -94,9 +266,16 @@
     showErrorBox('未处理的 Promise 拒绝', msg, stack);
   });
 
-  // 捕获 console.error
   var origError = console.error;
   console.error = function () {
+    var now = Date.now();
+    if (now - lastErrTime < 300) {
+      origError.apply(console, arguments);
+      return;
+    }
+    lastErrTime = now;
+    errCount++;
+
     var args = Array.prototype.slice.call(arguments);
     var msg = args.map(function (a) {
       if (a instanceof Error) return a.message;
@@ -105,175 +284,12 @@
       }
       return String(a);
     }).join(' ');
-    showErrorBox('console.error', msg, '');
+
+    showErrorBox('console.error', msg, errCount > 1 ? '（已节流，共 ' + errCount + ' 次）' : '');
     origError.apply(console, arguments);
   };
 })();
 </script>
-
-
-<!-- 沉浸式加载界面 -->
-<div id="loading-screen">
-    <!-- 背景流星与星轨 -->
-    <div class="loading-bg">
-        <div class="meteor m1"></div>
-        <div class="meteor m2"></div>
-        <div class="meteor m3"></div>
-        <div class="grid-overlay"></div>
-    </div>
-
-    <div class="loader-container">
-        <!-- 呼吸光球 -->
-        <div class="core-glow"></div>
-        
-        <!-- 状态文字与百分比 -->
-        <h2 class="loading-title">SkyMusic 0.0.9</h2>
-        <div class="loading-status" id="loadStatus">正在初始化核心模块...</div>
-        
-        <!-- 直线进度条 -->
-        <div class="progress-track">
-            <div class="progress-fill" id="loadProgressBar"></div>
-            <div class="progress-glow" id="loadProgressGlow"></div>
-        </div>
-
-        <!-- 双行进度数据 -->
-        <div class="progress-info">
-            <span id="loadSubStatus">连接星灵网络</span>
-            <span id="loadProgressText" class="percent">0%</span>
-        </div>
-
-        <!-- 底部跳动圆点 -->
-        <div class="loading-dots">
-            <span></span><span></span><span></span>
-        </div>
-    </div>
-</div>
-
-<!-- 柔和随机星光背景 Canvas -->
-<canvas id="bgCanvas"></canvas>
-
-<div class="content-wrapper">
-    <div id="toast-container"></div>
-    
-    <header class="app-header fade-in-up" style="animation-delay: 0.05s;">
-        <h1>光遇 MIDI <span>✨OneStar</span></h1>
-        <p class="subtitle">愿星光指引你，SkyMusic 0.0.9</p>
-    </header>
-
-    <div id="viewMidi">
-        <!-- 拖拽上传区 -->
-        <div class="glass-card upload-card fade-in-up" style="animation-delay: 0.1s;">
-            <div class="drop-zone breathing-border" id="dropZone">
-                <div class="upload-icon soft-float">🎵</div>
-                <p id="dropText">点击选择或拖拽 MIDI 文件</p>
-                <span class="file-hint">支持 .mid / .midi</span>
-                <input type="file" id="midiFile" accept=".mid, .midi, audio/midi">
-            </div>
-        </div>
-
-        <!-- 配置与指标区 -->
-        <div class="glass-card" id="configPanel" style="display: none;">
-            <div class="section-title">
-                <span class="icon">✨</span> 歌曲信息
-            </div>
-            <div class="info-list">
-                <div class="info-row"><span class="info-label">包含轨道 / 有效</span><span class="info-val"><span id="infoTotalTracks">-</span> / <span id="infoValidTracks">-</span></span></div>
-                <div class="info-row"><span class="info-label">包含乐器</span><span class="info-val wrap-text" id="infoInstruments">-</span></div>
-                <div class="info-row"><span class="info-label">原曲 BPM</span><span class="info-val" id="infoBpm">-</span></div>
-                <div class="info-row"><span class="info-label">原曲时长</span><span class="info-val" id="infoDuration">-</span></div>
-                <div class="info-row"><span class="info-label">音高范围</span><span class="info-val" id="infoPitchRange">-</span></div>
-                <div class="info-row"><span class="info-label">总音符量</span><span class="info-val" id="infoTotalNotes">-</span></div>
-            </div>
-
-            <div class="section-title" style="margin-top: 24px;">
-                <span class="icon">🎹</span> 提取音轨
-            </div>
-            <div class="track-list custom-scrollbar" id="trackListContainer"></div>
-
-            <div class="section-title" style="margin-top: 24px;">
-                <span class="icon">✏️</span> 谱面信息
-            </div>
-            <div class="meta-grid">
-                <div class="input-group">
-                    <label>歌曲名称</label>
-                    <input type="text" id="songNameInput" placeholder="未命名曲目">
-                </div>
-                <div class="input-group">
-                    <label>原曲作者</label>
-                    <input type="text" id="authorInput" placeholder="未知作者">
-                </div>
-                <div class="input-group">
-                    <label>改编者 / 谱师</label>
-                    <input type="text" id="transcriberInput" value="_OneStar">
-                </div>
-            </div>
-
-            <div class="section-title" style="margin-top: 24px;">
-                <span class="icon">🌌</span> 提取模式
-            </div>
-            <div id="modelContainer" class="model-grid"></div>
-
-            <button id="convertBtn" class="primary-btn">
-                <span class="btn-text">✨ 开始提取</span>
-            </button>
-            <div id="status">准备就绪</div>
-        </div>
-
-        <div id="log" class="custom-scrollbar"></div>
-
-        <!-- 结果展示区 -->
-        <div class="glass-card result-card" id="resultCard">
-            <div class="success-header">
-                <div class="success-icon">✨</div>
-                <div class="success-title">生成完成</div>
-            </div>
-            
-            <div class="res-metrics">
-                <div class="res-item">
-                    <div class="res-label">输出音符数</div>
-                    <div class="res-value" id="stepFinalNotes">-</div>
-                </div>
-                <div class="res-item">
-                    <div class="res-label">时间跨度</div>
-                    <div class="res-value" id="outDuration">-</div>
-                </div>
-                <div class="res-item">
-                    <div class="res-label">Studio 速度</div>
-                    <div class="res-value" id="outSpeed">-</div>
-                </div>
-                <div class="res-item">
-                    <div class="res-label">音域平移</div>
-                    <div class="res-value" id="outShift">-</div>
-                </div>
-            </div>
-
-            <div class="info-list result-details">
-                <div class="info-row"><span class="info-label">最终谱名</span><span class="info-val wrap-text highlight-text" id="outSongName">-</span></div>
-                <div class="info-row"><span class="info-label">原曲作者</span><span class="info-val" id="outAuthor">-</span></div>
-                <div class="info-row"><span class="info-label">提取模型</span><span class="info-val" id="outModel">-</span></div>
-                <div class="info-row"><span class="info-label">改编谱师</span><span class="info-val" id="outTranscriber">-</span></div>
-            </div>
-            
-            <div class="action-row" id="actionRow">
-                <div class="btn-group" id="appActions" style="display: none;">
-                    <button id="btnSendApp" class="action-btn btn-send">🚀 发送至 App</button>
-                    <button id="btnSaveLocal" class="action-btn btn-save">📁 保存至本地</button>
-                </div>
-                <div id="browserActions" style="display: none;">
-                    <button id="btnDownload" class="action-btn btn-download">⬇️ 浏览器直接下载</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<script type="importmap">
-{
-  "imports": {
-    "@tonejs/midi": "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm"
-  }
-}
-</script>
-<script type="module" src="./js/main.js"></script>
 </body>
 </html>
+

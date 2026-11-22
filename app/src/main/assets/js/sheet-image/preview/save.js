@@ -8,7 +8,33 @@ import { getBridge } from './bridge.js';
 import { showToast } from './toast.js';
 import { showProgress, hideProgress } from './progress.js';
 import { createZipWriter, canvasToBytes, buildLongPngBytes } from '../zip.js';
-import { renderPageAt } from './render.js';
+import { drawPageToCanvas, previewScaleFor } from '../render.js';
+
+/* ========================== 统一分辨率重绘 ========================== */
+
+/**
+ * 把指定页重绘到独立 canvas（统一 LOD_HIGH 分辨率）。
+ * 不修改 page._canvas，避免污染分页预览状态。
+ */
+function renderPageToExportCanvas(index, meta) {
+  const page = view.pages[index];
+  if (!page) return null;
+
+  const canvas = document.createElement('canvas');
+  const baseScale = previewScaleFor(view.rows, view.style, meta.infoItems.length);
+
+  try {
+    drawPageToCanvas(canvas, page, index, view.pages.length, meta, view.style, baseScale);
+  } catch (err) {
+    console.error('[sheet-image] 导出第 ' + (index + 1) + ' 页失败', err);
+    return null;
+  }
+
+  if (!canvas.width || canvas.width <= 1) return null;
+  return canvas;
+}
+
+/* ========================== payload ========================== */
 
 export function buildPayload(longOnly) {
   const selectedPages = [];
@@ -35,6 +61,8 @@ export function buildPayload(longOnly) {
     pages: selectedPages
   };
 }
+
+/* ========================== 保存入口 ========================== */
 
 export function saveImages(longOnly, onClose) {
   if (view.busy) return;
@@ -93,6 +121,8 @@ export function saveImages(longOnly, onClose) {
   exportInBrowser(longOnly, onClose);
 }
 
+/* ========================== 浏览器导出 ========================== */
+
 async function exportInBrowser(longOnly, onClose) {
   try {
     const fileNameBase = sanitizeFileName(view.title);
@@ -102,18 +132,16 @@ async function exportInBrowser(longOnly, onClose) {
       title: view.title,
       infoItems: view.infoItems
     };
-    for (let i = 0; i < view.pages.length; i++) {
-      renderPageAt(i, meta);
-    }
 
     if (longOnly) {
       showProgress('正在准备长图…', 5);
+
+      // 统一分辨率重绘所有页
       const canvases = [];
       for (let i = 0; i < view.pages.length; i++) {
-        const page = view.pages[i];
-        if (page && page._canvas && page._canvas.width > 1) {
-          canvases.push(page._canvas);
-        }
+        const c = renderPageToExportCanvas(i, meta);
+        if (c) canvases.push(c);
+        if (i % 4 === 3) await nextTick();
       }
       if (!canvases.length) throw new Error('没有可用的页面');
 
@@ -122,6 +150,9 @@ async function exportInBrowser(longOnly, onClose) {
         canvases, gapPx, view.style.bg, MAX_LONG_PIXELS,
         function (p) { showProgress('正在生成长图 ' + p + '%', p); }
       );
+
+      // 释放临时 canvas
+      releaseCanvases(canvases);
 
       if (parts.length === 1) {
         const blob = new Blob([parts[0].bytes], { type: 'image/png' });
@@ -143,6 +174,7 @@ async function exportInBrowser(longOnly, onClose) {
       return;
     }
 
+    // 分页导出
     const targets = [];
     for (let i = 0; i < view.pages.length; i++) {
       if (view.selected[i]) targets.push(i);
@@ -155,17 +187,19 @@ async function exportInBrowser(longOnly, onClose) {
 
     for (let k = 0; k < total; k++) {
       const i = targets[k];
-      const page = view.pages[i];
-      if (!page || !page._canvas) continue;
 
       showProgress('正在打包 ' + (k + 1) + ' / ' + total, Math.round((k / total) * 60));
 
-      const name = i === 0 ? fileNameBase + '.png' : fileNameBase + '-' + (i + 1) + '.png';
-      const bytes = await canvasToBytes(page._canvas);
-      zip.addFile(name, bytes);
-      selectedCanvases.push(page._canvas);
+      // 统一分辨率重绘
+      const canvas = renderPageToExportCanvas(i, meta);
+      if (!canvas) continue;
 
-      await nextFrame();
+      const name = i === 0 ? fileNameBase + '.png' : fileNameBase + '-' + (i + 1) + '.png';
+      const bytes = await canvasToBytes(canvas);
+      zip.addFile(name, bytes);
+      selectedCanvases.push(canvas);
+
+      await nextTick();
     }
 
     if (view.mergeLong && selectedCanvases.length > 0) {
@@ -186,6 +220,8 @@ async function exportInBrowser(longOnly, onClose) {
     const blob = zip.finish();
     downloadBlob(blob, fileNameBase + '.zip');
 
+    releaseCanvases(selectedCanvases);
+
     showProgress('完成', 100);
     setTimeout(hideProgress, 600);
     view.busy = false;
@@ -196,6 +232,19 @@ async function exportInBrowser(longOnly, onClose) {
     hideProgress();
     showToast('导出失败：' + (err && err.message ? err.message : err), 'error');
   }
+}
+
+/* ========================== 工具 ========================== */
+
+function releaseCanvases(list) {
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    if (c) {
+      c.width = 0;
+      c.height = 0;
+    }
+  }
+  list.length = 0;
 }
 
 function downloadBlob(blob, fileName) {
@@ -209,8 +258,9 @@ function downloadBlob(blob, fileName) {
   setTimeout(function () { URL.revokeObjectURL(url); }, 6000);
 }
 
-function nextFrame() {
+/** 让出主线程（比 requestAnimationFrame 更快） */
+function nextTick() {
   return new Promise(function (resolve) {
-    requestAnimationFrame(function () { resolve(); });
+    setTimeout(resolve, 0);
   });
 }

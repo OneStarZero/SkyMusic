@@ -1,74 +1,89 @@
 /* ================= 全量加载界面动画 ================= */
 #loading-screen {
-    position: fixed; inset: 0; z-index: 9999;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
     background: #060913;
-    display: flex; justify-content: center; align-items: center; flex-direction: column;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
     overflow: hidden;
-    transition: opacity 0.8s var(--ease-soft), visibility 0.8s;
+    transition: opacity 0.6s ease-out, visibility 0.6s;
 }
 #loading-screen.hidden { opacity: 0; visibility: hidden; }
 
 /* 背景层：流星 + 扫描网格 */
 .loading-bg {
-    position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    contain: strict;
 }
+
 .meteor {
-    position: absolute; width: 2px; height: 80px;
+    position: absolute;
+    width: 2px;
+    height: 80px;
     background: linear-gradient(to bottom, rgba(125, 211, 252, 0), rgba(125, 211, 252, 1));
     border-radius: 50%;
     opacity: 0;
     transform-origin: top center;
     animation: meteorDrop 4s linear infinite;
+    will-change: transform, opacity;
 }
-/* 流星从屏幕右上方出现，向左下方滑动 */
 .m1 { top: -10%; right: 10%; animation-delay: 0s; animation-duration: 3.5s; }
 .m2 { top: -5%; right: 50%; animation-delay: 1.2s; animation-duration: 4s; }
 .m3 { top: -15%; right: 85%; animation-delay: 2.5s; animation-duration: 3s; }
 
 @keyframes meteorDrop {
-    0% { 
-        transform: translate(0, 0) rotate(-135deg); 
-        opacity: 0; 
+    0% {
+        transform: translate(0, 0) rotate(-135deg);
+        opacity: 0;
     }
     10% { opacity: 1; }
-    100% { 
-        transform: translate(-400px, 500px) rotate(-135deg); 
-        opacity: 0; 
+    100% {
+        transform: translate(-400px, 500px) rotate(-135deg);
+        opacity: 0;
     }
 }
 
+/* 静态网格（移除 gridPan 动画，减少重绘） */
 .grid-overlay {
-    position: absolute; inset: 0;
-    background-image: 
+    position: absolute;
+    inset: 0;
+    background-image:
         linear-gradient(rgba(125, 211, 252, 0.03) 1px, transparent 1px),
         linear-gradient(90deg, rgba(125, 211, 252, 0.03) 1px, transparent 1px);
     background-size: 40px 40px;
     background-position: center;
     mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
     -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
-    animation: gridPan 20s linear infinite;
-}
-@keyframes gridPan {
-    0% { background-position: 0 0; }
-    100% { background-position: 0 80px; }
 }
 
 /* 核心容器层 */
 .loader-container {
-    position: relative; z-index: 10;
-    display: flex; flex-direction: column; align-items: center;
-    width: 80%; max-width: 320px;
-    animation: floatUp 1.2s var(--ease-spring) forwards;
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 80%;
+    max-width: 320px;
+    animation: floatUp 0.9s var(--ease-spring) forwards;
 }
 
-/* 呼吸光晕 */
+/* 呼吸光晕（用 radial-gradient 预渲染，移除 filter: blur） */
 .core-glow {
-    position: absolute; top: 0;
-    width: 150px; height: 150px;
-    background: radial-gradient(circle, rgba(56, 189, 248, 0.3) 0%, transparent 70%);
+    position: absolute;
+    top: 0;
+    width: 150px;
+    height: 150px;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.35) 0%, rgba(56, 189, 248, 0.12) 35%, transparent 70%);
     border-radius: 50%;
-    filter: blur(20px);
     animation: breatheGlow 2s ease-in-out infinite alternate;
+    will-change: transform, opacity;
 }
 @keyframes breatheGlow {
     from { transform: scale(0.8); opacity: 0.5; }
@@ -76,26 +91,37 @@
 }
 
 .loading-title {
-    font-size: 1.6rem; font-weight: 800; color: #fff; letter-spacing: 4px;
-    margin-top: 80px; margin-bottom: 12px;
-    text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 4px;
+    margin-top: 80px;
+    margin-bottom: 12px;
     background: linear-gradient(90deg, #F1F5F9, #7DD3FC, #FDE047, #F1F5F9);
     background-size: 200% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: shine 3s linear infinite;
+    animation: shine 4s linear infinite;
 }
 @keyframes shine { to { background-position: 200% center; } }
 
 .loading-status {
-    font-size: 0.9rem; color: #7DD3FC; font-weight: 600; margin-bottom: 30px;
+    font-size: 0.9rem;
+    color: #7DD3FC;
+    font-weight: 600;
+    margin-bottom: 30px;
     animation: statusPulse 1.5s infinite alternate ease-in-out;
+    will-change: transform, opacity;
 }
-@keyframes statusPulse { from { opacity: 0.6; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+@keyframes statusPulse {
+    from { opacity: 0.6; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+}
 
 /* 直线进度条 */
 .progress-track {
-    width: 100%; height: 6px;
+    width: 100%;
+    height: 6px;
     background: rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     position: relative;
@@ -103,7 +129,8 @@
     box-shadow: inset 0 1px 3px rgba(0,0,0,0.6);
 }
 .progress-fill {
-    width: 0%; height: 100%;
+    width: 0%;
+    height: 100%;
     background: linear-gradient(90deg, #38BDF8, #818CF8);
     border-radius: 10px;
     position: relative;
@@ -111,80 +138,62 @@
 }
 /* 进度条内部流光 */
 .progress-fill::after {
-    content: ''; position: absolute; inset: 0;
+    content: '';
+    position: absolute;
+    inset: 0;
     background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
     animation: progressShine 1.5s infinite;
     transform: translateX(-100%);
+    will-change: transform;
 }
 @keyframes progressShine { 100% { transform: translateX(100%); } }
 
-/* 进度条外部头部光晕 */
+/* 进度条外部头部光晕（用 box-shadow 替代 filter: blur） */
 .progress-glow {
-    position: absolute; top: -4px; left: 0;
-    width: 10px; height: 14px;
+    position: absolute;
+    top: -4px;
+    left: 0;
+    width: 10px;
+    height: 14px;
     background: #7DD3FC;
     border-radius: 50%;
-    filter: blur(6px);
+    box-shadow: 0 0 8px 2px rgba(125, 211, 252, 0.8);
     transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .progress-info {
-    width: 100%; display: flex; justify-content: space-between;
-    margin-top: 12px; font-size: 0.75rem; color: #64748B; font-family: var(--font-mono);
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 12px;
+    font-size: 0.75rem;
+    color: #64748B;
+    font-family: var(--font-mono);
 }
 .percent { color: #38BDF8; font-weight: 700; }
 
-/* 底部跳动圆点 */
+/* 底部跳动圆点（移除 box-shadow，减少每帧重绘） */
 .loading-dots {
-    display: flex; gap: 8px; margin-top: 30px;
+    display: flex;
+    gap: 8px;
+    margin-top: 30px;
 }
 .loading-dots span {
-    width: 6px; height: 6px; background-color: #7DD3FC; border-radius: 50%;
+    width: 6px;
+    height: 6px;
+    background-color: #7DD3FC;
+    border-radius: 50%;
     animation: dotBounce 1.4s infinite ease-in-out both;
+    will-change: transform, opacity;
 }
 .loading-dots span:nth-child(1) { animation-delay: -0.32s; }
 .loading-dots span:nth-child(2) { animation-delay: -0.16s; }
 @keyframes dotBounce {
     0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
-    40% { transform: scale(1); opacity: 1; box-shadow: 0 0 10px #7DD3FC; }
+    40% { transform: scale(1); opacity: 1; }
 }
 
-@keyframes floatUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-/* --- 主题选择弹窗 --- */
-.smsi-theme-picker {
-    position: absolute; inset: 0; z-index: 100;
-    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
-    display: flex; justify-content: center; align-items: flex-end;
-    transition: opacity 0.3s;
-}
-.smsi-theme-picker.smsi-hidden { opacity: 0; pointer-events: none; }
-.smsi-theme-content {
-    width: 100%; background: #0F172A; border-radius: 20px 20px 0 0;
-    max-height: 70%; display: flex; flex-direction: column;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
-    transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.smsi-theme-picker:not(.smsi-hidden) .smsi-theme-content { transform: translateY(0); }
-.smsi-theme-head {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1);
-    font-weight: 700; color: #FFF;
-}
-.smsi-theme-list {
-    overflow-y: auto; padding: 10px 20px 20px;
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
-}
-.smsi-theme-item {
-    display: flex; align-items: center; gap: 10px; padding: 12px;
-    background: rgba(255,255,255,0.05); border-radius: 12px;
-    color: #F8FAFC; font-size: 14px; cursor: pointer;
-    border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s;
-}
-.smsi-theme-item:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); }
-.smsi-theme-swatch { width: 24px; height: 24px; border-radius: 6px; }
-.smsi-theme-item.random {
-    grid-column: span 2; justify-content: center; font-weight: 700;
-    background: linear-gradient(135deg, rgba(56,189,248,0.2), rgba(167,139,250,0.2));
-    border-color: #38BDF8;
+@keyframes floatUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
