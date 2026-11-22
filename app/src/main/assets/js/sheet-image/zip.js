@@ -166,19 +166,9 @@ export function mergeCanvasesToLong(canvases, gapPx, bgColor, maxPixels) {
 
   return out;
 }
-
-/**
- * 分块生成长图 PNG 字节，避免一次性持有整张大图
- * @param {HTMLCanvasElement[]} canvases
- * @param {number} gapPx
- * @param {string} bgColor
- * @param {number} maxPixels
- * @param {function} onProgress (percent) => void
- * @returns {Promise<Uint8Array>}
- */
 /**
  * 分块生成长图 PNG 字节数组
- * 超过 16384px 时自动拆成多张，返回 [{name, bytes}, ...]
+ * 超过 16384px 时自动拆成多张，返回 [{part, total, bytes}, ...]
  */
 export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onProgress) {
   if (!canvases.length) throw new Error('没有可用的页面');
@@ -191,7 +181,6 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
   }
   totalH += gapPx * (canvases.length - 1);
 
-  // 降采样：像素总量控制在 maxPixels 内
   let scale = 1;
   if (maxW * totalH > maxPixels) {
     scale = Math.sqrt(maxPixels / (maxW * totalH));
@@ -200,10 +189,7 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
   const outW = Math.max(1, Math.round(maxW * scale));
   const outH = Math.max(1, Math.round(totalH * scale));
 
-  // 浏览器 canvas 单边上限
   const MAX_DIM = 16384;
-
-  // 计算需要拆成几张
   const partCount = Math.ceil(outH / MAX_DIM);
   const partH = Math.ceil(outH / partCount);
 
@@ -222,7 +208,6 @@ export async function buildLongPngBytes(canvases, gapPx, bgColor, maxPixels, onP
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, outW, thisH);
 
-    // 绘制与当前分块重叠的页
     let curY = 0;
     for (let i = 0; i < canvases.length; i++) {
       const c = canvases[i];

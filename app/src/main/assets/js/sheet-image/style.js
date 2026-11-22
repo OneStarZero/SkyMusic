@@ -12,23 +12,35 @@ export const THEMES = {
   ocean: { name: '深海幽蓝', bg: '#020617', bgGlow: '#0F172A', gridLine: '#38BDF8', noteFill: '#38BDF8', noteFillAlt: '#818CF8', logoColor: '#38BDF8', watermarkColor: '#38BDF8' }
 };
 
+/** 圆角样式：三选一 */
+export const CORNER_STYLES = {
+  round: { name: '圆角', gridRadius: 5 },
+  square: { name: '直角', gridRadius: 0 },
+  skystudio: { name: 'SkyStudio', gridRadius: 2 }
+};
+
+/** 随机样式：单独列出 */
+export const RANDOM_STYLE = {
+  name: '随机幻彩',
+  key: 'random'
+};
+
 export const STYLE_DEFAULTS = {
   bg: '#0B1120', bgGlow: '#1E1B4B', gridLine: '#7DD3FC', gridLineAlpha: 0.22,
   noteFill: '#7DD3FC', noteFillAlt: '#A78BFA', noteStroke: '#FFFFFF', noteStrokeAlpha: 0.40,
   titleColor: '#F8FAFC', metaColor: '#94A3B8', timeColor: '#CBD5E1', timeAlpha: 0.72,
   watermarkColor: '#7DD3FC', watermarkAlpha: 0.055, logoColor: '#7DD3FC', infoLabelColor: '#94A3B8',
   infoValueColor: '#E2E8F0', dividerColor: '#7DD3FC', dividerAlpha: 0.14,
-  
+
   cell: 22, cellGap: 4, gridRadius: 5, cols: 5, rowsPerPage: 6, gridGapX: 26, gridGapY: 30, pad: 40,
   titleSize: 30, metaSize: 14, timeSize: 13, watermarkSize: 13, logoSize: 15, infoSize: 12,
-  
+
   showStars: true, showWatermark: true, showInfoPanel: true, showTime: true,
-  
-  // 🌟 新增装饰元素参数
-  decoType: 'none', // stars, snow, bubbles, geometric, none
-  bgPattern: 'none', // grid, dots, diagonal, none
-  noteShape: 'square', // square, circle, hexagon, diamond
-  titleAlign: 'center' // center, left, right
+
+  decoType: 'none',
+  bgPattern: 'none',
+  noteShape: 'square',
+  titleAlign: 'center'
 };
 
 export const FONT_STACK = '"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif';
@@ -37,19 +49,17 @@ export const APP_NAME = 'SkyMusic';
 export const MAX_PAGE_PIXELS = 24000000;
 export const MAX_LONG_PIXELS = 80000000;
 
-export function getThemeStyle(themeKey, forceRound = null) {
+export function getThemeStyle(themeKey, cornerKey = 'round') {
   let t = THEMES[themeKey];
-  
+
   if (themeKey === 'random') {
     const h1 = Math.floor(Math.random() * 360);
     const h2 = (h1 + 120 + Math.random() * 120) % 360;
-    
+
     const cellSize = [18, 22, 26, 30][Math.floor(Math.random() * 4)];
     const gapSize = [2, 4, 6, 8][Math.floor(Math.random() * 4)];
     const padSize = [30, 40, 50][Math.floor(Math.random() * 3)];
-    const isRound = Math.random() > 0.5; 
 
-    // 🎲 随机元素池
     const decoTypes = ['stars', 'snow', 'bubbles', 'geometric', 'none'];
     const bgPatterns = ['none', 'grid', 'dots', 'diagonal'];
     const noteShapes = ['square', 'circle', 'hexagon', 'diamond'];
@@ -64,29 +74,26 @@ export function getThemeStyle(themeKey, forceRound = null) {
       noteFillAlt: `hsl(${h2}, 85%, 65%)`,
       logoColor: `hsl(${h2}, 90%, 70%)`,
       watermarkColor: `hsl(${h1}, 80%, 60%)`,
-      
+
       cell: cellSize,
       cellGap: gapSize,
       pad: padSize,
-      gridRadius: isRound ? (cellSize / 4) : 0,
       gridLineAlpha: 0.1 + Math.random() * 0.3,
       noteStrokeAlpha: Math.random() > 0.5 ? 0 : 0.4,
       showTime: Math.random() > 0.2,
       showWatermark: true,
-      
-      // 随机装饰
+
       decoType: decoTypes[Math.floor(Math.random() * decoTypes.length)],
       bgPattern: bgPatterns[Math.floor(Math.random() * bgPatterns.length)],
       noteShape: noteShapes[Math.floor(Math.random() * noteShapes.length)],
       titleAlign: titleAligns[Math.floor(Math.random() * titleAligns.length)]
     };
   }
-  
+
   if (!t) t = THEMES.morning;
 
-  let finalRadius = t.gridRadius !== undefined ? t.gridRadius : STYLE_DEFAULTS.gridRadius;
-  if (forceRound === true) finalRadius = (t.cell || STYLE_DEFAULTS.cell) / 4;
-  else if (forceRound === false) finalRadius = 0;
+  const corner = CORNER_STYLES[cornerKey] || CORNER_STYLES.round;
+  const finalRadius = corner.gridRadius;
 
   return Object.assign({}, STYLE_DEFAULTS, {
     bg: t.bg || STYLE_DEFAULTS.bg,
@@ -97,7 +104,7 @@ export function getThemeStyle(themeKey, forceRound = null) {
     logoColor: t.logoColor || STYLE_DEFAULTS.logoColor,
     watermarkColor: t.watermarkColor || STYLE_DEFAULTS.watermarkColor,
     dividerColor: t.gridLine || STYLE_DEFAULTS.dividerColor,
-    
+
     cell: t.cell || STYLE_DEFAULTS.cell,
     cellGap: t.cellGap || STYLE_DEFAULTS.cellGap,
     pad: t.pad || STYLE_DEFAULTS.pad,
@@ -106,8 +113,7 @@ export function getThemeStyle(themeKey, forceRound = null) {
     noteStrokeAlpha: t.noteStrokeAlpha !== undefined ? t.noteStrokeAlpha : STYLE_DEFAULTS.noteStrokeAlpha,
     showTime: t.showTime !== undefined ? t.showTime : STYLE_DEFAULTS.showTime,
     showWatermark: true,
-    
-    // 传递随机元素
+
     decoType: t.decoType || STYLE_DEFAULTS.decoType,
     bgPattern: t.bgPattern || STYLE_DEFAULTS.bgPattern,
     noteShape: t.noteShape || STYLE_DEFAULTS.noteShape,
@@ -115,28 +121,27 @@ export function getThemeStyle(themeKey, forceRound = null) {
   });
 }
 
-// hexToRgb, rgba, mixHex, clampInt, formatMs, formatDuration, todayStamp, sanitizeFileName 保持原样，此处省略以节省空间，请保留原文件中的这些工具函数
 export function hexToRgb(hex) {
   let h = String(hex == null ? '' : hex).trim();
   if (h.startsWith('hsl')) {
     const m = h.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
     if (m) {
-        const hh = parseInt(m[1]) / 360, ss = parseInt(m[2]) / 100, ll = parseInt(m[3]) / 100;
-        let r, g, b;
-        if (ss === 0) { r = g = b = ll; }
-        else {
-            const hue2rgb = (p, q, t) => {
-                if (t < 0) t += 1; if (t > 1) t -= 1;
-                if (t < 1 / 6) return p + (q - p) * 6 * t;
-                if (t < 1 / 2) return q;
-                if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-                return p;
-            };
-            const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss;
-            const p = 2 * ll - q;
-            r = hue2rgb(p, q, hh + 1 / 3); g = hue2rgb(p, q, hh); b = hue2rgb(p, q, hh - 1 / 3);
-        }
-        return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+      const hh = parseInt(m[1]) / 360, ss = parseInt(m[2]) / 100, ll = parseInt(m[3]) / 100;
+      let r, g, b;
+      if (ss === 0) { r = g = b = ll; }
+      else {
+        const hue2rgb = (p, q, t) => {
+          if (t < 0) t += 1; if (t > 1) t -= 1;
+          if (t < 1 / 6) return p + (q - p) * 6 * t;
+          if (t < 1 / 2) return q;
+          if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+          return p;
+        };
+        const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss;
+        const p = 2 * ll - q;
+        r = hue2rgb(p, q, hh + 1 / 3); g = hue2rgb(p, q, hh); b = hue2rgb(p, q, hh - 1 / 3);
+      }
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
     }
   }
   if (h.charAt(0) === '#') h = h.slice(1);

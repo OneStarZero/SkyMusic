@@ -38,10 +38,12 @@ export function buildPayload(longOnly) {
 
 export function saveImages(longOnly, onClose) {
   if (view.busy) return;
+  view.busy = true;
 
   if (!longOnly) {
     const count = view.selected.filter(Boolean).length;
     if (count === 0) {
+      view.busy = false;
       showToast('请至少选择一页', 'error');
       return;
     }
@@ -51,7 +53,6 @@ export function saveImages(longOnly, onClose) {
   const payload = buildPayload(longOnly);
 
   if (bridge && typeof bridge.saveSheetImage === 'function') {
-    view.busy = true;
     showProgress(longOnly ? '正在生成长图…' : '正在生成图片…', 5);
 
     setTimeout(function () {
@@ -79,7 +80,7 @@ export function saveImages(longOnly, onClose) {
         const files = (res.files && res.files.length) || 1;
         showToast('已保存 ' + files + ' 张图片到 ' + (res.dir || 'SkyMusic-OneStar'), 'success');
         if (res.debug) {
-          alert('DEBUG:\n' + res.debug);
+          console.log('[SheetImage] ' + res.debug);
         }
         if (onClose) onClose();
       } else {
@@ -93,12 +94,9 @@ export function saveImages(longOnly, onClose) {
 }
 
 async function exportInBrowser(longOnly, onClose) {
-  view.busy = true;
-
   try {
     const fileNameBase = sanitizeFileName(view.title);
 
-    // 确保所有页已渲染
     const meta = {
       rows: view.rows,
       title: view.title,
@@ -145,8 +143,6 @@ async function exportInBrowser(longOnly, onClose) {
       return;
     }
 
-
-
     const targets = [];
     for (let i = 0; i < view.pages.length; i++) {
       if (view.selected[i]) targets.push(i);
@@ -185,7 +181,6 @@ async function exportInBrowser(longOnly, onClose) {
         zip.addFile(name, parts[i].bytes);
       }
     }
-
 
     showProgress('正在生成 zip…', 94);
     const blob = zip.finish();

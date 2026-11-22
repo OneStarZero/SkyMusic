@@ -71,13 +71,14 @@ object SheetImageExporter {
                 return fail("无法创建目录：" + rootDir.absolutePath)
             }
 
-             val pageDir = if (longOnly) rootDir else File(rootDir, "分页")
+                         val pageDir = if (longOnly) rootDir else File(rootDir, "分页")
             if (!longOnly && !pageDir.exists() && !pageDir.mkdirs()) {
                 return fail("无法创建分页目录：" + pageDir.absolutePath)
             }
 
             // 长图目录（多张时使用）
             val longDir = File(rootDir, "长图")
+
 
             val files = ArrayList<String>()
             val pageCount = if (totalPages > 0) totalPages else pagesArr.length()
