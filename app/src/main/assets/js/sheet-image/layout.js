@@ -1,21 +1,17 @@
 /**
  * SkyMusic · 谱面图片布局计算
- * 负责：音符收集 → 时间点聚合 → 分页 → 尺寸计算 → 统计信息
  */
 
 import { formatMs, formatDuration, todayStamp } from './style.js';
 
-/** 网格列数：15 键横排 5 列，9 键 3 列 */
 export function gridColsFor(rows) {
   return rows === 9 ? 3 : 5;
 }
 
-/** 网格行数：统一 3 行 */
 export function gridRowsFor() {
   return 3;
 }
 
-/** 把 '1Key3' 或数字 3 解析成行索引，越界返回 -1 */
 export function keyToRow(key, rows) {
   if (typeof key === 'number' && Number.isFinite(key)) {
     const idx = Math.round(key);
@@ -29,7 +25,6 @@ export function keyToRow(key, rows) {
   return idx;
 }
 
-/** 从 skyStudioData 收集可用音符 */
 export function collectNotes(data, rows) {
   if (Array.isArray(data)) data = data[0] || {};
   const src = (data && (data.songNotes || data.notes)) || [];
@@ -45,7 +40,6 @@ export function collectNotes(data, rows) {
   return out;
 }
 
-/** 按时间窗口聚合成「时间点」 */
 export function buildLayout(notes, rows, toleranceMs) {
   const tol = Number.isFinite(toleranceMs) && toleranceMs >= 0 ? toleranceMs : 25;
   const sorted = notes.slice().sort((a, b) => (a.t - b.t) || (a.r - b.r));
@@ -71,13 +65,15 @@ export function buildLayout(notes, rows, toleranceMs) {
 }
 
 /** 按「每页 cols × rowsPerPage 个时间点」分页 */
-export function buildPages(layout, st) {
-  const cols = layout.columns;
-  const perPage = Math.max(1, Math.round(st.cols) * Math.round(st.rowsPerPage));
+export function buildPages(layout, st, rowsPerPage, cols) {
+  const c = layout.columns;
+  const rpp = rowsPerPage || st.rowsPerPage || 6;
+  const cc = cols || st.cols || 5;
+  const perPage = Math.max(1, Math.round(cc) * Math.round(rpp));
   const pages = [];
 
-  for (let start = 0; start < cols.length; start += perPage) {
-    pages.push({ columns: cols.slice(start, start + perPage) });
+  for (let start = 0; start < c.length; start += perPage) {
+    pages.push({ columns: c.slice(start, start + perPage) });
   }
 
   if (pages.length === 0) pages.push({ columns: [] });
@@ -88,7 +84,10 @@ export function buildPages(layout, st) {
  * 计算一页画布尺寸（CSS 像素）
  * 与原生 SheetImageExporter.kt 的 measure() 严格一致
  */
-export function measurePage(rows, st, infoItemCount) {
+export function measurePage(rows, st, infoItemCount, rowsPerPage, cols) {
+  const rpp = rowsPerPage || st.rowsPerPage || 6;
+  const cc = cols || st.cols || 5;
+
   const gCols = gridColsFor(rows);
   const gRows = gridRowsFor(rows);
   const gridW = gCols * st.cell + (gCols - 1) * st.cellGap;
@@ -106,8 +105,8 @@ export function measurePage(rows, st, infoItemCount) {
 
   const footerH = st.watermarkSize * 2.6;
 
-  const bodyW = st.cols * gridW + (st.cols - 1) * st.gridGapX;
-  const bodyH = st.rowsPerPage * (gridH + timeH) + (st.rowsPerPage - 1) * st.gridGapY;
+  const bodyW = cc * gridW + (cc - 1) * st.gridGapX;
+  const bodyH = rpp * (gridH + timeH) + (rpp - 1) * st.gridGapY;
 
   return {
     headerH: headerH,
@@ -125,7 +124,6 @@ export function measurePage(rows, st, infoItemCount) {
   };
 }
 
-/** 汇总谱面统计信息 */
 export function computeInfo(layout, rows, tol) {
   const cols = layout.columns;
   let noteCount = 0;
@@ -170,7 +168,7 @@ export function computeInfo(layout, rows, tol) {
     tol: tol
   };
 }
-/** 生成信息面板条目（16 项） */
+
 export function buildInfoItems(info, rows, bpm, model, author, transcriber) {
   const items = [];
 

@@ -46,6 +46,9 @@ export const view = {
   mergeLong: false,
   busy: false,
 
+  customCols: 8,
+  customRows: 15,
+
   pageZoom: DEFAULT_ZOOM,
   longZoom: DEFAULT_ZOOM,
 
@@ -73,7 +76,9 @@ export const view = {
   themePanel: null,
   themeList: null,
   cornerList: null,
-  themeCloseBtn: null
+  themeCloseBtn: null,
+  rowsValEl: null,
+  colsValEl: null
 };
 
 let activeTab = 'pages';
@@ -96,8 +101,6 @@ function setNativeTopBarVisible(visible) {
     }
   } catch (e) { /* 忽略 */ }
 }
-
-/* ---- Toast ---- */
 
 let toastImpl = function (message, type) {
   let box = document.getElementById('smsi-fallback-toast');
@@ -127,8 +130,6 @@ function showToast(message, type) {
   toastImpl(message, type);
 }
 
-/* ---- 进度条 ---- */
-
 function showProgress(text, percent) {
   if (!view.progressBar) return;
   view.progressBar.classList.add('smsi-show');
@@ -145,8 +146,6 @@ function hideProgress() {
 window.onSheetImageProgress = function (text, percent) {
   showProgress(text, percent);
 };
-
-/* ---- 进度记忆 ---- */
 
 const PROGRESS_KEY = 'skymusic_sheet_image_progress_v3';
 
@@ -179,7 +178,6 @@ function saveProgress(songName, data) {
  * ================================================================== */
 
 const OVERLAY_CSS = [
-  /* 遮罩与窗口 */
   '.smsi-overlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;',
   'background:rgba(8,12,24,.9);',
   'opacity:0;transition:opacity .2s ease;font-family:' + FONT_STACK + ';',
@@ -195,14 +193,12 @@ const OVERLAY_CSS = [
   'contain:layout style;}',
   '.smsi-overlay.smsi-show .smsi-window{transform:scale(1);}',
 
-  /* 顶栏 */
   '.smsi-head{display:flex;align-items:center;gap:10px;padding:13px 16px;flex:0 0 auto;',
   'border-bottom:1px solid rgba(125,211,252,.06);background:#0F172A;}',
   '.smsi-title{font-size:13.5px;font-weight:700;color:#F8FAFC;overflow:hidden;',
   'text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;letter-spacing:.3px;}',
   '.smsi-tools{display:flex;align-items:center;gap:5px;flex:0 0 auto;}',
 
-  /* 按钮 */
   '.smsi-btn{appearance:none;border:1px solid rgba(125,211,252,.14);',
   'background:rgba(30,41,59,.5);',
   'color:#CBD5E1;font-size:12px;line-height:1;padding:7px 10px;border-radius:10px;cursor:pointer;',
@@ -214,7 +210,6 @@ const OVERLAY_CSS = [
   '.smsi-btn.smsi-icon{padding:7px 9px;font-size:13px;}',
   '.smsi-btn.smsi-close{border-color:rgba(248,113,113,.2);color:#F87171;}',
 
-  /* 标签页 */
   '.smsi-tabs{display:flex;gap:6px;padding:10px 16px 0;flex:0 0 auto;}',
   '.smsi-tab{flex:1;padding:9px 12px;border-radius:11px;border:1px solid rgba(125,211,252,.1);',
   'background:rgba(30,41,59,.35);',
@@ -223,14 +218,12 @@ const OVERLAY_CSS = [
   '.smsi-tab.smsi-active{border-color:rgba(125,211,252,.5);',
   'background:rgba(125,211,252,.14);color:#7DD3FC;}',
 
-  /* 内容区 */
   '.smsi-body{flex:1 1 auto;overflow:hidden;position:relative;contain:layout style;}',
   '.smsi-pane{position:absolute;inset:0;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch;',
   'display:none;overscroll-behavior:contain;touch-action:pan-x pan-y;',
   'contain:layout style paint;}',
   '.smsi-pane.smsi-active{display:block;}',
 
-  /* 分页预览 */
   '.smsi-pages{display:flex;flex-direction:column;align-items:center;gap:16px;}',
   '.smsi-page{position:relative;border-radius:14px;overflow:hidden;background:#0B1120;',
   'box-shadow:0 8px 24px rgba(0,0,0,.45);',
@@ -251,20 +244,17 @@ const OVERLAY_CSS = [
   'background:rgba(11,17,32,.7);border:1px solid rgba(148,163,184,.15);',
   'padding:2px 8px;border-radius:8px;font-variant-numeric:tabular-nums;}',
 
-  /* 长图预览 */
   '.smsi-long-wrap{display:flex;justify-content:center;align-items:flex-start;}',
   '.smsi-long-slot{position:relative;overflow:hidden;background:#0B1120;contain:layout paint style;}',
   '.smsi-long-canvas{display:block;border-radius:12px;}',
   '.smsi-long-empty{color:#64748B;font-size:12.5px;text-align:center;padding:40px 20px;}',
 
-  /* 缩放条 */
   '.smsi-zoombar{display:flex;align-items:center;justify-content:center;gap:8px;',
   'padding:8px 16px;flex:0 0 auto;border-top:1px solid rgba(125,211,252,.05);',
   'background:#0B1120;}',
   '.smsi-zoom{font-size:11px;color:#7DD3FC;min-width:40px;text-align:center;',
   'font-variant-numeric:tabular-nums;}',
 
-  /* 底部操作区 */
   '.smsi-foot{display:flex;flex-direction:column;gap:8px;padding:10px 16px calc(12px + env(safe-area-inset-bottom));',
   'flex:0 0 auto;border-top:1px solid rgba(125,211,252,.06);background:#0B1120;}',
 
@@ -273,7 +263,6 @@ const OVERLAY_CSS = [
   '.smsi-optlabel{font-size:12px;color:#CBD5E1;display:flex;align-items:center;gap:7px;}',
   '.smsi-optlabel small{color:rgba(148,163,184,.7);font-size:10.5px;}',
 
-  /* 开关 */
   '.smsi-switch{position:relative;width:40px;height:23px;border-radius:12px;flex:0 0 auto;',
   'background:rgba(148,163,184,.2);border:1px solid rgba(148,163,184,.2);cursor:pointer;',
   'transition:background .18s ease,border-color .18s ease;}',
@@ -282,7 +271,6 @@ const OVERLAY_CSS = [
   '.smsi-switch.smsi-on{background:rgba(125,211,252,.25);border-color:rgba(125,211,252,.55);}',
   '.smsi-switch.smsi-on::after{transform:translateX(17px);background:#7DD3FC;}',
 
-  /* 进度条 */
   '.smsi-progress{display:none;flex-direction:column;gap:5px;}',
   '.smsi-progress.smsi-show{display:flex;}',
   '.smsi-progress-track{height:4px;border-radius:2px;background:rgba(148,163,184,.15);overflow:hidden;}',
@@ -291,7 +279,6 @@ const OVERLAY_CSS = [
   'transition:width .15s ease;}',
   '.smsi-progress-text{font-size:10.5px;color:#94A3B8;text-align:center;}',
 
-  /* 操作按钮 */
   '.smsi-actions{display:flex;gap:8px;align-items:center;}',
   '.smsi-actions .smsi-btn{flex:1;padding:12px 10px;font-size:13px;font-weight:600;border-radius:12px;}',
   '.smsi-actions .smsi-btn.smsi-hidden{display:none;}',
@@ -303,7 +290,6 @@ const OVERLAY_CSS = [
   '.smsi-btn.smsi-long{border:none;color:#0B1120;',
   'background:linear-gradient(135deg,#A78BFA,#C4B5FD);}',
 
-  /* 主题面板 */
   '.smsi-theme-panel{position:absolute;top:0;right:0;bottom:0;width:min(82%,320px);',
   'background:#0B1120;border-left:1px solid rgba(125,211,252,.12);',
   'transform:translateX(100%);transition:transform .22s ease;',
@@ -318,7 +304,6 @@ const OVERLAY_CSS = [
   '.smsi-theme-section{padding:12px 16px;}',
   '.smsi-theme-label{font-size:11.5px;color:#94A3B8;margin-bottom:8px;font-weight:600;letter-spacing:.5px;}',
 
-  /* 主题配色列表（胶囊） */
   '.smsi-theme-list{display:flex;flex-direction:column;gap:8px;}',
   '.smsi-theme-item{display:flex;align-items:center;gap:10px;padding:8px 12px;',
   'border-radius:12px;border:1px solid rgba(125,211,252,.08);',
@@ -339,7 +324,6 @@ const OVERLAY_CSS = [
 
   '.smsi-theme-name{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
 
-  /* 按键样式 */
   '.smsi-corner-row{display:flex;gap:8px;}',
   '.smsi-corner-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;',
   'border-radius:10px;border:1px solid rgba(125,211,252,.08);',
@@ -348,7 +332,11 @@ const OVERLAY_CSS = [
   '.smsi-corner-item.smsi-selected{border-color:rgba(125,211,252,.65);',
   'background:rgba(125,211,252,.14);color:#7DD3FC;}',
   '.smsi-corner-preview{width:32px;height:32px;background:rgba(125,211,252,.35);',
-  'border:1.5px solid rgba(125,211,252,.55);display:flex;align-items:center;justify-content:center;}'
+  'border:1.5px solid rgba(125,211,252,.55);display:flex;align-items:center;justify-content:center;}',
+
+  '.smsi-stepper{display:flex;align-items:center;gap:10px;}',
+  '.smsi-stepper-val{flex:1;text-align:center;font-size:13px;font-weight:700;color:#7DD3FC;',
+  'font-variant-numeric:tabular-nums;}'
 ].join('');
 
 function injectStyle() {
@@ -393,6 +381,22 @@ const OVERLAY_HTML = [
   '      <div class="smsi-theme-section">',
   '        <div class="smsi-theme-label">按键样式</div>',
   '        <div class="smsi-corner-row" data-role="corner-list"></div>',
+  '      </div>',
+  '      <div class="smsi-theme-section">',
+  '        <div class="smsi-theme-label">每页行数</div>',
+  '        <div class="smsi-stepper">',
+  '          <button class="smsi-btn smsi-icon" data-act="rows-minus" type="button">−</button>',
+  '          <span class="smsi-stepper-val" data-role="rows-val">15</span>',
+  '          <button class="smsi-btn smsi-icon" data-act="rows-plus" type="button">+</button>',
+  '        </div>',
+  '      </div>',
+  '      <div class="smsi-theme-section">',
+  '        <div class="smsi-theme-label">每行列数</div>',
+  '        <div class="smsi-stepper">',
+  '          <button class="smsi-btn smsi-icon" data-act="cols-minus" type="button">−</button>',
+  '          <span class="smsi-stepper-val" data-role="cols-val">8</span>',
+  '          <button class="smsi-btn smsi-icon" data-act="cols-plus" type="button">+</button>',
+  '        </div>',
   '      </div>',
   '    </div>',
   '  </div>',
@@ -451,7 +455,7 @@ function renderPages() {
     infoItems: view.infoItems
   };
 
-  const m = measurePage(view.rows, view.style, meta.infoItems.length);
+  const m = measurePage(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
   const w = Math.round(m.width * view.pageZoom) + 'px';
 
   const frag = document.createDocumentFragment();
@@ -564,7 +568,7 @@ function ensureLongPreview() {
     infoItems: view.infoItems
   };
 
-  const m = measurePage(view.rows, view.style, meta.infoItems.length);
+  const m = measurePage(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
   const logicalW = m.width;
   const logicalH = m.height;
   if (!logicalW || !logicalH) return;
@@ -674,7 +678,8 @@ function releaseLongSlot(slot) {
   slot.innerHTML = '';
   slot._rendered = false;
 }
-/*===================================================================
+
+/* ==================================================================
  * 6. 缩放
  * ================================================================== */
 
@@ -701,7 +706,7 @@ function updateZoomLabel() {
 }
 
 function applyPageZoom() {
-  const m = measurePage(view.rows, view.style, view.infoItems.length);
+  const m = measurePage(view.rows, view.style, view.infoItems.length, view.customRows, view.customCols);
   const w = Math.round(m.width * view.pageZoom) + 'px';
   for (let i = 0; i < view.pages.length; i++) {
     const page = view.pages[i];
@@ -823,6 +828,8 @@ function buildPayload(longOnly) {
     version: 9,
     songName: view.title,
     rows: view.rows,
+    cols: view.customCols,
+    rowsPerPage: view.customRows,
     style: view.style,
     mergeLong: longOnly ? true : view.mergeLong,
     longOnly: Boolean(longOnly),
@@ -1262,6 +1269,8 @@ function persistProgress() {
     themeKey: themeState.themeKey,
     cornerKey: themeState.cornerKey,
     isRandom: themeState.isRandom,
+    customCols: view.customCols,
+    customRows: view.customRows,
     updatedAt: Date.now()
   });
 }
@@ -1276,6 +1285,9 @@ function restoreProgress() {
   } else {
     view.selected = new Array(view.pages.length).fill(true);
   }
+
+  if (typeof saved.customCols === 'number') view.customCols = saved.customCols;
+  if (typeof saved.customRows === 'number') view.customRows = saved.customRows;
 
   restoreTheme(saved);
 
@@ -1356,7 +1368,7 @@ function rebuild() {
   if (!notes.length) return false;
 
   view.layout = buildLayout(notes, view.rows, view.tol);
-  view.pages = buildPages(view.layout, view.style);
+  view.pages = buildPages(view.layout, view.style, view.customRows, view.customCols);
   view.info = computeInfo(view.layout, view.rows, view.tol);
   view.infoItems = buildInfoItems(
     view.info, view.rows, view.bpm, view.model, view.author, view.transcriber
@@ -1384,6 +1396,11 @@ function switchKeyCount(rows) {
   renderPages();
   updateSelectUI();
   if (getActiveTab() === 'long') ensureLongPreview();
+}
+
+function updateStepperUI() {
+  if (view.rowsValEl) view.rowsValEl.textContent = String(view.customRows);
+  if (view.colsValEl) view.colsValEl.textContent = String(view.customCols);
 }
 
 /* ==================================================================
@@ -1460,6 +1477,34 @@ function onOverlayClick(ev) {
     case 'random':
       applyRandom();
       break;
+    case 'rows-minus':
+      view.customRows = Math.max(6, view.customRows - 1);
+      updateStepperUI();
+      rebuild();
+      renderPages();
+      updateSelectUI();
+      break;
+    case 'rows-plus':
+      view.customRows = Math.min(20, view.customRows + 1);
+      updateStepperUI();
+      rebuild();
+      renderPages();
+      updateSelectUI();
+      break;
+    case 'cols-minus':
+      view.customCols = Math.max(3, view.customCols - 1);
+      updateStepperUI();
+      rebuild();
+      renderPages();
+      updateSelectUI();
+      break;
+    case 'cols-plus':
+      view.customCols = Math.min(12, view.customCols + 1);
+      updateStepperUI();
+      rebuild();
+      renderPages();
+      updateSelectUI();
+      break;
     case 'save':
       saveImages(false, closeOverlay);
       break;
@@ -1511,8 +1556,11 @@ function ensureOverlay() {
   view.themeList = overlay.querySelector('[data-role="theme-list"]');
   view.cornerList = overlay.querySelector('[data-role="corner-list"]');
   view.themeCloseBtn = overlay.querySelector('[data-act="theme-close"]');
+  view.rowsValEl = overlay.querySelector('[data-role="rows-val"]');
+  view.colsValEl = overlay.querySelector('[data-role="cols-val"]');
 
   buildThemeLists();
+  updateStepperUI();
 
   blockScrollChaining(overlay);
   blockScrollChaining(view.bodyPages);
@@ -1567,6 +1615,8 @@ export function openSheetImagePreview(sheet, opts) {
   view.busy = false;
   view.pageZoom = DEFAULT_ZOOM;
   view.longZoom = DEFAULT_ZOOM;
+  view.customCols = 8;
+  view.customRows = 15;
 
   ensureOverlay();
 
@@ -1577,6 +1627,7 @@ export function openSheetImagePreview(sheet, opts) {
   }
 
   restoreProgress();
+  updateStepperUI();
   switchTab('pages');
   renderPages();
   updateSelectUI();

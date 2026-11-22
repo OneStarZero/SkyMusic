@@ -24,6 +24,7 @@ object SheetImageExporter {
     private const val LONG_SUFFIX = "-Full"
     private const val FALLBACK_BG = "#0B1120"
     private const val SIZE_MULT = 5f
+    private const val MAX_LONG_HEIGHT = 100000
 
     fun export(
         baseDir: File,
@@ -34,7 +35,9 @@ object SheetImageExporter {
             val root = JSONObject(payloadJson)
             val songName = root.optString("songName", "未命名乐谱").ifBlank { "未命名乐谱" }
             val rows = root.optInt("rows", 15).coerceIn(1, 15)
-            val st = Style.from(root.optJSONObject("style"))
+            val cols = root.optInt("cols", 8).coerceIn(3, 12)
+            val rowsPerPage = root.optInt("rowsPerPage", 15).coerceIn(6, 20)
+            val st = Style.from(root.optJSONObject("style")).copy(cols = cols, rowsPerPage = rowsPerPage)
             val mergeLong = root.optBoolean("mergeLong", false)
             val longOnly = root.optBoolean("longOnly", false)
             val totalPages = root.optInt("totalPages", 0)
@@ -95,12 +98,13 @@ object SheetImageExporter {
                 if ((mergeLong || longOnly) && rendered.isNotEmpty()) {
                     onProgress?.invoke("正在拼接长图…", 85)
                     val longBitmap = mergePages(rendered, st)
-                    if (longBitmap != null) {
-                        val longName = "$safeName$LONG_SUFFIX.png"
-                        writeBitmap(longBitmap, File(rootDir, longName))
-                        files.add(longName)
-                        longBitmap.recycle()
+                    if (longBitmap == null) {
+                        return fail("长图过高（超过 ${MAX_LONG_HEIGHT}px），请减少页数或行数")
                     }
+                    val longName = "$safeName$LONG_SUFFIX.png"
+                    writeBitmap(longBitmap, File(rootDir, longName))
+                    files.add(longName)
+                    longBitmap.recycle()
                 }
                 onProgress?.invoke("完成", 100)
             } finally {
@@ -125,7 +129,7 @@ object SheetImageExporter {
     private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
         if (pages.isEmpty()) return null
 
-        val gap = (st.pad * 0.6f).roundToInt().coerceAtLeast(8)
+        val gap = (st.pad * 0.6f * SIZE_MULT).roundToInt().coerceAtLeast(8)
         var maxW = 0
         var totalH = 0L
         for (bmp in pages) {
@@ -134,6 +138,7 @@ object SheetImageExporter {
         }
         totalH += gap.toLong() * (pages.size - 1)
         if (maxW <= 0 || totalH <= 0) return null
+        if (totalH > MAX_LONG_HEIGHT) return null
 
         val outW = maxW
         val outH = totalH.toInt()
@@ -278,13 +283,31 @@ object SheetImageExporter {
     }
 
     private fun measure(rows: Int, st: Style, infoCount: Int): Size {
-        val cols = st.cols.coerceAtLeast(1)
-        val cell = st.cell
-        val gap = st.cellGap
-        val gridW = cols * cell + (cols - 1) * gap
-        val gridH = rows * cell + (rows - 1) * gap
-        val w = ((st.pad * 2 + gridW) * SIZE_MULT).roundToInt()
-        val h = ((st.pad * 2 + gridH + 120 + infoCount * 22) * SIZE_MULT).roundToInt()
+        val gCols = if (rows == 9) 3 else 5
+        val gRows = 3
+        val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
+        val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
+        val timeH = (st.timeSize * 2.2f).roundToInt()
+
+        val headerH = (st.titleSize * 1.4f + 10 + st.metaSize * 1.5f + 26).roundToInt()
+
+        var infoH = 0
+        if (st.showInfoPanel && infoCount > 0) {
+            val infoRows = (infoCount + 1) / 2
+            val infoRowH = (st.infoSize * 2.0f).roundToInt()
+            infoH = infoRows * infoRowH + 28
+        }
+
+        val footerH = (st.watermarkSize * 2.6f).roundToInt()
+
+        val cc = st.cols.coerceAtLeast(1)
+        val rpp = st.rowsPerPage.coerceAtLeast(1)
+
+        val bodyW = cc * gridW + (cc - 1) * st.gridGapX
+        val bodyH = rpp * (gridH + timeH) + (rpp - 1) * st.gridGapY
+
+        val w = ((st.pad * 2 + bodyW) * SIZE_MULT).roundToInt()
+        val h = ((st.pad * 2 + headerH + infoH + bodyH + footerH) * SIZE_MULT).roundToInt()
         return Size(w, h)
     }
 
@@ -338,11 +361,40 @@ object SheetImageExporter {
         val pageY = if (showTitle) st.pad + titleSize + st.metaSize + 8f else st.pad + st.metaSize
         canvas.drawText(pageText, logicalW - st.pad, pageY, pagePaint)
 
-        val gridTop = pageY + 20f
-        drawKeyGrid(canvas, page, rows, st, st.pad.toFloat(), gridTop)
+        val gCols = if (rows == 9) 3 else 5
+        val gRows = 3
+        val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
+        val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
+        val timeH = st.timeSize * 2.2f
+
+        val bodyTop = pageY + 26f
+        val bodyLeft = st.pad.toFloat()
+
+        val cc = st.cols.coerceAtLeast(1)
+        val rpp = st.rowsPerPage.coerceAtLeast(1)
+
+        for (idx in page.columns.indices) {
+            val col = page.columns[idx]
+            val cx = idx % cc
+            val cy = idx / cc
+            if (cy >= rpp) break
+
+            val cellLeft = bodyLeft + cx * (gridW + st.gridGapX)
+            val cellTop = bodyTop + cy * (gridH + timeH + st.gridGapY)
+
+            drawMiniGrid(canvas, col, rows, st, cellLeft, cellTop, gCols, gRows)
+
+            val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.timeColor, st.timeAlpha)
+                textSize = st.timeSize
+                textAlign = Paint.Align.CENTER
+            }
+            canvas.drawText(formatMs(col.t), cellLeft + gridW / 2f, cellTop + gridH + timeH * 0.8f, timePaint)
+        }
 
         if (showInfo) {
-            drawInfoPanel(canvas, infoItems, st, logicalW, gridTop + rows * (st.cell + st.cellGap) + 20f)
+            val infoTop = bodyTop + rpp * (gridH + timeH) + (rpp - 1) * st.gridGapY + 20f
+            drawInfoPanel(canvas, infoItems, st, logicalW, infoTop)
         }
 
         if (showWatermark && st.showWatermark) {
@@ -353,8 +405,10 @@ object SheetImageExporter {
         return bmp
     }
 
-    private fun drawKeyGrid(canvas: Canvas, page: PageData, rows: Int, st: Style, left: Float, top: Float) {
-        val cols = st.cols.coerceAtLeast(1)
+    private fun drawMiniGrid(
+        canvas: Canvas, col: ColumnData, rows: Int, st: Style,
+        left: Float, top: Float, gCols: Int, gRows: Int
+    ) {
         val cell = st.cell
         val gap = st.cellGap
         val radius = st.gridRadius.toFloat()
@@ -372,47 +426,52 @@ object SheetImageExporter {
             color = argb(st.noteFillAlt, 1f)
         }
 
-        for (r in 0 until rows) {
-            for (c in 0 until cols) {
+        for (r in 0 until gRows) {
+            for (c in 0 until gCols) {
                 val x = left + c * (cell + gap)
                 val y = top + r * (cell + gap)
                 canvas.drawRoundRect(RectF(x, y, x + cell, y + cell), radius, radius, cellPaint)
             }
         }
 
-        for (col in page.columns) {
-            for (rowIdx in col.rows) {
-                if (rowIdx < 0 || rowIdx >= rows) continue
-                val c = rowIdx % cols
-                val r = rowIdx / cols
-                if (r >= rows) continue
-                val x = left + c * (cell + gap)
-                val y = top + r * (cell + gap)
-                val rect = RectF(x, y, x + cell, y + cell)
-                val paint = if (rowIdx % 2 == 0) activePaint else activeAltPaint
+        for (rowIdx in col.rows) {
+            if (rowIdx < 0 || rowIdx >= rows) continue
+            val c = rowIdx % gCols
+            val r = rowIdx / gCols
+            if (r >= gRows) continue
+            val x = left + c * (cell + gap)
+            val y = top + r * (cell + gap)
+            val rect = RectF(x, y, x + cell, y + cell)
+            val paint = if (rowIdx % 2 == 0) activePaint else activeAltPaint
 
-                if (st.noteShape == "skystudio") {
-                    canvas.drawRoundRect(rect, radius, radius, paint)
-                    val diamondPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        style = Paint.Style.FILL
-                        color = Color.argb(217, 11, 17, 32)
-                    }
-                    val cx = x + cell / 2f
-                    val cy = y + cell / 2f
-                    val d = cell * 0.28f
-                    val path = Path().apply {
-                        moveTo(cx, cy - d)
-                        lineTo(cx + d, cy)
-                        lineTo(cx, cy + d)
-                        lineTo(cx - d, cy)
-                        close()
-                    }
-                    canvas.drawPath(path, diamondPaint)
-                } else {
-                    canvas.drawRoundRect(rect, radius, radius, paint)
+            if (st.noteShape == "skystudio") {
+                canvas.drawRoundRect(rect, radius, radius, paint)
+                val diamondPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    color = Color.argb(217, 11, 17, 32)
                 }
+                val cx = x + cell / 2f
+                val cy = y + cell / 2f
+                val d = cell * 0.28f
+                val path = Path().apply {
+                    moveTo(cx, cy - d)
+                    lineTo(cx + d, cy)
+                    lineTo(cx, cy + d)
+                    lineTo(cx - d, cy)
+                    close()
+                }
+                canvas.drawPath(path, diamondPaint)
+            } else {
+                canvas.drawRoundRect(rect, radius, radius, paint)
             }
         }
+    }
+
+    private fun formatMs(ms: Long): String {
+        val t = max(0, ms)
+        val m = t / 60000
+        val s = (t % 60000) / 1000
+        return "$m:" + (if (s < 10) "0$s" else "$s")
     }
 
     private fun drawInfoPanel(canvas: Canvas, items: List<Pair<String, String>>, st: Style, logicalW: Float, top: Float) {
@@ -526,6 +585,23 @@ object SheetImageExporter {
         val showStars: Boolean, val showWatermark: Boolean, val showInfoPanel: Boolean, val showTime: Boolean,
         val decoType: String, val bgPattern: String, val noteShape: String, val titleAlign: String
     ) {
+        fun copy(cols: Int = this.cols, rowsPerPage: Int = this.rowsPerPage): Style {
+            return Style(
+                bg = bg, bgGlow = bgGlow, gridLine = gridLine, gridLineAlpha = gridLineAlpha,
+                noteFill = noteFill, noteFillAlt = noteFillAlt, noteStroke = noteStroke, noteStrokeAlpha = noteStrokeAlpha,
+                titleColor = titleColor, metaColor = metaColor, timeColor = timeColor, timeAlpha = timeAlpha,
+                watermarkColor = watermarkColor, watermarkAlpha = watermarkAlpha, logoColor = logoColor,
+                infoLabelColor = infoLabelColor, infoValueColor = infoValueColor,
+                dividerColor = dividerColor, dividerAlpha = dividerAlpha,
+                cell = cell, cellGap = cellGap, gridRadius = gridRadius, cols = cols, rowsPerPage = rowsPerPage,
+                gridGapX = gridGapX, gridGapY = gridGapY, pad = pad,
+                titleSize = titleSize, metaSize = metaSize, timeSize = timeSize,
+                watermarkSize = watermarkSize, logoSize = logoSize, infoSize = infoSize,
+                showStars = showStars, showWatermark = showWatermark, showInfoPanel = showInfoPanel, showTime = showTime,
+                decoType = decoType, bgPattern = bgPattern, noteShape = noteShape, titleAlign = titleAlign
+            )
+        }
+
         companion object {
             fun from(o: JSONObject?): Style {
                 if (o == null) return defaults()
@@ -552,8 +628,8 @@ object SheetImageExporter {
                     cell = o.optInt("cell", 22),
                     cellGap = o.optInt("cellGap", 4),
                     gridRadius = o.optInt("gridRadius", 5),
-                    cols = o.optInt("cols", 5),
-                    rowsPerPage = o.optInt("rowsPerPage", 6),
+                    cols = o.optInt("cols", 8),
+                    rowsPerPage = o.optInt("rowsPerPage", 15),
                     gridGapX = o.optInt("gridGapX", 26),
                     gridGapY = o.optInt("gridGapY", 30),
                     pad = o.optInt("pad", 40),
