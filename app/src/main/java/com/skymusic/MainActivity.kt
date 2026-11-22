@@ -20,6 +20,8 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.skymusic.log.LogBridge
+import com.skymusic.log.SkyLog
 import com.skymusic.preview.PreviewBridge
 import org.json.JSONObject
 import java.io.File
@@ -38,6 +40,7 @@ class MainActivity : AppCompatActivity() {
             val midiPath = result.data?.getStringExtra("midiPath")
             val fileName = result.data?.getStringExtra("fileName")
             if (midiPath != null && fileName != null) {
+                SkyLog.i("MIDI 选择: $fileName")
                 val safeName = JSONObject.quote(fileName)
                 val safePath = JSONObject.quote(midiPath)
                 webViewInstance?.evaluateJavascript("if (window.onMidiPathReceived) window.onMidiPathReceived($safePath,$safeName);", null)
@@ -51,6 +54,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         density = resources.displayMetrics.density
+
+        SkyLog.init()
+        SkyLog.i("MainActivity onCreate, SDK=${Build.VERSION.SDK_INT}")
 
         requestLegacyStorageIfNeeded()
 
@@ -78,10 +84,33 @@ class MainActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    SkyLog.i("WebView 加载完成: $url")
                     pushBridgeStateToWeb()
                 }
+
+                override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                    super.onReceivedError(view, request, error)
+                    SkyLog.e("WebView 资源错误: ${request?.url} - ${error?.description}")
+                }
             }
+
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
+                    if (msg != null) {
+                        val level = when (msg.messageLevel()) {
+                            ConsoleMessage.MessageLevel.ERROR -> SkyLog.Level.ERROR
+                            ConsoleMessage.MessageLevel.WARNING -> SkyLog.Level.WARN
+                            ConsoleMessage.MessageLevel.DEBUG -> SkyLog.Level.DEBUG
+                            else -> SkyLog.Level.INFO
+                        }
+                        SkyLog.log(level, "[JS] ${msg.message()} (${msg.sourceId()}:${msg.lineNumber()})")
+                    }
+                    return true
+                }
+            }
+
             addJavascriptInterface(WebAppInterface(), "AndroidBridge")
+            addJavascriptInterface(LogBridge(), "SkyLogBridge")
             loadUrl("file:///android_asset/index.html")
         }
 
@@ -179,6 +208,7 @@ class MainActivity : AppCompatActivity() {
 
         // 注册试听状态回调
         PreviewBridge.setOnStateChange { state, progressMs, totalMs ->
+            SkyLog.d("试听状态: $state, $progressMs/$totalMs")
             runOnUiThread {
                 webViewInstance?.evaluateJavascript(
                     "if (window.onPreviewState) window.onPreviewState('$state', $progressMs, $totalMs);",
@@ -191,21 +221,25 @@ class MainActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         density = resources.displayMetrics.density
+        SkyLog.i("配置变化: orientation=${newConfig.orientation}")
         pushBridgeStateToWeb()
     }
 
     override fun onResume() {
         super.onResume()
+        SkyLog.i("onResume")
         refreshPermissionIndicators()
         pushBridgeStateToWeb()
     }
 
     override fun onDestroy() {
+        SkyLog.i("onDestroy")
         PreviewBridge.stop()
         PreviewBridge.setOnStateChange(null)
         webViewInstance?.apply {
             stopLoading()
             removeJavascriptInterface("AndroidBridge")
+            removeJavascriptInterface("SkyLogBridge")
             destroy()
         }
         webViewInstance = null
@@ -222,6 +256,7 @@ class MainActivity : AppCompatActivity() {
                 ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
             if (missing.isNotEmpty()) {
+                SkyLog.w("请求存储权限: $missing")
                 storagePermissionLauncher.launch(missing.toTypedArray())
             }
         }
@@ -334,11 +369,13 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun saveSheetImage(payloadJson: String): String {
+            SkyLog.i("开始生成谱面图片")
             return try {
                 val baseDir = File("/storage/emulated/0/SkyMusic-OneStar/")
                 if (!baseDir.exists()) baseDir.mkdirs()
 
-                SheetImageExporter.export(baseDir, payloadJson) { text, percent ->
+                val result = SheetImageExporter.export(baseDir, payloadJson) { text, percent ->
+                    SkyLog.d("导出进度: $text ($percent%)")
                     runOnUiThread {
                         val safeText = JSONObject.quote(text)
                         webViewInstance?.evaluateJavascript(
@@ -346,28 +383,46 @@ class MainActivity : AppCompatActivity() {
                             null
                         )
                     }
-                }.toString()
+                }
+                SkyLog.i("导出结果: $result")
+                result.toString()
             } catch (e: Throwable) {
+                SkyLog.e("导出失败", e)
                 JSONObject().put("ok", false).put("error", e.message ?: "未知错误").toString()
             }
         }
 
-                /* ==================== 试听（转发给 PreviewBridge） ==================== */
+        /* ==================== 试听（转发给 PreviewBridge） ==================== */
 
         @JavascriptInterface
-        fun playPreview(payloadJson: String): Boolean = PreviewBridge.play(payloadJson)
+        fun playPreview(payloadJson: String): Boolean {
+            SkyLog.i("试听请求: ${payloadJson.take(120)}...")
+            return PreviewBridge.play(payloadJson)
+        }
 
         @JavascriptInterface
-        fun pausePreview() = PreviewBridge.pause()
+        fun pausePreview() {
+            SkyLog.d("试听暂停")
+            PreviewBridge.pause()
+        }
 
         @JavascriptInterface
-        fun resumePreview() = PreviewBridge.resume()
+        fun resumePreview() {
+            SkyLog.d("试听恢复")
+            PreviewBridge.resume()
+        }
 
         @JavascriptInterface
-        fun stopPreview() = PreviewBridge.stop()
+        fun stopPreview() {
+            SkyLog.d("试听停止")
+            PreviewBridge.stop()
+        }
 
         @JavascriptInterface
-        fun seekPreview(ms: Long) = PreviewBridge.seek(ms)
+        fun seekPreview(ms: Long) {
+            SkyLog.d("试听跳转: ${ms}ms")
+            PreviewBridge.seek(ms)
+        }
 
         @JavascriptInterface
         fun isPreviewPlaying(): Boolean = PreviewBridge.isPlaying()
@@ -399,8 +454,10 @@ class MainActivity : AppCompatActivity() {
                 putExtra("song_bpm", payload.optString("bpm", "0"))
             }
             startFloatingServiceSafe(intent)
+            SkyLog.i("发送至悬浮窗: ${payload.optString("name")}, ${notesList.size} 音符")
             Toast.makeText(this, "🚀 已发送至悬浮窗", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
+            SkyLog.e("发送失败", e)
             Toast.makeText(this, "❌ 发送失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
@@ -424,8 +481,10 @@ class MainActivity : AppCompatActivity() {
             }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
 
             File(folder, fileName).writeText(fullJson, Charsets.UTF_8)
+            SkyLog.i("保存本地: $fileName")
             Toast.makeText(this, "✅ 已保存", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
+            SkyLog.e("保存失败", e)
             Toast.makeText(this, "❌ 保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }

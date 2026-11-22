@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
+import com.skymusic.log.SkyLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -24,6 +25,7 @@ object SheetImageExporter {
     private const val WATERMARK_TEXT = "Bilibili@_OneStar"
     private const val APP_NAME = "SkyMusic"
     private const val LONG_SUFFIX = "-Full"
+    private const val FALLBACK_BG = "#0B1120"
 
     fun export(
         baseDir: File,
@@ -41,7 +43,13 @@ object SheetImageExporter {
             val infoItems = parseInfoItems(root.optJSONArray("infoItems"))
             val pagesArr = root.optJSONArray("pages")
 
+            SkyLog.i("导出参数: bg=${st.bg}, noteFill=${st.noteFill}, noteFillAlt=${st.noteFillAlt}, " +
+                    "gridLine=${st.gridLine}, cell=${st.cell}, pad=${st.pad}, gridRadius=${st.gridRadius}, " +
+                    "cols=${st.cols}, rowsPerPage=${st.rowsPerPage}, noteShape=${st.noteShape}, " +
+                    "bgPattern=${st.bgPattern}, decoType=${st.decoType}, longOnly=$longOnly, mergeLong=$mergeLong")
+
             if (pagesArr == null || pagesArr.length() == 0) {
+                SkyLog.w("没有选中任何页面")
                 return fail("没有选中任何页面")
             }
 
@@ -49,7 +57,6 @@ object SheetImageExporter {
             val rootDir = File(baseDir, safeName)
             if (!rootDir.exists() && !rootDir.mkdirs()) return fail("无法创建目录")
 
-            // 只有「分页模式」才创建分页目录
             val pageDir = if (longOnly) null else File(rootDir, "分页")
             if (pageDir != null && !pageDir.exists() && !pageDir.mkdirs()) return fail("无法创建分页目录")
 
@@ -65,6 +72,7 @@ object SheetImageExporter {
 
             val size = measure(rows, st, infoItems.size)
             val scale = computeScale(size.width, size.height)
+            SkyLog.d("画布尺寸: ${size.width}x${size.height}, scale=$scale")
 
             val rendered = ArrayList<Bitmap>(parsedPages.size)
             try {
@@ -77,7 +85,6 @@ object SheetImageExporter {
                         infoItems, size, scale
                     ) ?: return fail("绘制失败")
 
-                    // 只有「分页模式」才写分页 PNG
                     if (!longOnly && pageDir != null) {
                         val fileName = if (pageIndex == 0) "$safeName.png" else "$safeName-${pageIndex + 1}.png"
                         writeBitmap(bitmap, File(pageDir, fileName))
@@ -107,8 +114,10 @@ object SheetImageExporter {
                 for (bmp in rendered) { if (!bmp.isRecycled) bmp.recycle() }
             }
 
+            SkyLog.i("导出完成: ${files.size} 个文件 -> ${rootDir.absolutePath}")
             return JSONObject().put("ok", true).put("dir", rootDir.absolutePath).put("files", JSONArray(files))
         } catch (t: Throwable) {
+            SkyLog.e("导出异常", t)
             return fail(t.message ?: "未知错误")
         }
     }
@@ -197,7 +206,7 @@ object SheetImageExporter {
         return if (s.isEmpty() || s == "." || s == "..") "未命名乐谱" else s
     }
 
-    // ============================ 颜色解析（支持 hsl/rgb/hex） ============================
+    // ============================ 颜色解析（宽松匹配 + 兜底） ============================
 
     private fun argb(hex: String, alpha: Float): Int {
         val c = parseColorSafe(hex)
@@ -205,40 +214,37 @@ object SheetImageExporter {
         return Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
     }
 
-    /** 支持 #RRGGBB / #AARRGGBB / hsl(h,s%,l%) / rgb(r,g,b) */
     private fun parseColorSafe(input: String): Int {
         val s = input.trim()
-        if (s.isEmpty()) return Color.WHITE
+        if (s.isEmpty()) return Color.parseColor(FALLBACK_BG)
 
-        // hsl(h, s%, l%)
         if (s.startsWith("hsl", ignoreCase = true)) {
-            val m = Regex("""hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)""").find(s)
-            if (m != null) {
-                val h = m.groupValues[1].toFloat() / 360f
-                val sat = m.groupValues[2].toFloat() / 100f
-                val light = m.groupValues[3].toFloat() / 100f
-                return hslToColor(h, sat, light)
+            val nums = Regex("""[\d.]+""").findAll(s).map { it.value.toFloat() }.toList()
+            if (nums.size >= 3) {
+                return hslToColor(nums[0] / 360f, nums[1] / 100f, nums[2] / 100f)
             }
-            return Color.WHITE
+            SkyLog.w("hsl 解析失败: $s")
+            return Color.parseColor(FALLBACK_BG)
         }
 
-        // rgb(r, g, b) / rgba(r, g, b, a)
         if (s.startsWith("rgb", ignoreCase = true)) {
-            val m = Regex("""rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)""").find(s)
-            if (m != null) {
-                val r = m.groupValues[1].toInt().coerceIn(0, 255)
-                val g = m.groupValues[2].toInt().coerceIn(0, 255)
-                val b = m.groupValues[3].toInt().coerceIn(0, 255)
-                return Color.rgb(r, g, b)
+            val nums = Regex("""[\d.]+""").findAll(s).map { it.value.toInt() }.toList()
+            if (nums.size >= 3) {
+                return Color.rgb(
+                    nums[0].coerceIn(0, 255),
+                    nums[1].coerceIn(0, 255),
+                    nums[2].coerceIn(0, 255)
+                )
             }
-            return Color.WHITE
+            SkyLog.w("rgb 解析失败: $s")
+            return Color.parseColor(FALLBACK_BG)
         }
 
-        // #RRGGBB / #AARRGGBB
         return try {
             Color.parseColor(s)
         } catch (_: Exception) {
-            Color.WHITE
+            SkyLog.w("颜色解析失败: $s，使用兜底 $FALLBACK_BG")
+            Color.parseColor(FALLBACK_BG)
         }
     }
 
@@ -553,7 +559,7 @@ object SheetImageExporter {
             fun from(o: JSONObject?): Style {
                 if (o == null) return defaults()
                 return Style(
-                    bg = o.optString("bg", "#0B1120"),
+                    bg = o.optString("bg", FALLBACK_BG),
                     bgGlow = o.optString("bgGlow", "#1E1B4B"),
                     gridLine = o.optString("gridLine", "#7DD3FC"),
                     gridLineAlpha = o.optDouble("gridLineAlpha", 0.22).toFloat(),
