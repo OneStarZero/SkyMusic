@@ -1,6 +1,5 @@
 /**
  * SkyMusic · App 端原生试听控制
- * 依赖：window.AndroidBridge（MainActivity 注入）
  */
 
 let currentState = 'idle';
@@ -11,15 +10,6 @@ function getBridge() {
   return window.AndroidBridge || null;
 }
 
-/** 写日志到原生 */
-function logToNative(level, message) {
-  try {
-    if (window.SkyLogBridge && typeof window.SkyLogBridge.log === 'function') {
-      window.SkyLogBridge.log(level, message);
-    }
-  } catch (_) {}
-}
-
 export function isPreviewSupported() {
   const bridge = getBridge();
   return !!(bridge && typeof bridge.playPreview === 'function');
@@ -28,11 +18,9 @@ export function isPreviewSupported() {
 export function playPreview(notes, totalMs) {
   const bridge = getBridge();
   if (!bridge || typeof bridge.playPreview !== 'function') {
-    logToNative('WARN', 'playPreview: 不支持原生试听');
     return { ok: false, error: '当前环境不支持原生试听' };
   }
   if (!notes || !notes.length) {
-    logToNative('WARN', 'playPreview: 没有音符');
     return { ok: false, error: '没有可播放的音符' };
   }
 
@@ -50,10 +38,8 @@ export function playPreview(notes, totalMs) {
 
   try {
     const ok = bridge.playPreview(payload);
-    logToNative('INFO', 'playPreview: ' + notes.length + ' 音符, ' + totalMs + 'ms, ok=' + ok);
     return { ok: !!ok };
   } catch (err) {
-    logToNative('ERROR', 'playPreview 异常: ' + (err && err.message ? err.message : err));
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }
 }
@@ -73,7 +59,6 @@ export function stopPreview() {
   if (bridge && typeof bridge.stopPreview === 'function') bridge.stopPreview();
 }
 
-/** 跳转到指定毫秒 */
 export function seekPreview(ms) {
   const bridge = getBridge();
   if (bridge && typeof bridge.seekPreview === 'function') {
@@ -95,13 +80,10 @@ export function formatTime(ms) {
   return m + ':' + (s < 10 ? '0' + s : s);
 }
 
-/** 原生回调入口 */
 window.onPreviewState = function (state, progressMs, totalMs) {
   currentState = state;
   currentProgress = progressMs;
   currentTotal = totalMs;
-
-  logToNative('DEBUG', 'onPreviewState: ' + state + ' ' + progressMs + '/' + totalMs);
 
   window.dispatchEvent(new CustomEvent('skymusic:preview-state', {
     detail: { state: state, progressMs: progressMs, totalMs: totalMs }

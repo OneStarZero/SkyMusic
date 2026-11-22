@@ -7,14 +7,12 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
-import com.skymusic.log.SkyLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Random
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 object SheetImageExporter {
@@ -25,7 +23,7 @@ object SheetImageExporter {
     private const val APP_NAME = "SkyMusic"
     private const val LONG_SUFFIX = "-Full"
     private const val FALLBACK_BG = "#0B1120"
-    private const val TARGET_SCALE = 3f
+    private const val SIZE_MULT = 5f
 
     fun export(
         baseDir: File,
@@ -43,14 +41,7 @@ object SheetImageExporter {
             val infoItems = parseInfoItems(root.optJSONArray("infoItems"))
             val pagesArr = root.optJSONArray("pages")
 
-            SkyLog.i("导出参数: bg=${st.bg}, noteFill=${st.noteFill}, cell=${st.cell}, pad=${st.pad}, " +
-                    "gridRadius=${st.gridRadius}, cols=${st.cols}, noteShape=${st.noteShape}, " +
-                    "longOnly=$longOnly, mergeLong=$mergeLong")
-
-            if (pagesArr == null || pagesArr.length() == 0) {
-                SkyLog.w("没有选中任何页面")
-                return fail("没有选中任何页面")
-            }
+            if (pagesArr == null || pagesArr.length() == 0) return fail("没有选中任何页面")
 
             val safeName = sanitize(songName)
             val rootDir = File(baseDir, safeName)
@@ -66,12 +57,10 @@ object SheetImageExporter {
             val parsedPages = ArrayList<PageData>(total)
             for (i in 0 until total) {
                 val pageObj = pagesArr.optJSONObject(i) ?: continue
-                parsedPages.add(parsePage(pageObj, rows))
+                parsedPages.add(parsePage(pageObj))
             }
 
             val size = measure(rows, st, infoItems.size)
-            val scale = computeScale(size.width, size.height)
-            SkyLog.d("画布尺寸: ${size.width}x${size.height}, scale=$scale")
 
             val rendered = ArrayList<Bitmap>(parsedPages.size)
             try {
@@ -82,15 +71,12 @@ object SheetImageExporter {
                     val isFirst = (i == 0)
                     val isLongMode = (longOnly || mergeLong)
 
-                    // 长图模式：所有页都显示标题+页码+底部水印，只有第 1 页显示信息面板
-                    val showTitle = true
-                    val showInfo = if (isLongMode) isFirst else true
-                    val showWatermark = true
-
-                    val bitmap = drawPageFast(
+                    val bitmap = drawPage(
                         parsedPages[i], songName, rows, st, pageIndex, pageCount,
-                        infoItems, size, scale,
-                        showTitle, showInfo, showWatermark
+                        infoItems, size,
+                        showTitle = true,
+                        showInfo = if (isLongMode) isFirst else true,
+                        showWatermark = true
                     ) ?: return fail("绘制失败")
 
                     if (!longOnly && pageDir != null) {
@@ -103,7 +89,6 @@ object SheetImageExporter {
                         rendered.add(bitmap)
                     } else {
                         bitmap.recycle()
-                        System.gc()
                     }
                 }
 
@@ -122,10 +107,8 @@ object SheetImageExporter {
                 for (bmp in rendered) { if (!bmp.isRecycled) bmp.recycle() }
             }
 
-            SkyLog.i("导出完成: ${files.size} 个文件 -> ${rootDir.absolutePath}")
             return JSONObject().put("ok", true).put("dir", rootDir.absolutePath).put("files", JSONArray(files))
         } catch (t: Throwable) {
-            SkyLog.e("导出异常", t)
             return fail(t.message ?: "未知错误")
         }
     }
@@ -139,11 +122,10 @@ object SheetImageExporter {
         }
     }
 
-    // ============================ 长图拼接（不降级） ============================
-
     private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
         if (pages.isEmpty()) return null
-        val gap = (st.pad * 0.6f * TARGET_SCALE).roundToInt().coerceAtLeast(8)
+
+        val gap = (st.pad * 0.6f).roundToInt().coerceAtLeast(8)
         var maxW = 0
         var totalH = 0L
         for (bmp in pages) {
@@ -151,7 +133,6 @@ object SheetImageExporter {
             totalH += bmp.height.toLong()
         }
         totalH += gap.toLong() * (pages.size - 1)
-
         if (maxW <= 0 || totalH <= 0) return null
 
         val outW = maxW
@@ -169,7 +150,6 @@ object SheetImageExporter {
             y += bmp.height + gap
         }
 
-        // 商业级斜向水印（铺满整张长图）
         drawTiledWatermark(canvas, outW, outH, st)
 
         return longBitmap
@@ -178,20 +158,19 @@ object SheetImageExporter {
     private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.watermarkColor, 0.035f)
-            textSize = 36f * TARGET_SCALE
+            textSize = 36f * SIZE_MULT
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
         }
-        val text = WATERMARK_TEXT
-        val stepX = 380f * TARGET_SCALE
-        val stepY = 260f * TARGET_SCALE
-        var y = 80f * TARGET_SCALE
+        val stepX = 380f * SIZE_MULT
+        val stepY = 260f * SIZE_MULT
+        var y = 80f * SIZE_MULT
         while (y < h) {
-            var x = 80f * TARGET_SCALE
+            var x = 80f * SIZE_MULT
             while (x < w) {
                 canvas.save()
                 canvas.rotate(-30f, x, y)
-                canvas.drawText(text, x, y, paint)
+                canvas.drawText(WATERMARK_TEXT, x, y, paint)
                 canvas.restore()
                 x += stepX
             }
@@ -199,9 +178,7 @@ object SheetImageExporter {
         }
     }
 
-    // ============================ 解析 ============================
-
-    private fun parsePage(obj: JSONObject, rows: Int): PageData {
+    private fun parsePage(obj: JSONObject): PageData {
         val columns = ArrayList<ColumnData>()
         val arr = obj.optJSONArray("columns") ?: JSONArray()
         for (i in 0 until arr.length()) {
@@ -236,8 +213,6 @@ object SheetImageExporter {
         return if (s.isEmpty() || s == "." || s == "..") "未命名乐谱" else s
     }
 
-    // ============================ 颜色解析 ============================
-
     private fun argb(hex: String, alpha: Float): Int {
         val c = parseColorSafe(hex)
         val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
@@ -250,10 +225,7 @@ object SheetImageExporter {
 
         if (s.startsWith("hsl", ignoreCase = true)) {
             val nums = Regex("""[\d.]+""").findAll(s).map { it.value.toFloat() }.toList()
-            if (nums.size >= 3) {
-                return hslToColor(nums[0] / 360f, nums[1] / 100f, nums[2] / 100f)
-            }
-            SkyLog.w("hsl 解析失败: $s")
+            if (nums.size >= 3) return hslToColor(nums[0] / 360f, nums[1] / 100f, nums[2] / 100f)
             return Color.parseColor(FALLBACK_BG)
         }
 
@@ -266,14 +238,12 @@ object SheetImageExporter {
                     nums[2].coerceIn(0, 255)
                 )
             }
-            SkyLog.w("rgb 解析失败: $s")
             return Color.parseColor(FALLBACK_BG)
         }
 
         return try {
             Color.parseColor(s)
         } catch (_: Exception) {
-            SkyLog.w("颜色解析失败: $s，使用兜底 $FALLBACK_BG")
             Color.parseColor(FALLBACK_BG)
         }
     }
@@ -307,47 +277,40 @@ object SheetImageExporter {
         }
     }
 
-    // ============================ 尺寸 ============================
-
-    private fun computeScale(w: Int, h: Int): Float {
-        // 固定 3 倍分辨率，不降级
-        return TARGET_SCALE
-    }
-
     private fun measure(rows: Int, st: Style, infoCount: Int): Size {
         val cols = st.cols.coerceAtLeast(1)
         val cell = st.cell
         val gap = st.cellGap
         val gridW = cols * cell + (cols - 1) * gap
         val gridH = rows * cell + (rows - 1) * gap
-        val w = st.pad * 2 + gridW
-        val h = st.pad * 2 + gridH + 120 + infoCount * 22
+        val w = ((st.pad * 2 + gridW) * SIZE_MULT).roundToInt()
+        val h = ((st.pad * 2 + gridH + 120 + infoCount * 22) * SIZE_MULT).roundToInt()
         return Size(w, h)
     }
 
-    // ============================ 绘制 ============================
-
-    private fun drawPageFast(
+    private fun drawPage(
         page: PageData, songName: String, rows: Int, st: Style,
         pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
-        size: Size, scale: Float,
-        showTitle: Boolean = true,
-        showInfo: Boolean = true,
-        showWatermark: Boolean = true
+        size: Size,
+        showTitle: Boolean,
+        showInfo: Boolean,
+        showWatermark: Boolean
     ): Bitmap? {
-        val w = (size.width * scale).roundToInt().coerceAtLeast(1)
-        val h = (size.height * scale).roundToInt().coerceAtLeast(1)
+        val w = size.width
+        val h = size.height
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
 
         canvas.drawColor(argb(st.bg, 1f))
         canvas.save()
-        canvas.scale(scale, scale)
+        canvas.scale(SIZE_MULT, SIZE_MULT)
 
-        drawBgPattern(canvas, size, st)
-        drawDeco(canvas, size, st)
+        val logicalW = size.width / SIZE_MULT
+        val logicalH = size.height / SIZE_MULT
 
-        // 页码（先算，用于标题宽度限制）
+        drawBgPattern(canvas, logicalW, logicalH, st)
+        drawDeco(canvas, logicalW, logicalH, st)
+
         val pageText = "${pageIndex + 1} / $pageCount"
         val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.metaColor, 1f)
@@ -356,7 +319,6 @@ object SheetImageExporter {
         }
         val pageWidth = pagePaint.measureText(pageText)
 
-        // 标题（自动缩小）
         var titleSize = st.titleSize
         if (showTitle) {
             val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -365,33 +327,27 @@ object SheetImageExporter {
                 typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
                 textAlign = Paint.Align.CENTER
             }
-            val maxTitleWidth = size.width - st.pad * 2 - pageWidth - 16f
+            val maxTitleWidth = logicalW - st.pad * 2 - pageWidth - 16f
             while (titlePaint.measureText(songName) > maxTitleWidth && titleSize > 10f) {
                 titleSize -= 1f
                 titlePaint.textSize = titleSize
             }
-            canvas.drawText(songName, size.width / 2f, st.pad + titleSize, titlePaint)
+            canvas.drawText(songName, logicalW / 2f, st.pad + titleSize, titlePaint)
         }
 
-        // 页码（标题下方，右对齐）
-        val pageY = if (showTitle) {
-            st.pad + titleSize + st.metaSize + 8f
-        } else {
-            st.pad + st.metaSize
-        }
-        canvas.drawText(pageText, (size.width - st.pad).toFloat(), pageY, pagePaint)
+        val pageY = if (showTitle) st.pad + titleSize + st.metaSize + 8f else st.pad + st.metaSize
+        canvas.drawText(pageText, logicalW - st.pad, pageY, pagePaint)
 
-        // 网格
         val gridTop = pageY + 20f
         drawKeyGrid(canvas, page, rows, st, st.pad.toFloat(), gridTop)
 
-        // 信息面板（只有第 1 页显示，其他页留空）
         if (showInfo) {
-            drawInfoPanel(canvas, infoItems, st, size, gridTop + rows * (st.cell + st.cellGap) + 20f)
+            drawInfoPanel(canvas, infoItems, st, logicalW, gridTop + rows * (st.cell + st.cellGap) + 20f)
         }
 
-        // 底部水印（所有页都显示）
-        if (showWatermark && st.showWatermark) drawWatermark(canvas, size, st)
+        if (showWatermark && st.showWatermark) {
+            drawWatermark(canvas, logicalW, logicalH, st)
+        }
 
         canvas.restore()
         return bmp
@@ -420,21 +376,19 @@ object SheetImageExporter {
             for (c in 0 until cols) {
                 val x = left + c * (cell + gap)
                 val y = top + r * (cell + gap)
-                val rect = RectF(x, y, x + cell, y + cell)
-                canvas.drawRoundRect(rect, radius, radius, cellPaint)
+                canvas.drawRoundRect(RectF(x, y, x + cell, y + cell), radius, radius, cellPaint)
             }
         }
 
         for (col in page.columns) {
             for (rowIdx in col.rows) {
                 if (rowIdx < 0 || rowIdx >= rows) continue
-                val c = (rowIdx % cols)
-                val r = (rowIdx / cols)
+                val c = rowIdx % cols
+                val r = rowIdx / cols
                 if (r >= rows) continue
                 val x = left + c * (cell + gap)
                 val y = top + r * (cell + gap)
                 val rect = RectF(x, y, x + cell, y + cell)
-
                 val paint = if (rowIdx % 2 == 0) activePaint else activeAltPaint
 
                 if (st.noteShape == "skystudio") {
@@ -461,7 +415,7 @@ object SheetImageExporter {
         }
     }
 
-    private fun drawInfoPanel(canvas: Canvas, items: List<Pair<String, String>>, st: Style, size: Size, top: Float) {
+    private fun drawInfoPanel(canvas: Canvas, items: List<Pair<String, String>>, st: Style, logicalW: Float, top: Float) {
         if (items.isEmpty()) return
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.infoLabelColor, 1f)
@@ -475,12 +429,12 @@ object SheetImageExporter {
         var y = top
         for ((label, value) in items) {
             canvas.drawText(label, st.pad.toFloat(), y, labelPaint)
-            canvas.drawText(value, (size.width - st.pad).toFloat(), y, valuePaint)
+            canvas.drawText(value, logicalW - st.pad, y, valuePaint)
             y += 22f
         }
     }
 
-    private fun drawBgPattern(canvas: Canvas, size: Size, st: Style) {
+    private fun drawBgPattern(canvas: Canvas, w: Float, h: Float, st: Style) {
         if (st.bgPattern == "none") return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.gridLine, 0.04f)
@@ -489,91 +443,70 @@ object SheetImageExporter {
         when (st.bgPattern) {
             "grid" -> {
                 var x = 0f
-                while (x < size.width) {
-                    canvas.drawLine(x, 0f, x, size.height.toFloat(), paint)
-                    x += 40f
-                }
+                while (x < w) { canvas.drawLine(x, 0f, x, h, paint); x += 40f }
                 var y = 0f
-                while (y < size.height) {
-                    canvas.drawLine(0f, y, size.width.toFloat(), y, paint)
-                    y += 40f
-                }
+                while (y < h) { canvas.drawLine(0f, y, w, y, paint); y += 40f }
             }
             "dots" -> {
-                val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = argb(st.gridLine, 0.08f)
-                }
+                val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = argb(st.gridLine, 0.08f) }
                 var x = 20f
-                while (x < size.width) {
+                while (x < w) {
                     var y = 20f
-                    while (y < size.height) {
-                        canvas.drawCircle(x, y, 1.5f, dotPaint)
-                        y += 40f
-                    }
+                    while (y < h) { canvas.drawCircle(x, y, 1.5f, dotPaint); y += 40f }
                     x += 40f
                 }
             }
             "diagonal" -> {
-                var i = -size.height
-                while (i < size.width) {
-                    canvas.drawLine(i.toFloat(), 0f, (i + size.height).toFloat(), size.height.toFloat(), paint)
+                var i = -h.toInt()
+                while (i < w) {
+                    canvas.drawLine(i.toFloat(), 0f, i + h, h, paint)
                     i += 40
                 }
             }
         }
     }
 
-    private fun drawDeco(canvas: Canvas, size: Size, st: Style) {
+    private fun drawDeco(canvas: Canvas, w: Float, h: Float, st: Style) {
         if (st.decoType == "none") return
         val rnd = Random(42)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.gridLine, 0.15f)
-        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = argb(st.gridLine, 0.15f) }
         when (st.decoType) {
-            "stars" -> {
-                repeat(30) {
-                    val x = rnd.nextFloat() * size.width
-                    val y = rnd.nextFloat() * size.height
-                    val r = 1f + rnd.nextFloat() * 2f
-                    canvas.drawCircle(x, y, r, paint)
-                }
+            "stars" -> repeat(30) {
+                canvas.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 1f + rnd.nextFloat() * 2f, paint)
             }
-            "snow" -> {
-                repeat(40) {
-                    val x = rnd.nextFloat() * size.width
-                    val y = rnd.nextFloat() * size.height
-                    canvas.drawCircle(x, y, 2f, paint)
-                }
+            "snow" -> repeat(40) {
+                canvas.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 2f, paint)
             }
-            "bubbles" -> {
-                repeat(15) {
-                    val x = rnd.nextFloat() * size.width
-                    val y = rnd.nextFloat() * size.height
-                    val r = 8f + rnd.nextFloat() * 20f
-                    canvas.drawCircle(x, y, r, paint)
-                }
+            "bubbles" -> repeat(15) {
+                canvas.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 8f + rnd.nextFloat() * 20f, paint)
             }
-            "geometric" -> {
-                repeat(10) {
-                    val x = rnd.nextFloat() * size.width
-                    val y = rnd.nextFloat() * size.height
-                    val s = 10f + rnd.nextFloat() * 20f
-                    canvas.drawRect(x, y, x + s, y + s, paint)
-                }
+            "geometric" -> repeat(10) {
+                val x = rnd.nextFloat() * w
+                val y = rnd.nextFloat() * h
+                val s = 10f + rnd.nextFloat() * 20f
+                canvas.drawRect(x, y, x + s, y + s, paint)
             }
         }
     }
 
-    private fun drawWatermark(canvas: Canvas, size: Size, st: Style) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private fun drawWatermark(canvas: Canvas, logicalW: Float, logicalH: Float, st: Style) {
+        val baseY = logicalH - st.pad / 2f
+
+        val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.logoColor, 0.55f)
+            textSize = st.logoSize
+            textAlign = Paint.Align.LEFT
+            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+        }
+        canvas.drawText(APP_NAME, st.pad.toFloat(), baseY, logoPaint)
+
+        val wmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.watermarkColor, st.watermarkAlpha)
             textSize = st.watermarkSize
-            textAlign = Paint.Align.CENTER
+            textAlign = Paint.Align.RIGHT
         }
-        canvas.drawText(WATERMARK_TEXT, size.width / 2f, size.height - st.pad / 2f, paint)
+        canvas.drawText(WATERMARK_TEXT, logicalW - st.pad, baseY, wmPaint)
     }
-
-    // ============================ 数据类 ============================
 
     data class ColumnData(val t: Long, val rows: List<Int>)
     data class PageData(val columns: List<ColumnData>)
