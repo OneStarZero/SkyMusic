@@ -11,7 +11,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Random
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -24,7 +23,127 @@ object SheetImageExporter {
     private const val APP_NAME = "SkyMusic"
     private const val LONG_SUFFIX = "-Full"
     private const val FALLBACK_BG = "#0B1120"
-      private const val SIZE_MULT = 3f
+    private const val SIZE_MULT = 3f
+    private const val TRIM_PADDING = 40
+
+    // ============================ 数据模型 ============================
+
+    data class Size(val width: Int, val height: Int)
+
+    data class Style(
+        val bg: String,
+        val fg: String,
+        val accent: String,
+        val sub: String,
+        val grid: String,
+        val noteBg: String,
+        val noteFg: String,
+        val pad: Float,
+        val cell: Float,
+        val cellGap: Float,
+        val cols: Int,
+        val rowsPerPage: Int,
+        val titleSize: Float,
+        val metaSize: Float,
+        val timeSize: Float,
+        val infoSize: Float,
+        val watermarkSize: Float,
+        val logoSize: Float,
+        val gridRadius: Float,
+        val noteShape: String
+    )
+
+    data class Note(val time: Float, val key: String)
+
+    data class PageData(
+        val index: Int,
+        val startTime: Float,
+        val endTime: Float,
+        val notes: List<Note>
+    )
+
+    // ============================ 入口 ============================
+
+    fun export(
+        baseDir: File,
+        payloadJson: String,
+        onProgress: ((String, Int) -> Unit)? = null
+    ): JSONObject {
+        val result = JSONObject()
+        try {
+            val payload = JSONObject(payloadJson)
+
+            val songName = sanitizeName(payload.optString("songName", "未命名"))
+            val author = payload.optString("author", "")
+            val modelName = payload.optString("modelName", "")
+            val bpm = payload.optInt("bpm", 0)
+            val keyCount = payload.optInt("keyCount", 15)
+            val longOnly = payload.optBoolean("longOnly", false)
+            val st = parseStyle(payload.optJSONObject("style"))
+            val notes = parseNotes(payload.optJSONArray("notes"))
+            val rows = payload.optInt("rows", st.rowsPerPage).coerceIn(1, 30)
+            val cols = payload.optInt("cols", st.cols).coerceIn(2, 8)
+
+            if (notes.isEmpty()) {
+                return result.put("ok", false).put("error", "没有可导出的音符")
+            }
+
+            val style = st.copy(cols = cols, rowsPerPage = rows)
+
+            onProgress?.invoke("正在计算布局…", 5)
+
+            val pages = buildPages(notes, style)
+            val pageCount = pages.size
+            val infoItems = buildInfoItems(songName, author, modelName, bpm, keyCount, notes.size, pageCount)
+            val size = measurePage(style, infoItems)
+
+            val sheetDir = File(baseDir, songName)
+            if (!sheetDir.exists()) sheetDir.mkdirs()
+
+            val savedFiles = JSONArray()
+
+            // ---------- 分页导出 ----------
+            if (!longOnly) {
+                val pageDir = File(sheetDir, "分页")
+                if (!pageDir.exists()) pageDir.mkdirs()
+
+                for (i in pages.indices) {
+                    onProgress?.invoke("正在导出第 ${i + 1} / $pageCount 页", 10 + (i * 60) / pageCount)
+
+                    val bmp = drawPage(pages[i], songName, rows, style, i, pageCount, infoItems, size)
+                        ?: return result.put("ok", false).put("error", "绘制第 ${i + 1} 页失败")
+
+                    val fileName = if (i == 0) "$songName.png" else "$songName-${i + 1}.png"
+                    val target = File(pageDir, fileName)
+                    writeBitmap(bmp, target)
+                    bmp.recycle()
+                    savedFiles.put(target.absolutePath)
+                }
+            }
+
+            // ---------- 长图导出 ----------
+            onProgress?.invoke("正在生成长图…", 75)
+            val longTarget = File(sheetDir, "$songName$LONG_SUFFIX.png")
+            val longOk = writeLongImage(
+                longTarget, pages, songName, rows, style, pageCount, infoItems, size, onProgress
+            )
+            if (longOk) savedFiles.put(longTarget.absolutePath)
+
+            onProgress?.invoke("完成", 100)
+
+            return result
+                .put("ok", true)
+                .put("dir", sheetDir.absolutePath)
+                .put("files", savedFiles)
+                .put("pageCount", pageCount)
+        } catch (oom: OutOfMemoryError) {
+            return result.put("ok", false).put("error", "内存不足，请减少页数或行数")
+        } catch (e: Throwable) {
+            return result.put("ok", false).put("error", e.message ?: "未知错误")
+        }
+    }
+
+    // ============================ 长图 ============================
 
     private fun writeLongImage(
         target: File,
@@ -45,7 +164,6 @@ object SheetImageExporter {
         val outW = size.width
 
         try {
-            // 一次性创建完整长图（RGB_565 省一半内存）
             val longBitmap = Bitmap.createBitmap(outW, totalH, Bitmap.Config.RGB_565)
             val canvas = Canvas(longBitmap)
             canvas.drawColor(argb(st.bg, 1f))
@@ -119,568 +237,447 @@ object SheetImageExporter {
             }
         }
 
-        var preciseY = lastContentY
-        var checkY = minOf(h - 1, lastContentY + step)
-        while (checkY > lastContentY) {
-            if (rowHasContent(bitmap, checkY, w, bgR, bgG, bgB, threshold)) {
-                preciseY = checkY
-                break
-            }
-            checkY--
-        }
-
-        val padding = 40
-        return minOf(h, preciseY + padding)
+        val padded = lastContentY + TRIM_PADDING
+        return padded.coerceIn(1, h)
     }
 
     private fun rowHasContent(
-        bitmap: Bitmap, y: Int, w: Int,
-        bgR: Int, bgG: Int, bgB: Int, threshold: Int
+        bitmap: Bitmap,
+        y: Int,
+        w: Int,
+        bgR: Int,
+        bgG: Int,
+        bgB: Int,
+        threshold: Int
     ): Boolean {
+        val stepX = 3
         var x = 0
         while (x < w) {
-            val px = bitmap.getPixel(x, y)
-            val dr = Math.abs(Color.red(px) - bgR)
-            val dg = Math.abs(Color.green(px) - bgG)
-            val db = Math.abs(Color.blue(px) - bgB)
-            if (dr > threshold || dg > threshold || db > threshold) {
-                return true
-            }
-            x += 8
+            val c = bitmap.getPixel(x, y)
+            val dr = kotlin.math.abs(Color.red(c) - bgR)
+            val dg = kotlin.math.abs(Color.green(c) - bgG)
+            val db = kotlin.math.abs(Color.blue(c) - bgB)
+            if (dr > threshold || dg > threshold || db > threshold) return true
+            x += stepX
         }
         return false
     }
 
+    // ============================ 单页绘制 ============================
+
+    private fun drawPage(
+        page: PageData,
+        songName: String,
+        rows: Int,
+        st: Style,
+        pageIndex: Int,
+        pageCount: Int,
+        infoItems: List<Pair<String, String>>,
+        size: Size
+    ): Bitmap? {
+        return try {
+            val bmp = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(argb(st.bg, 1f))
+
+            val pad = st.pad * SIZE_MULT
+            var y = pad
+
+            // ---------- 标题 ----------
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.fg, 1f)
+                textSize = st.titleSize * SIZE_MULT
+                typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+            }
+            var titleSize = st.titleSize * SIZE_MULT
+            val maxTitleW = size.width - pad * 2
+            while (titlePaint.measureText(songName) > maxTitleW && titleSize > 12f) {
+                titleSize -= 1f
+                titlePaint.textSize = titleSize
+            }
+            canvas.drawText(songName, pad, y + titleSize, titlePaint)
+            y += titleSize + st.metaSize * SIZE_MULT * 0.8f
+
+            // ---------- 页码 ----------
+            val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.sub, 1f)
+                textSize = st.metaSize * SIZE_MULT
+                typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+            }
+            val pageText = "第 ${pageIndex + 1} / $pageCount 页"
+            canvas.drawText(pageText, pad, y + pagePaint.textSize, pagePaint)
+            y += pagePaint.textSize + st.metaSize * SIZE_MULT * 0.6f
+
+            // ---------- 信息面板 ----------
+            if (infoItems.isNotEmpty()) {
+                val infoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = argb(st.sub, 1f)
+                    textSize = st.infoSize * SIZE_MULT
+                    typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+                }
+                val lineH = infoPaint.textSize * 1.5f
+                for ((k, v) in infoItems) {
+                    canvas.drawText("$k：$v", pad, y + infoPaint.textSize, infoPaint)
+                    y += lineH
+                }
+                y += st.infoSize * SIZE_MULT * 0.5f
+            }
+
+            // ---------- 网格 ----------
+            val cell = st.cell * SIZE_MULT
+            val gap = st.cellGap * SIZE_MULT
+            val cols = st.cols
+            val gridW = cols * cell + (cols - 1) * gap
+            val gridX = (size.width - gridW) / 2f
+
+            val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.grid, 1f)
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f * SIZE_MULT
+            }
+            val noteBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.noteBg, 1f)
+                style = Paint.Style.FILL
+            }
+            val noteFgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.noteFg, 1f)
+                textSize = cell * 0.42f
+                typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
+            }
+
+            val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.sub, 1f)
+                textSize = st.timeSize * SIZE_MULT
+                typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+            }
+
+            // 按时间分组
+            val groups = groupByTime(page.notes)
+            val rowH = cell + gap
+            val timeColW = timePaint.textSize * 3.2f
+
+            var rowY = y
+            for (g in groups) {
+                if (rowY + cell > size.height - pad) break
+
+                // 时间标签
+                val tSec = g.time
+                val mm = (tSec / 60).toInt()
+                val ss = (tSec % 60).toInt()
+                val timeStr = String.format("%02d:%02d", mm, ss)
+                canvas.drawText(timeStr, pad, rowY + cell * 0.65f, timePaint)
+
+                // 音符格
+                for (n in g.notes) {
+                    val col = keyToCol(n.key, cols)
+                    if (col < 0) continue
+                    val cx = gridX + col * (cell + gap)
+                    val rect = RectF(cx, rowY, cx + cell, rowY + cell)
+
+                    if (st.noteShape == "skystudio") {
+                        val path = Path()
+                        val r = st.gridRadius * SIZE_MULT
+                        path.addRoundRect(rect, r, r, Path.Direction.CW)
+                        canvas.drawPath(path, noteBgPaint)
+                    } else {
+                        val r = st.gridRadius * SIZE_MULT
+                        canvas.drawRoundRect(rect, r, r, noteBgPaint)
+                    }
+
+                    val label = keyLabel(n.key)
+                    if (label.isNotEmpty()) {
+                        val ty = rowY + cell / 2f - (noteFgPaint.descent() + noteFgPaint.ascent()) / 2f
+                        canvas.drawText(label, cx + cell / 2f, ty, noteFgPaint)
+                    }
+                }
+
+                rowY += rowH
+            }
+
+            // ---------- 底部水印 ----------
+            drawBottomWatermark(canvas, size, st)
+
+            bmp
+        } catch (oom: OutOfMemoryError) {
+            null
+        }
+    }
+
     // ============================ 水印 ============================
 
-    private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style, offsetY: Int = 0) {
-        val wmSize = 26f * SIZE_MULT
-        val logoSize = 30f * SIZE_MULT
-        val uidSize = 22f * SIZE_MULT
-
-        val wmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.watermarkColor, 0.05f)
-            textSize = wmSize
-            textAlign = Paint.Align.CENTER
+    private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = st.watermarkSize * SIZE_MULT
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
         }
-        val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.logoColor, 0.06f)
-            textSize = logoSize
-            textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-        }
-        val uidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.watermarkColor, 0.045f)
-            textSize = uidSize
-            textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
-        }
-
         val stepX = 200f * SIZE_MULT
         val stepY = 140f * SIZE_MULT
 
-        val startY = (60f * SIZE_MULT) - (offsetY % stepY.toInt())
-        var y = startY
-        var row = ((offsetY / stepY.toInt()) % 3 + 3) % 3
+        canvas.save()
+        canvas.rotate(-30f, w / 2f, h / 2f)
 
-        while (y < h) {
-            var x = 60f * SIZE_MULT
-            while (x < w) {
-                canvas.save()
-                canvas.rotate(-30f, x, y)
-                when (row % 3) {
-                    0 -> canvas.drawText(APP_NAME, x, y, logoPaint)
-                    1 -> canvas.drawText(WATERMARK_TEXT, x, y, wmPaint)
-                    else -> canvas.drawText(WATERMARK_UID, x, y, uidPaint)
+        val diag = kotlin.math.sqrt((w * w + h * h).toFloat())
+        val startX = w / 2f - diag
+        val startY = h / 2f - diag
+        val endX = w / 2f + diag
+        val endY = h / 2f + diag
+
+        var idx = 0
+        var y = startY
+        while (y < endY) {
+            var x = startX
+            while (x < endX) {
+                val (text, alpha) = when (idx % 3) {
+                    0 -> APP_NAME to 0.06f
+                    1 -> WATERMARK_TEXT to 0.05f
+                    else -> WATERMARK_UID to 0.045f
                 }
-                canvas.restore()
+                paint.color = argb(st.sub, alpha)
+                canvas.drawText(text, x, y, paint)
                 x += stepX
+                idx++
             }
             y += stepY
-            row++
         }
+        canvas.restore()
     }
 
-    // ============================ 解析 ============================
-
-    private fun parsePage(obj: JSONObject): PageData {
-        val columns = ArrayList<ColumnData>()
-        val arr = obj.optJSONArray("columns") ?: JSONArray()
-        for (i in 0 until arr.length()) {
-            val c = arr.optJSONObject(i) ?: continue
-            val t = c.optLong("t", 0L)
-            val rowsArr = c.optJSONArray("rows") ?: JSONArray()
-            val rowList = ArrayList<Int>()
-            for (j in 0 until rowsArr.length()) {
-                rowList.add(rowsArr.optInt(j, -1))
-            }
-            columns.add(ColumnData(t, rowList))
+    private fun drawBottomWatermark(canvas: Canvas, size: Size, st: Style) {
+        val pad = st.pad * SIZE_MULT
+        val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.accent, 0.5f)
+            textSize = st.logoSize * SIZE_MULT
+            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
         }
-        return PageData(columns)
+        val wmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.sub, 0.35f)
+            textSize = st.watermarkSize * SIZE_MULT
+            typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+            textAlign = Paint.Align.RIGHT
+        }
+        val baseY = size.height - pad
+        canvas.drawText(APP_NAME, pad, baseY, logoPaint)
+        canvas.drawText(WATERMARK_TEXT, size.width - pad, baseY, wmPaint)
     }
 
-    private fun parseInfoItems(arr: JSONArray?): List<Pair<String, String>> {
+    // ============================ 布局 ============================
+
+    private fun buildPages(notes: List<Note>, st: Style): List<PageData> {
+        val sorted = notes.sortedBy { it.time }
+        val groups = groupByTime(sorted)
+        val perPage = st.rowsPerPage
+        val pages = mutableListOf<PageData>()
+
+        var i = 0
+        var pageIdx = 0
+        while (i < groups.size) {
+            val end = minOf(i + perPage, groups.size)
+            val slice = groups.subList(i, end)
+            val startT = slice.first().time
+            val endT = slice.last().time
+            val flat = mutableListOf<Note>()
+            for (g in slice) flat.addAll(g.notes)
+            pages.add(PageData(pageIdx, startT, endT, flat))
+            pageIdx++
+            i = end
+        }
+        if (pages.isEmpty()) pages.add(PageData(0, 0f, 0f, emptyList()))
+        return pages
+    }
+
+    private data class TimeGroup(val time: Float, val notes: List<Note>)
+
+    private fun groupByTime(notes: List<Note>): List<TimeGroup> {
+        val map = LinkedHashMap<Int, MutableList<Note>>()
+        for (n in notes) {
+            val bucket = (n.time * 1000f / 20f).roundToInt() // 20ms 聚合
+            map.getOrPut(bucket) { mutableListOf() }.add(n)
+        }
+        return map.entries.map { (bucket, list) ->
+            TimeGroup(bucket * 20f / 1000f, list)
+        }.sortedBy { it.time }
+    }
+
+    private fun measurePage(st: Style, infoItems: List<Pair<String, String>>): Size {
+        val pad = st.pad * SIZE_MULT
+        val cell = st.cell * SIZE_MULT
+        val gap = st.cellGap * SIZE_MULT
+        val cols = st.cols
+        val gridW = cols * cell + (cols - 1) * gap
+        val timeColW = st.timeSize * SIZE_MULT * 3.2f
+
+        val headerH = st.titleSize * SIZE_MULT +
+                st.metaSize * SIZE_MULT * 1.4f +
+                st.metaSize * SIZE_MULT * 1.2f +
+                infoItems.size * st.infoSize * SIZE_MULT * 1.5f +
+                st.infoSize * SIZE_MULT * 0.5f
+
+        val rowH = cell + gap
+        val gridH = st.rowsPerPage * rowH
+
+        val w = (pad * 2 + timeColW + gridW).roundToInt().coerceAtLeast(600)
+        val h = (pad * 2 + headerH + gridH + st.logoSize * SIZE_MULT * 2).roundToInt().coerceAtLeast(600)
+        return Size(w, h)
+    }
+
+    private fun buildInfoItems(
+        songName: String,
+        author: String,
+        modelName: String,
+        bpm: Int,
+        keyCount: Int,
+        noteCount: Int,
+        pageCount: Int
+    ): List<Pair<String, String>> {
+        val list = mutableListOf<Pair<String, String>>()
+        if (author.isNotBlank()) list.add("作者" to author)
+        if (modelName.isNotBlank()) list.add("模型" to modelName)
+        if (bpm > 0) list.add("BPM" to bpm.toString())
+        list.add("键位" to "${keyCount}键")
+        list.add("音符" to noteCount.toString())
+        list.add("页数" to pageCount.toString())
+        return list
+    }
+
+    // ============================ 工具 ============================
+
+    private fun parseStyle(obj: JSONObject?): Style {
+        val o = obj ?: JSONObject()
+        return Style(
+            bg = o.optString("bg", FALLBACK_BG),
+            fg = o.optString("fg", "#E8F4FF"),
+            accent = o.optString("accent", "#7DD3FC"),
+            sub = o.optString("sub", "#A78BFA"),
+            grid = o.optString("grid", "#2A3350"),
+            noteBg = o.optString("noteBg", "#7DD3FC"),
+            noteFg = o.optString("noteFg", "#0B1120"),
+            pad = o.optDouble("pad", 40.0).toFloat(),
+            cell = o.optDouble("cell", 22.0).toFloat(),
+            cellGap = o.optDouble("cellGap", 4.0).toFloat(),
+            cols = o.optInt("cols", 8),
+            rowsPerPage = o.optInt("rowsPerPage", 30),
+            titleSize = o.optDouble("titleSize", 30.0).toFloat(),
+            metaSize = o.optDouble("metaSize", 14.0).toFloat(),
+            timeSize = o.optDouble("timeSize", 13.0).toFloat(),
+            infoSize = o.optDouble("infoSize", 12.0).toFloat(),
+            watermarkSize = o.optDouble("watermarkSize", 13.0).toFloat(),
+            logoSize = o.optDouble("logoSize", 15.0).toFloat(),
+            gridRadius = o.optDouble("gridRadius", 5.0).toFloat(),
+            noteShape = o.optString("noteShape", "square")
+        )
+    }
+
+    private fun parseNotes(arr: JSONArray?): List<Note> {
         if (arr == null) return emptyList()
-        val list = ArrayList<Pair<String, String>>()
+        val list = ArrayList<Note>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            list.add(Pair(o.optString("label", ""), o.optString("value", "")))
+            val t = o.optDouble("time", -1.0).toFloat()
+            val k = o.optString("key", "")
+            if (t < 0f || k.isEmpty()) continue
+            list.add(Note(t, k))
         }
         return list
     }
 
-    private fun sanitize(name: String): String {
-        var s = name.trim()
-        if (s.isEmpty()) s = "未命名乐谱"
-        s = s.replace(Regex("[\\\\/:*?\"<>\\r\\n\\t]"), "_")
-        s = s.replace(Regex("\\s+"), " ").trim()
-        if (s.length > MAX_NAME_LENGTH) s = s.substring(0, MAX_NAME_LENGTH).trim()
-        return if (s.isEmpty() || s == "." || s == "..") "未命名乐谱" else s
+    private fun keyToCol(key: String, cols: Int): Int {
+        // key 形如 "1Key0" ~ "1Key9" / "2Key0" ~ "2Key4"
+        val idx = key.filter { it.isDigit() }.takeLast(1).toIntOrNull() ?: return -1
+        val row = key.firstOrNull()?.digitToIntOrNull() ?: 1
+        val col = if (row == 1) idx else 10 + idx
+        return if (col in 0 until cols) col else -1
     }
 
-    // ============================ 颜色 ============================
-
-    private fun argb(hex: String, alpha: Float): Int {
-        val c = parseColorSafe(hex)
-        val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
-        return Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
-    }
-
-    private fun parseColorSafe(input: String): Int {
-        val s = input.trim()
-        if (s.isEmpty()) return Color.parseColor(FALLBACK_BG)
-
-        if (s.startsWith("hsl", ignoreCase = true)) {
-            val nums = Regex("""[\d.]+""").findAll(s).map { it.value.toFloat() }.toList()
-            if (nums.size >= 3) return hslToColor(nums[0] / 360f, nums[1] / 100f, nums[2] / 100f)
-            return Color.parseColor(FALLBACK_BG)
+    private fun keyLabel(key: String): String {
+        val idx = key.filter { it.isDigit() }.takeLast(1).toIntOrNull() ?: return ""
+        val row = key.firstOrNull()?.digitToIntOrNull() ?: 1
+        return if (row == 1) {
+            if (idx == 0) "1" else (idx + 1).toString()
+        } else {
+            val letters = "CDEFGAB"
+            letters.getOrNull(idx)?.toString() ?: ""
         }
+    }
 
-        if (s.startsWith("rgb", ignoreCase = true)) {
-            val nums = Regex("""[\d.]+""").findAll(s).map { it.value.toInt() }.toList()
-            if (nums.size >= 3) {
-                return Color.rgb(
-                    nums[0].coerceIn(0, 255),
-                    nums[1].coerceIn(0, 255),
-                    nums[2].coerceIn(0, 255)
-                )
+    private fun sanitizeName(raw: String): String {
+        var s = raw.trim().ifEmpty { "未命名" }
+        s = s.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        if (s.length > MAX_NAME_LENGTH) s = s.substring(0, MAX_NAME_LENGTH)
+        return s
+    }
+
+    private fun writeBitmap(bitmap: Bitmap, target: File) {
+        target.parentFile?.mkdirs()
+        FileOutputStream(target).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            out.flush()
+        }
+    }
+
+    private fun argb(colorStr: String, alpha: Float): Int {
+        val base = parseColorSafe(colorStr)
+        val a = (alpha.coerceIn(0f, 1f) * 255).roundToInt()
+        return Color.argb(a, Color.red(base), Color.green(base), Color.blue(base))
+    }
+
+    private fun parseColorSafe(colorStr: String): Int {
+        val s = colorStr.trim()
+        try {
+            if (s.startsWith("#")) {
+                return when (s.length) {
+                    7 -> Color.parseColor(s)
+                    9 -> Color.parseColor(s)
+                    4 -> {
+                        val r = s[1]; val g = s[2]; val b = s[3]
+                        Color.parseColor("#$r$r$g$g$b$b")
+                    }
+                    else -> Color.parseColor(s)
+                }
             }
+            if (s.startsWith("rgb")) {
+                val nums = s.substringAfter("(").substringBefore(")").split(",")
+                val r = nums.getOrNull(0)?.trim()?.toFloatOrNull()?.roundToInt() ?: 0
+                val g = nums.getOrNull(1)?.trim()?.toFloatOrNull()?.roundToInt() ?: 0
+                val b = nums.getOrNull(2)?.trim()?.toFloatOrNull()?.roundToInt() ?: 0
+                return Color.rgb(r.coerceIn(0, 255), g.coerceIn(0, 255), b.coerceIn(0, 255))
+            }
+            if (s.startsWith("hsl")) {
+                val nums = s.substringAfter("(").substringBefore(")").split(",")
+                val h = nums.getOrNull(0)?.trim()?.toFloatOrNull() ?: 0f
+                val sat = (nums.getOrNull(1)?.trim()?.removeSuffix("%")?.toFloatOrNull() ?: 0f) / 100f
+                val l = (nums.getOrNull(2)?.trim()?.removeSuffix("%")?.toFloatOrNull() ?: 0f) / 100f
+                return hslToColor(h, sat, l)
+            }
+            return Color.parseColor(s)
+        } catch (e: Throwable) {
             return Color.parseColor(FALLBACK_BG)
-        }
-
-        return try {
-            Color.parseColor(s)
-        } catch (_: Exception) {
-            Color.parseColor(FALLBACK_BG)
         }
     }
 
     private fun hslToColor(h: Float, s: Float, l: Float): Int {
-        if (s == 0f) {
-            val v = (l * 255).toInt().coerceIn(0, 255)
-            return Color.rgb(v, v, v)
-        }
+        val hh = ((h % 360f) + 360f) % 360f / 360f
         val q = if (l < 0.5f) l * (1 + s) else l + s - l * s
         val p = 2 * l - q
-        val r = hue2rgb(p, q, h + 1f / 3f)
-        val g = hue2rgb(p, q, h)
-        val b = hue2rgb(p, q, h - 1f / 3f)
+        val r = hue2rgb(p, q, hh + 1f / 3f)
+        val g = hue2rgb(p, q, hh)
+        val b = hue2rgb(p, q, hh - 1f / 3f)
         return Color.rgb(
-            (r * 255).toInt().coerceIn(0, 255),
-            (g * 255).toInt().coerceIn(0, 255),
-            (b * 255).toInt().coerceIn(0, 255)
+            (r * 255).roundToInt().coerceIn(0, 255),
+            (g * 255).roundToInt().coerceIn(0, 255),
+            (b * 255).roundToInt().coerceIn(0, 255)
         )
     }
 
-    private fun hue2rgb(p: Float, q: Float, t0: Float): Float {
-        var t = t0
-        if (t < 0f) t += 1f
-        if (t > 1f) t -= 1f
+    private fun hue2rgb(p: Float, q: Float, t: Float): Float {
+        var tt = t
+        if (tt < 0f) tt += 1f
+        if (tt > 1f) tt -= 1f
         return when {
-            t < 1f / 6f -> p + (q - p) * 6f * t
-            t < 1f / 2f -> q
-            t < 2f / 3f -> p + (q - p) * (2f / 3f - t) * 6f
+            tt < 1f / 6f -> p + (q - p) * 6f * tt
+            tt < 1f / 2f -> q
+            tt < 2f / 3f -> p + (q - p) * (2f / 3f - tt) * 6f
             else -> p
-        }
-    }
-
-    // ============================ 尺寸 ============================
-
-    private fun measure(rows: Int, st: Style, infoCount: Int): Size {
-        val gCols = if (rows == 9) 3 else 5
-        val gRows = 3
-        val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
-        val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
-        val timeH = (st.timeSize * 2.2f).roundToInt()
-
-        val titleH = (st.titleSize * 1.4f).roundToInt()
-        val metaH = (st.metaSize * 1.6f).roundToInt()
-        val headerH = titleH + metaH + 20
-
-        var infoH = 0
-        if (st.showInfoPanel && infoCount > 0) {
-            val infoRows = (infoCount + 1) / 2
-            val infoRowH = (st.infoSize * 2.0f).roundToInt()
-            infoH = infoRows * infoRowH + 28
-        }
-
-        val footerH = (st.watermarkSize * 2.6f).roundToInt()
-
-        val cc = st.cols.coerceAtLeast(1)
-        val rpp = st.rowsPerPage.coerceAtLeast(1)
-
-        val bodyW = cc * gridW + (cc - 1) * st.gridGapX
-        val bodyH = rpp * (gridH + timeH) + (rpp - 1) * st.gridGapY
-
-        val w = ((st.pad * 2 + bodyW) * SIZE_MULT).roundToInt()
-        val h = ((st.pad * 2 + headerH + infoH + bodyH + footerH) * SIZE_MULT).roundToInt()
-        return Size(w, h)
-    }
-
-    // ============================ 绘制 ============================
-
-    private fun drawPage(
-        page: PageData, songName: String, rows: Int, st: Style,
-        pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
-        size: Size
-    ): Bitmap? {
-        val w = size.width
-        val h = size.height
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-
-        canvas.drawColor(argb(st.bg, 1f))
-        canvas.save()
-        canvas.scale(SIZE_MULT, SIZE_MULT)
-
-        val logicalW = size.width / SIZE_MULT
-        val logicalH = size.height / SIZE_MULT
-
-        drawBgPattern(canvas, logicalW, logicalH, st)
-        drawDeco(canvas, logicalW, logicalH, st)
-
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.titleColor, 1f)
-            textSize = st.titleSize
-            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-        }
-        val maxTitleWidth = logicalW - st.pad * 2
-        var titleSize = st.titleSize
-        while (titlePaint.measureText(songName) > maxTitleWidth && titleSize > 10f) {
-            titleSize -= 1f
-            titlePaint.textSize = titleSize
-        }
-        val titleY = st.pad + titleSize
-        canvas.drawText(songName, logicalW / 2f, titleY, titlePaint)
-
-        val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.metaColor, 1f)
-            textSize = st.metaSize
-            textAlign = Paint.Align.RIGHT
-        }
-        val pageY = titleY + st.metaSize + 8f
-        canvas.drawText("${pageIndex + 1} / $pageCount", logicalW - st.pad, pageY, pagePaint)
-
-        var infoBottom = pageY
-        if (st.showInfoPanel && infoItems.isNotEmpty()) {
-            val infoTop = pageY + st.metaSize + 12f
-            drawInfoPanel(canvas, infoItems, st, logicalW, infoTop)
-            val infoRows = (infoItems.size + 1) / 2
-            infoBottom = infoTop + infoRows * (st.infoSize * 2.0f) + 16f
-        }
-
-        val gCols = if (rows == 9) 3 else 5
-        val gRows = 3
-        val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
-        val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
-        val timeH = st.timeSize * 2.2f
-
-        val bodyTop = infoBottom + 20f
-        val bodyLeft = st.pad.toFloat()
-
-        val cc = st.cols.coerceAtLeast(1)
-        val rpp = st.rowsPerPage.coerceAtLeast(1)
-
-        for (idx in page.columns.indices) {
-            val col = page.columns[idx]
-            val cx = idx % cc
-            val cy = idx / cc
-            if (cy >= rpp) break
-
-            val cellLeft = bodyLeft + cx * (gridW + st.gridGapX)
-            val cellTop = bodyTop + cy * (gridH + timeH + st.gridGapY)
-
-            drawMiniGrid(canvas, col, rows, st, cellLeft, cellTop, gCols, gRows)
-
-            val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = argb(st.timeColor, st.timeAlpha)
-                textSize = st.timeSize
-                textAlign = Paint.Align.CENTER
-            }
-            canvas.drawText(formatMs(col.t), cellLeft + gridW / 2f, cellTop + gridH + timeH * 0.8f, timePaint)
-        }
-
-        if (st.showWatermark) {
-            drawFooter(canvas, logicalW, logicalH, st)
-        }
-
-        canvas.restore()
-
-        drawTiledWatermark(canvas, w, h, st)
-
-        return bmp
-    }
-
-    private fun drawMiniGrid(
-        canvas: Canvas, col: ColumnData, rows: Int, st: Style,
-        left: Float, top: Float, gCols: Int, gRows: Int
-    ) {
-        val cell = st.cell
-        val gap = st.cellGap
-        val radius = st.gridRadius.toFloat()
-
-        val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = argb(st.gridLine, st.gridLineAlpha)
-        }
-        val activePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = argb(st.noteFill, 1f)
-        }
-        val activeAltPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = argb(st.noteFillAlt, 1f)
-        }
-
-        for (r in 0 until gRows) {
-            for (c in 0 until gCols) {
-                val x = left + c * (cell + gap)
-                val y = top + r * (cell + gap)
-                canvas.drawRoundRect(RectF(x, y, x + cell, y + cell), radius, radius, cellPaint)
-            }
-        }
-
-        for (rowIdx in col.rows) {
-            if (rowIdx < 0 || rowIdx >= rows) continue
-            val c = rowIdx % gCols
-            val r = rowIdx / gCols
-            if (r >= gRows) continue
-            val x = left + c * (cell + gap)
-            val y = top + r * (cell + gap)
-            val rect = RectF(x, y, x + cell, y + cell)
-            val paint = if (rowIdx % 2 == 0) activePaint else activeAltPaint
-
-            if (st.noteShape == "skystudio") {
-                canvas.drawRoundRect(rect, radius, radius, paint)
-                val diamondPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.FILL
-                    color = Color.argb(217, 11, 17, 32)
-                }
-                val cx = x + cell / 2f
-                val cy = y + cell / 2f
-                val d = cell * 0.28f
-                val path = Path().apply {
-                    moveTo(cx, cy - d)
-                    lineTo(cx + d, cy)
-                    lineTo(cx, cy + d)
-                    lineTo(cx - d, cy)
-                    close()
-                }
-                canvas.drawPath(path, diamondPaint)
-            } else {
-                canvas.drawRoundRect(rect, radius, radius, paint)
-            }
-        }
-    }
-
-    private fun formatMs(ms: Long): String {
-        val t = max(0, ms)
-        val m = t / 60000
-        val s = (t % 60000) / 1000
-        return "$m:" + (if (s < 10) "0$s" else "$s")
-    }
-
-    private fun drawInfoPanel(canvas: Canvas, items: List<Pair<String, String>>, st: Style, logicalW: Float, top: Float) {
-        if (items.isEmpty()) return
-        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.infoLabelColor, 1f)
-            textSize = st.infoSize
-        }
-        val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.infoValueColor, 1f)
-            textSize = st.infoSize
-            textAlign = Paint.Align.RIGHT
-        }
-        var y = top
-        for ((label, value) in items) {
-            canvas.drawText(label, st.pad.toFloat(), y, labelPaint)
-            canvas.drawText(value, logicalW - st.pad, y, valuePaint)
-            y += 22f
-        }
-    }
-
-    private fun drawBgPattern(canvas: Canvas, w: Float, h: Float, st: Style) {
-        if (st.bgPattern == "none") return
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.gridLine, 0.04f)
-            strokeWidth = 1f
-        }
-        when (st.bgPattern) {
-            "grid" -> {
-                var x = 0f
-                while (x < w) { canvas.drawLine(x, 0f, x, h, paint); x += 40f }
-                var y = 0f
-                while (y < h) { canvas.drawLine(0f, y, w, y, paint); y += 40f }
-            }
-            "dots" -> {
-                val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = argb(st.gridLine, 0.08f) }
-                var x = 20f
-                while (x < w) {
-                    var y = 20f
-                    while (y < h) { canvas.drawCircle(x, y, 1.5f, dotPaint); y += 40f }
-                    x += 40f
-                }
-            }
-            "diagonal" -> {
-                var i = -h.toInt()
-                while (i < w) {
-                    canvas.drawLine(i.toFloat(), 0f, i + h, h, paint)
-                    i += 40
-                }
-            }
-        }
-    }
-
-    private fun drawDeco(canvas: Canvas, w: Float, h: Float, st: Style) {
-        if (st.decoType == "none") return
-        val rnd = Random(42)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = argb(st.gridLine, 0.15f) }
-        when (st.decoType) {
-            "stars" -> repeat(30) {
-                canvas.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 1f + rnd.nextFloat() * 2f, paint)
-            }
-            "snow" -> repeat(40) {
-                canvas.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 2f, paint)
-            }
-            "bubbles" -> repeat(15) {
-                canvas.drawCircle(rnd.nextFloat() * w, rnd.nextFloat() * h, 8f + rnd.nextFloat() * 20f, paint)
-            }
-            "geometric" -> repeat(10) {
-                val x = rnd.nextFloat() * w
-                val y = rnd.nextFloat() * h
-                val s = 10f + rnd.nextFloat() * 20f
-                canvas.drawRect(x, y, x + s, y + s, paint)
-            }
-        }
-    }
-
-    private fun drawFooter(canvas: Canvas, logicalW: Float, logicalH: Float, st: Style) {
-        val baseY = logicalH - st.pad / 2f
-
-        val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.logoColor, 0.55f)
-            textSize = st.logoSize
-            textAlign = Paint.Align.LEFT
-            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-        }
-        canvas.drawText(APP_NAME, st.pad.toFloat(), baseY, logoPaint)
-
-        val wmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.watermarkColor, st.watermarkAlpha)
-            textSize = st.watermarkSize
-            textAlign = Paint.Align.RIGHT
-        }
-        canvas.drawText(WATERMARK_TEXT, logicalW - st.pad, baseY, wmPaint)
-    }
-
-    // ============================ 数据类 ============================
-
-    data class ColumnData(val t: Long, val rows: List<Int>)
-    data class PageData(val columns: List<ColumnData>)
-    data class Size(val width: Int, val height: Int)
-
-    class Style(
-        val bg: String, val bgGlow: String, val gridLine: String, val gridLineAlpha: Float,
-        val noteFill: String, val noteFillAlt: String, val noteStroke: String, val noteStrokeAlpha: Float,
-        val titleColor: String, val metaColor: String, val timeColor: String, val timeAlpha: Float,
-        val watermarkColor: String, val watermarkAlpha: Float, val logoColor: String,
-        val infoLabelColor: String, val infoValueColor: String,
-        val dividerColor: String, val dividerAlpha: Float,
-        val cell: Int, val cellGap: Int, val gridRadius: Int, val cols: Int, val rowsPerPage: Int,
-        val gridGapX: Int, val gridGapY: Int, val pad: Int,
-        val titleSize: Float, val metaSize: Float, val timeSize: Float,
-        val watermarkSize: Float, val logoSize: Float, val infoSize: Float,
-        val showStars: Boolean, val showWatermark: Boolean, val showInfoPanel: Boolean, val showTime: Boolean,
-        val decoType: String, val bgPattern: String, val noteShape: String, val titleAlign: String
-    ) {
-        fun copy(cols: Int = this.cols, rowsPerPage: Int = this.rowsPerPage): Style {
-            return Style(
-                bg = bg, bgGlow = bgGlow, gridLine = gridLine, gridLineAlpha = gridLineAlpha,
-                noteFill = noteFill, noteFillAlt = noteFillAlt, noteStroke = noteStroke, noteStrokeAlpha = noteStrokeAlpha,
-                titleColor = titleColor, metaColor = metaColor, timeColor = timeColor, timeAlpha = timeAlpha,
-                watermarkColor = watermarkColor, watermarkAlpha = watermarkAlpha, logoColor = logoColor,
-                infoLabelColor = infoLabelColor, infoValueColor = infoValueColor,
-                dividerColor = dividerColor, dividerAlpha = dividerAlpha,
-                cell = cell, cellGap = cellGap, gridRadius = gridRadius, cols = cols, rowsPerPage = rowsPerPage,
-                gridGapX = gridGapX, gridGapY = gridGapY, pad = pad,
-                titleSize = titleSize, metaSize = metaSize, timeSize = timeSize,
-                watermarkSize = watermarkSize, logoSize = logoSize, infoSize = infoSize,
-                showStars = showStars, showWatermark = showWatermark, showInfoPanel = showInfoPanel, showTime = showTime,
-                decoType = decoType, bgPattern = bgPattern, noteShape = noteShape, titleAlign = titleAlign
-            )
-        }
-
-        companion object {
-            fun from(o: JSONObject?): Style {
-                if (o == null) return defaults()
-                return Style(
-                    bg = o.optString("bg", FALLBACK_BG),
-                    bgGlow = o.optString("bgGlow", "#1E1B4B"),
-                    gridLine = o.optString("gridLine", "#7DD3FC"),
-                    gridLineAlpha = o.optDouble("gridLineAlpha", 0.22).toFloat(),
-                    noteFill = o.optString("noteFill", "#7DD3FC"),
-                    noteFillAlt = o.optString("noteFillAlt", "#A78BFA"),
-                    noteStroke = o.optString("noteStroke", "#FFFFFF"),
-                    noteStrokeAlpha = o.optDouble("noteStrokeAlpha", 0.40).toFloat(),
-                    titleColor = o.optString("titleColor", "#F8FAFC"),
-                    metaColor = o.optString("metaColor", "#94A3B8"),
-                    timeColor = o.optString("timeColor", "#CBD5E1"),
-                    timeAlpha = o.optDouble("timeAlpha", 0.72).toFloat(),
-                    watermarkColor = o.optString("watermarkColor", "#7DD3FC"),
-                    watermarkAlpha = o.optDouble("watermarkAlpha", 0.055).toFloat(),
-                    logoColor = o.optString("logoColor", "#7DD3FC"),
-                    infoLabelColor = o.optString("infoLabelColor", "#94A3B8"),
-                    infoValueColor = o.optString("infoValueColor", "#E2E8F0"),
-                    dividerColor = o.optString("dividerColor", "#7DD3FC"),
-                    dividerAlpha = o.optDouble("dividerAlpha", 0.14).toFloat(),
-                    cell = o.optInt("cell", 22),
-                    cellGap = o.optInt("cellGap", 4),
-                    gridRadius = o.optInt("gridRadius", 5),
-                    cols = o.optInt("cols", 8),
-                    rowsPerPage = o.optInt("rowsPerPage", 30),
-                    gridGapX = o.optInt("gridGapX", 26),
-                    gridGapY = o.optInt("gridGapY", 30),
-                    pad = o.optInt("pad", 40),
-                    titleSize = o.optDouble("titleSize", 30.0).toFloat(),
-                    metaSize = o.optDouble("metaSize", 14.0).toFloat(),
-                    timeSize = o.optDouble("timeSize", 13.0).toFloat(),
-                    watermarkSize = o.optDouble("watermarkSize", 13.0).toFloat(),
-                    logoSize = o.optDouble("logoSize", 15.0).toFloat(),
-                    infoSize = o.optDouble("infoSize", 12.0).toFloat(),
-                    showStars = o.optBoolean("showStars", true),
-                    showWatermark = o.optBoolean("showWatermark", true),
-                    showInfoPanel = o.optBoolean("showInfoPanel", true),
-                    showTime = o.optBoolean("showTime", true),
-                    decoType = o.optString("decoType", "none"),
-                    bgPattern = o.optString("bgPattern", "none"),
-                    noteShape = o.optString("noteShape", "square"),
-                    titleAlign = o.optString("titleAlign", "center")
-                )
-            }
-
-            fun defaults(): Style = from(null)
         }
     }
 }
