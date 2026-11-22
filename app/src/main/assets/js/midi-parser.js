@@ -176,7 +176,6 @@ export function initMidi() {
     /* ==================== 原曲试听 UI ==================== */
 
     const srcPanel = document.getElementById('previewSrcPanel');
-    const srcTime = document.getElementById
     const srcTime = document.getElementById('previewSrcTime');
     const srcState = document.getElementById('previewSrcState');
     const srcFill = document.getElementById('previewSrcFill');
