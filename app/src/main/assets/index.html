@@ -10,12 +10,9 @@
 </head>
 <body>
 
-<!-- 沉浸式加载界面 -->
+<!-- 加载界面 -->
 <div id="loading-screen">
     <div class="loading-bg">
-        <div class="meteor m1"></div>
-        <div class="meteor m2"></div>
-        <div class="meteor m3"></div>
         <div class="grid-overlay"></div>
     </div>
 
@@ -27,7 +24,6 @@
 
         <div class="progress-track">
             <div class="progress-fill" id="loadProgressBar"></div>
-            <div class="progress-glow" id="loadProgressGlow"></div>
         </div>
 
         <div class="progress-info">
@@ -41,29 +37,29 @@
     </div>
 </div>
 
-<!-- 柔和随机星光背景 Canvas -->
+<!-- 背景 Canvas -->
 <canvas id="bgCanvas"></canvas>
 
 <div class="content-wrapper">
     <div id="toast-container"></div>
 
-    <header class="app-header fade-in-up">
+    <header class="app-header">
         <h1>光遇 MIDI <span>✨OneStar</span></h1>
         <p class="subtitle">愿星光指引你，SkyMusic 0.1.0</p>
     </header>
 
     <div id="viewMidi">
-        <!-- 拖拽上传区 -->
-        <div class="glass-card upload-card fade-in-up">
+        <!-- 上传区 -->
+        <div class="glass-card upload-card">
             <div class="drop-zone breathing-border" id="dropZone">
-                <div class="upload-icon soft-float">🎵</div>
+                <div class="upload-icon">🎵</div>
                 <p id="dropText">点击选择或拖拽 MIDI 文件</p>
                 <span class="file-hint">支持 .mid / .midi</span>
                 <input type="file" id="midiFile" accept=".mid, .midi, audio/midi">
             </div>
         </div>
 
-        <!-- 配置与指标区 -->
+        <!-- 配置区 -->
         <div class="glass-card" id="configPanel" hidden>
             <div class="section-title">
                 <span class="icon">✨</span> 歌曲信息
@@ -111,7 +107,7 @@
             <div id="status">准备就绪</div>
         </div>
 
-        <!-- 原曲试听面板（选 MIDI 后出现，跟随轨道勾选） -->
+        <!-- 原曲试听 -->
         <div class="glass-card preview-card" id="previewSrcPanel" hidden>
             <div class="section-title">
                 <span class="icon">🎧</span> 试听原曲
@@ -137,7 +133,7 @@
 
         <div id="log" class="custom-scrollbar"></div>
 
-        <!-- 结果展示区 -->
+        <!-- 结果区 -->
         <div class="glass-card result-card" id="resultCard">
             <div class="success-header">
                 <div class="success-icon">✨</div>
@@ -170,7 +166,7 @@
                 <div class="info-row"><span class="info-label">改编谱师</span><span class="info-val" id="outTranscriber">-</span></div>
             </div>
 
-            <!-- 谱面试听面板（随结果卡片显隐） -->
+            <!-- 谱面试听 -->
             <div class="preview-inline" id="previewSheetPanel">
                 <div class="preview-head">
                     <span class="preview-time" id="previewSheetTime">0:00 / 0:00</span>
@@ -210,7 +206,7 @@
 </script>
 <script type="module" src="./js/main.js"></script>
 
-<!-- 错误捕获（移到末尾，不阻塞解析） -->
+<!-- 错误捕获 -->
 <script>
 (function () {
   var shown = {};
@@ -235,11 +231,10 @@
       box.id = '__err_box';
       box.style.cssText =
         'position:fixed;left:0;right:0;top:0;z-index:2147483647;' +
-        'background:linear-gradient(180deg,#7F1D1D,#450A0A);' +
+        'background:#7F1D1D;' +
         'color:#FEE2E2;font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;' +
         'padding:12px 14px;max-height:50vh;overflow:auto;' +
         'border-bottom:2px solid #F87171;' +
-        'box-shadow:0 8px 24px rgba(0,0,0,.6);' +
         'white-space:pre-wrap;word-break:break-all;';
       document.body.appendChild(box);
     }

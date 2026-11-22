@@ -3,6 +3,7 @@
  */
 
 export const THEMES = {
+  warm: { name: '暖棕', bg: '#1A1614', bgGlow: '#2A2420', gridLine: '#E8C88A', noteFill: '#E8C88A', noteFillAlt: '#C9A96E', logoColor: '#E8C88A', watermarkColor: '#E8C88A' },
   morning: { name: '晨岛蓝', bg: '#0B1120', bgGlow: '#1E1B4B', gridLine: '#7DD3FC', noteFill: '#7DD3FC', noteFillAlt: '#A78BFA', logoColor: '#7DD3FC', watermarkColor: '#7DD3FC' },
   mono: { name: '极简黑白', bg: '#111111', bgGlow: '#000000', gridLine: '#FFFFFF', noteFill: '#FFFFFF', noteFillAlt: '#AAAAAA', logoColor: '#FFFFFF', watermarkColor: '#FFFFFF' },
   vivid: { name: '高对比紫', bg: '#1A0B2E', bgGlow: '#090512', gridLine: '#C084FC', noteFill: '#C084FC', noteFillAlt: '#F472B6', logoColor: '#F472B6', watermarkColor: '#C084FC' },

@@ -1,20 +1,21 @@
 /**
- * SkyMusic · 谱面图片预览层（合并版）
+ * SkyMusic · 谱面图片预览层（全屏独立页面）
  * ------------------------------------------------------------------
  * 分区：
- *   1. 状态        view / activeTab / DEFAULT_ZOOM
- *   2. 工具        getBridge / showToast / showProgress / 进度记忆
- *   3. 样式        OVERLAY_CSS / injectStyle
- *   4. 模板        OVERLAY_HTML
- *   5. 渲染        renderPages / renderPageAt / ensureLongPreview / LOD
- *   6. 缩放        currentZoom / setZoom / applyPageZoom / applyLongZoom / bindPinchZoom
- *   7. 保存        buildPayload / saveImages / exportInBrowser
- *   8. 主题        themeState / buildThemeLists / applyTheme / applyCorner / applyRandom
- *   9. 勾选        updateSelectUI / togglePageSelection / toggleSelectAll
- *  10. 开关        switchTab / openOverlay / closeOverlay / toggleThemePanel
- *  11. 重建        rebuild / switchKeyCount
- *  12. 事件        onOverlayClick
- *  13. 入口        ensureOverlay / openSheetImagePreview
+ *   1. 状态
+ *   2. 工具
+ *   3. 样式
+ *   4. 模板
+ *   5. 渲染（实时加载/卸载）
+ *   6. 缩放
+ *   7. 保存
+ *   8. 主题
+ *   9. 勾选
+ *  10. 开关
+ *  11. 重建
+ *  12. 滑杆
+ *  13. 事件
+ *  14. 入口
  */
 
 import { STYLE_DEFAULTS, THEMES, CORNER_STYLES, RANDOM_STYLE, getThemeStyle, MAX_LONG_PIXELS, sanitizeFileName, FONT_STACK } from './style.js';
@@ -26,7 +27,7 @@ import { createZipWriter, canvasToBytes, buildLongPngBytes } from './zip.js';
  * 1. 状态
  * ================================================================== */
 
-export const DEFAULT_ZOOM = 0.5;
+export const DEFAULT_ZOOM = 0.3;
 
 export const view = {
   raw: null,
@@ -47,12 +48,12 @@ export const view = {
   busy: false,
 
   customCols: 8,
-  customRows: 15,
+  customRows: 30,
 
   pageZoom: DEFAULT_ZOOM,
   longZoom: DEFAULT_ZOOM,
 
-  overlay: null,
+  root: null,
   titleEl: null,
   pagesHost: null,
   longHost: null,
@@ -110,16 +111,16 @@ let toastImpl = function (message, type) {
     box = document.createElement('div');
     box.id = 'smsi-fallback-toast';
     box.style.cssText = 'position:fixed;left:50%;top:30px;transform:translateX(-50%);z-index:100001;' +
-      'padding:10px 18px;border-radius:12px;font-size:13px;color:#E2E8F0;' +
-      'background:rgba(15,23,42,.94);border:1px solid rgba(148,163,184,.22);' +
-      'box-shadow:0 10px 28px rgba(0,0,0,.4);pointer-events:none;transition:opacity .3s ease;';
+      'padding:10px 18px;border-radius:12px;font-size:13px;color:#E8E0D5;' +
+      'background:#2A2420;border:1px solid rgba(232,200,138,.25);' +
+      'pointer-events:none;transition:opacity .3s ease;';
     document.body.appendChild(box);
   }
   box.textContent = message;
   box.style.opacity = '1';
   clearTimeout(box._timer);
   box._timer = setTimeout(function () { box.style.opacity = '0'; }, 2600);
-  box.style.borderColor = type === 'error' ? 'rgba(248,113,113,.45)' : 'rgba(148,163,184,.22)';
+  box.style.borderColor = type === 'error' ? 'rgba(248,113,113,.45)' : 'rgba(232,200,138,.25)';
 };
 
 import('../ui.js')
@@ -176,180 +177,142 @@ function saveProgress(songName, data) {
 }
 
 /* ==================================================================
- * 3. 样式
+ * 3. 样式（去阴影、去毛玻璃、纯色平替）
  * ================================================================== */
 
 const OVERLAY_CSS = [
-  '.smsi-overlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;',
-  'background:rgba(8,12,24,.9);',
-  'opacity:0;transition:opacity .2s ease;font-family:' + FONT_STACK + ';',
-  'overscroll-behavior:contain;touch-action:none;',
-  'will-change:opacity;}',
-  '.smsi-overlay.smsi-show{opacity:1;}',
+  '.smsi-root{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;',
+  'background:#1A1614;color:#E8E0D5;font-family:' + FONT_STACK + ';',
+  'overscroll-behavior:contain;touch-action:none;}',
 
-  '.smsi-window{width:min(92vw,760px);height:min(88vh,900px);display:flex;flex-direction:column;',
-  'background:#0F172A;',
-  'border:1px solid rgba(125,211,252,.12);border-radius:22px;overflow:hidden;',
-  'box-shadow:0 24px 60px rgba(0,0,0,.6);',
-  'transform:scale(.97);transition:transform .2s ease;',
-  'contain:layout style;}',
-  '.smsi-overlay.smsi-show .smsi-window{transform:scale(1);}',
+  '.smsi-head{display:flex;align-items:center;gap:10px;padding:14px 16px;flex:0 0 auto;',
+  'background:#1A1614;border-bottom:1px solid rgba(232,224,213,.06);}',
+  '.smsi-close{width:32px;height:32px;display:flex;align-items:center;justify-content:center;',
+  'font-size:20px;color:#E8E0D5;cursor:pointer;border-radius:8px;flex:0 0 auto;}',
+  '.smsi-close:active{background:rgba(232,224,213,.1);}',
+  '.smsi-title{font-size:15px;font-weight:600;color:#E8E0D5;flex:1 1 auto;',
+  'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+  '.smsi-tools{display:flex;align-items:center;gap:6px;flex:0 0 auto;}',
+  '.smsi-tool-btn{padding:6px 10px;border-radius:8px;border:1px solid rgba(232,224,213,.12);',
+  'background:rgba(232,224,213,.06);color:#A89E92;font-size:12px;font-weight:600;cursor:pointer;}',
+  '.smsi-tool-btn.smsi-on{background:rgba(232,200,138,.18);color:#E8C88A;',
+  'border-color:rgba(232,200,138,.4);}',
+  '.smsi-tool-btn.smsi-tool-icon{padding:6px 9px;font-size:14px;}',
 
-  '.smsi-head{display:flex;align-items:center;gap:10px;padding:13px 16px;flex:0 0 auto;',
-  'border-bottom:1px solid rgba(125,211,252,.06);background:#0F172A;}',
-  '.smsi-title{font-size:13.5px;font-weight:700;color:#F8FAFC;overflow:hidden;',
-  'text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;letter-spacing:.3px;}',
-  '.smsi-tools{display:flex;align-items:center;gap:5px;flex:0 0 auto;}',
-
-  '.smsi-btn{appearance:none;border:1px solid rgba(125,211,252,.14);',
-  'background:rgba(30,41,59,.5);',
-  'color:#CBD5E1;font-size:12px;line-height:1;padding:7px 10px;border-radius:10px;cursor:pointer;',
-  'transition:background .15s ease,border-color .15s ease,color .15s ease;',
-  'position:relative;}',
-  '.smsi-btn:active{background:rgba(125,211,252,.15);}',
-  '.smsi-btn.smsi-on{border-color:rgba(125,211,252,.55);',
-  'background:rgba(125,211,252,.15);color:#7DD3FC;}',
-  '.smsi-btn.smsi-icon{padding:7px 9px;font-size:13px;}',
-  '.smsi-btn.smsi-close{border-color:rgba(248,113,113,.2);color:#F87171;}',
-
-  '.smsi-tabs{display:flex;gap:6px;padding:10px 16px 0;flex:0 0 auto;}',
-  '.smsi-tab{flex:1;padding:9px 12px;border-radius:11px;border:1px solid rgba(125,211,252,.1);',
-  'background:rgba(30,41,59,.35);',
-  'color:#94A3B8;font-size:12.5px;font-weight:600;cursor:pointer;',
-  'text-align:center;transition:background .15s ease,color .15s ease,border-color .15s ease;}',
-  '.smsi-tab.smsi-active{border-color:rgba(125,211,252,.5);',
-  'background:rgba(125,211,252,.14);color:#7DD3FC;}',
-
-  '.smsi-slider-bar{display:flex;flex-direction:column;gap:6px;padding:8px 16px;flex:0 0 auto;',
-  'border-bottom:1px solid rgba(125,211,252,.06);background:#0B1120;}',
-  '.smsi-slider-row{display:flex;align-items:center;gap:10px;}',
-  '.smsi-slider-label{font-size:11px;color:#94A3B8;width:16px;flex:0 0 auto;}',
-  '.smsi-slider{flex:1;height:4px;-webkit-appearance:none;appearance:none;',
-  'background:rgba(148,163,184,.2);border-radius:2px;outline:none;}',
-  '.smsi-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;',
-  'width:16px;height:16px;border-radius:50%;background:#7DD3FC;cursor:pointer;',
-  'box-shadow:0 0 8px rgba(125,211,252,.5);}',
-  '.smsi-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;',
-  'background:#7DD3FC;cursor:pointer;border:none;}',
-  '.smsi-slider-val{font-size:11px;color:#7DD3FC;width:24px;text-align:right;',
-  'font-variant-numeric:tabular-nums;font-weight:700;flex:0 0 auto;}',
-
-  '.smsi-body{flex:1 1 auto;overflow:hidden;position:relative;contain:layout style;}',
-  '.smsi-pane{position:absolute;inset:0;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch;',
-  'display:none;overscroll-behavior:contain;touch-action:pan-x pan-y;',
+  '.smsi-preview{flex:1 1 auto;overflow:auto;padding:16px;',
+  'display:flex;flex-direction:column;align-items:center;',
+  '-webkit-overflow-scrolling:touch;overscroll-behavior:contain;',
   'contain:layout style paint;}',
-  '.smsi-pane.smsi-active{display:block;}',
-
-  '.smsi-pages{display:flex;flex-direction:column;align-items:center;gap:16px;}',
-  '.smsi-page{position:relative;border-radius:14px;overflow:hidden;background:#0B1120;',
-  'box-shadow:0 8px 24px rgba(0,0,0,.45);',
-  'transition:opacity .15s ease;',
+  '.smsi-pages{display:flex;flex-direction:column;align-items:center;gap:16px;width:100%;}',
+  '.smsi-page{position:relative;border-radius:12px;overflow:hidden;background:#0B1120;',
   'contain:layout paint style;}',
-  '.smsi-page.smsi-unselected{opacity:.4;}',
+  '.smsi-page.smsi-unselected{opacity:.35;}',
   '.smsi-canvas{display:block;width:100%;height:auto;}',
 
-  '.smsi-pick{position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;',
+  '.smsi-pick{position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;',
   'display:flex;align-items:center;justify-content:center;cursor:pointer;',
-  'background:rgba(11,17,32,.7);border:1.5px solid rgba(125,211,252,.4);',
-  'color:transparent;font-size:14px;font-weight:700;line-height:1;',
-  'transition:background .15s ease,border-color .15s ease,color .15s ease;}',
-  '.smsi-page:not(.smsi-unselected) .smsi-pick{background:rgba(125,211,252,.85);',
-  'border-color:rgba(125,211,252,.85);color:#0B1120;}',
+  'background:rgba(26,22,20,.75);border:1.5px solid rgba(232,200,138,.4);',
+  'color:transparent;font-size:13px;font-weight:700;line-height:1;}',
+  '.smsi-page:not(.smsi-unselected) .smsi-pick{background:#E8C88A;',
+  'border-color:#E8C88A;color:#1A1614;}',
 
-  '.smsi-pageno{position:absolute;top:10px;left:10px;font-size:10.5px;color:#CBD5E1;',
-  'background:rgba(11,17,32,.7);border:1px solid rgba(148,163,184,.15);',
-  'padding:2px 8px;border-radius:8px;font-variant-numeric:tabular-nums;}',
+  '.smsi-pageno{position:absolute;top:10px;left:10px;font-size:10.5px;color:#E8E0D5;',
+  'background:rgba(26,22,20,.75);border:1px solid rgba(232,224,213,.15);',
+  'padding:2px 8px;border-radius:6px;font-variant-numeric:tabular-nums;}',
 
-  '.smsi-long-wrap{display:flex;justify-content:center;align-items:flex-start;}',
+  '.smsi-long-wrap{display:flex;justify-content:center;align-items:flex-start;width:100%;}',
   '.smsi-long-slot{position:relative;overflow:hidden;background:#0B1120;contain:layout paint style;}',
-  '.smsi-long-canvas{display:block;border-radius:12px;}',
-  '.smsi-long-empty{color:#64748B;font-size:12.5px;text-align:center;padding:40px 20px;}',
+  '.smsi-long-canvas{display:block;border-radius:8px;}',
 
-  '.smsi-zoombar{display:flex;align-items:center;justify-content:center;gap:8px;',
-  'padding:8px 16px;flex:0 0 auto;border-top:1px solid rgba(125,211,252,.05);',
-  'background:#0B1120;}',
-  '.smsi-zoom{font-size:11px;color:#7DD3FC;min-width:40px;text-align:center;',
+  '.smsi-tabs{display:flex;gap:8px;padding:12px 16px;flex:0 0 auto;',
+  'background:#1A1614;border-top:1px solid rgba(232,224,213,.06);}',
+  '.smsi-tab{flex:1;padding:10px 12px;border-radius:10px;',
+  'background:rgba(232,224,213,.06);color:#A89E92;font-size:13px;font-weight:600;',
+  'cursor:pointer;text-align:center;}',
+  '.smsi-tab.smsi-active{background:rgba(232,200,138,.18);color:#E8C88A;}',
+
+  '.smsi-slider-bar{display:flex;flex-direction:column;gap:14px;padding:16px;flex:0 0 auto;',
+  'background:#1A1614;border-top:1px solid rgba(232,224,213,.06);}',
+  '.smsi-slider-row{display:flex;flex-direction:column;gap:8px;}',
+  '.smsi-slider-head{display:flex;align-items:center;justify-content:space-between;}',
+  '.smsi-slider-label{font-size:13px;color:#A89E92;}',
+  '.smsi-slider-val{font-size:13px;font-weight:700;color:#E8C88A;',
+  'background:rgba(232,200,138,.12);padding:2px 10px;border-radius:6px;',
   'font-variant-numeric:tabular-nums;}',
+  '.smsi-slider{width:100%;height:4px;-webkit-appearance:none;appearance:none;',
+  'background:rgba(232,224,213,.15);border-radius:2px;outline:none;}',
+  '.smsi-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;',
+  'width:20px;height:20px;border-radius:50%;background:#E8C88A;cursor:pointer;}',
+  '.smsi-slider::-moz-range-thumb{width:20px;height:20px;border-radius:50%;',
+  'background:#E8C88A;cursor:pointer;border:none;}',
+  '.smsi-slider-range{display:flex;justify-content:space-between;font-size:11px;color:#6B6259;}',
 
-  '.smsi-foot{display:flex;flex-direction:column;gap:8px;padding:10px 16px calc(12px + env(safe-area-inset-bottom));',
-  'flex:0 0 auto;border-top:1px solid rgba(125,211,252,.06);background:#0B1120;}',
-
+  '.smsi-foot{display:flex;flex-direction:column;gap:8px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));',
+  'flex:0 0 auto;background:#1A1614;border-top:1px solid rgba(232,224,213,.06);}',
   '.smsi-optrow{display:flex;align-items:center;justify-content:space-between;gap:10px;}',
   '.smsi-optrow.smsi-hidden{display:none;}',
-  '.smsi-optlabel{font-size:12px;color:#CBD5E1;display:flex;align-items:center;gap:7px;}',
-  '.smsi-optlabel small{color:rgba(148,163,184,.7);font-size:10.5px;}',
+  '.smsi-optlabel{font-size:13px;color:#A89E92;display:flex;align-items:center;gap:8px;}',
+  '.smsi-optlabel small{color:#6B6259;font-size:11px;}',
 
-  '.smsi-switch{position:relative;width:40px;height:23px;border-radius:12px;flex:0 0 auto;',
-  'background:rgba(148,163,184,.2);border:1px solid rgba(148,163,184,.2);cursor:pointer;',
-  'transition:background .18s ease,border-color .18s ease;}',
-  '.smsi-switch::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;',
-  'border-radius:50%;background:#CBD5E1;transition:transform .18s ease,background .18s ease;}',
-  '.smsi-switch.smsi-on{background:rgba(125,211,252,.25);border-color:rgba(125,211,252,.55);}',
-  '.smsi-switch.smsi-on::after{transform:translateX(17px);background:#7DD3FC;}',
+  '.smsi-switch{position:relative;width:44px;height:24px;border-radius:12px;flex:0 0 auto;',
+  'background:rgba(232,224,213,.15);cursor:pointer;}',
+  '.smsi-switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;',
+  'border-radius:50%;background:#A89E92;}',
+  '.smsi-switch.smsi-on{background:rgba(232,200,138,.35);}',
+  '.smsi-switch.smsi-on::after{transform:translateX(20px);background:#E8C88A;}',
 
-  '.smsi-progress{display:none;flex-direction:column;gap:5px;}',
+  '.smsi-progress{display:none;flex-direction:column;gap:6px;}',
   '.smsi-progress.smsi-show{display:flex;}',
-  '.smsi-progress-track{height:4px;border-radius:2px;background:rgba(148,163,184,.15);overflow:hidden;}',
-  '.smsi-progress-fill{height:100%;width:0%;border-radius:2px;',
-  'background:linear-gradient(90deg,#7DD3FC,#A78BFA);',
-  'transition:width .15s ease;}',
-  '.smsi-progress-text{font-size:10.5px;color:#94A3B8;text-align:center;}',
+  '.smsi-progress-track{height:4px;border-radius:2px;background:rgba(232,224,213,.12);overflow:hidden;}',
+  '.smsi-progress-fill{height:100%;width:0%;border-radius:2px;background:#E8C88A;}',
+  '.smsi-progress-text{font-size:11px;color:#A89E92;text-align:center;}',
 
-  '.smsi-actions{display:flex;gap:8px;align-items:center;}',
-  '.smsi-actions .smsi-btn{flex:1;padding:12px 10px;font-size:13px;font-weight:600;border-radius:12px;}',
-  '.smsi-actions .smsi-btn.smsi-hidden{display:none;}',
-  '.smsi-actions .smsi-btn.smsi-random-inline{flex:0 0 auto;padding:12px 14px;font-size:16px;',
-  'border-color:rgba(167,139,250,.3);color:#C4B5FD;',
-  'background:rgba(167,139,250,.12);}',
-  '.smsi-btn.smsi-primary{border:none;color:#0B1120;',
-  'background:linear-gradient(135deg,#7DD3FC,#A78BFA);}',
-  '.smsi-btn.smsi-long{border:none;color:#0B1120;',
-  'background:linear-gradient(135deg,#A78BFA,#C4B5FD);}',
+  '.smsi-actions{display:flex;gap:10px;align-items:center;}',
+  '.smsi-btn{flex:1;padding:14px 12px;border-radius:12px;border:none;',
+  'font-size:14px;font-weight:600;cursor:pointer;}',
+  '.smsi-btn:active{transform:scale(.97);}',
+  '.smsi-btn.smsi-hidden{display:none;}',
+  '.smsi-btn.smsi-primary{background:#E8C88A;color:#1A1614;}',
+  '.smsi-btn.smsi-long{background:#C9A96E;color:#1A1614;}',
+  '.smsi-btn.smsi-random{flex:0 0 auto;padding:14px 18px;font-size:18px;',
+  'background:rgba(232,200,138,.15);color:#E8C88A;}',
+  '.smsi-btn.smsi-reset-zoom{flex:0 0 auto;padding:14px 16px;font-size:16px;',
+  'background:rgba(232,224,213,.08);color:#A89E92;}',
 
-  '.smsi-theme-panel{position:absolute;top:0;right:0;bottom:0;width:min(82%,320px);',
-  'background:#0B1120;border-left:1px solid rgba(125,211,252,.12);',
-  'transform:translateX(100%);transition:transform .22s ease;',
-  'display:flex;flex-direction:column;z-index:10;overflow-y:auto;',
-  'box-shadow:-8px 0 24px rgba(0,0,0,.5);contain:layout style;}',
+  '.smsi-theme-panel{position:absolute;top:0;right:0;bottom:0;width:min(85%,340px);',
+  'background:#1A1614;border-left:1px solid rgba(232,224,213,.08);',
+  'transform:translateX(100%);display:flex;flex-direction:column;z-index:10;overflow-y:auto;}',
   '.smsi-theme-panel.smsi-show{transform:translateX(0);}',
-
   '.smsi-theme-head{display:flex;align-items:center;justify-content:space-between;',
-  'padding:13px 16px;border-bottom:1px solid rgba(125,211,252,.08);',
-  'font-size:13px;font-weight:700;color:#F8FAFC;flex:0 0 auto;background:#0F172A;}',
-
-  '.smsi-theme-section{padding:12px 16px;}',
-  '.smsi-theme-label{font-size:11.5px;color:#94A3B8;margin-bottom:8px;font-weight:600;letter-spacing:.5px;}',
+  'padding:16px;border-bottom:1px solid rgba(232,224,213,.08);',
+  'font-size:15px;font-weight:600;color:#E8E0D5;flex:0 0 auto;}',
+  '.smsi-theme-close{width:28px;height:28px;display:flex;align-items:center;justify-content:center;',
+  'font-size:16px;color:#A89E92;cursor:pointer;border-radius:6px;}',
+  '.smsi-theme-close:active{background:rgba(232,224,213,.1);}',
+  '.smsi-theme-section{padding:16px;}',
+  '.smsi-theme-label{font-size:12px;color:#A89E92;margin-bottom:10px;font-weight:600;}',
 
   '.smsi-theme-list{display:flex;flex-direction:column;gap:8px;}',
-  '.smsi-theme-item{display:flex;align-items:center;gap:10px;padding:8px 12px;',
-  'border-radius:12px;border:1px solid rgba(125,211,252,.08);',
-  'background:rgba(30,41,59,.45);',
-  'cursor:pointer;transition:border-color .15s ease,background .15s ease;',
-  'font-size:12px;color:#CBD5E1;}',
-  '.smsi-theme-item.smsi-selected{border-color:rgba(125,211,252,.65);',
-  'background:rgba(125,211,252,.14);color:#7DD3FC;}',
-
-  '.smsi-theme-swatch{position:relative;width:34px;height:34px;flex:0 0 auto;}',
+  '.smsi-theme-item{display:flex;align-items:center;gap:12px;padding:10px 14px;',
+  'border-radius:10px;background:rgba(232,224,213,.05);',
+  'cursor:pointer;font-size:13px;color:#E8E0D5;}',
+  '.smsi-theme-item.smsi-selected{background:rgba(232,200,138,.15);color:#E8C88A;}',
+  '.smsi-theme-swatch{position:relative;width:32px;height:32px;flex:0 0 auto;}',
   '.smsi-swatch-dot{position:absolute;border-radius:50%;display:block;}',
-  '.smsi-swatch-bg{width:34px;height:34px;left:0;top:0;',
-  'box-shadow:0 0 0 1px rgba(255,255,255,.12) inset;}',
-  '.smsi-swatch-fill{width:22px;height:22px;left:6px;top:6px;',
-  'box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;}',
-  '.smsi-swatch-alt{width:12px;height:12px;left:11px;top:11px;',
-  'box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;}',
-
+  '.smsi-swatch-bg{width:32px;height:32px;left:0;top:0;}',
+  '.smsi-swatch-fill{width:20px;height:20px;left:6px;top:6px;}',
+  '.smsi-swatch-alt{width:10px;height:10px;left:11px;top:11px;}',
   '.smsi-theme-name{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
 
   '.smsi-corner-row{display:flex;gap:8px;}',
-  '.smsi-corner-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;',
-  'border-radius:10px;border:1px solid rgba(125,211,252,.08);',
-  'background:rgba(30,41,59,.45);',
-  'cursor:pointer;transition:border-color .15s ease,background .15s ease;font-size:11px;color:#CBD5E1;}',
-  '.smsi-corner-item.smsi-selected{border-color:rgba(125,211,252,.65);',
-  'background:rgba(125,211,252,.14);color:#7DD3FC;}',
-  '.smsi-corner-preview{width:32px;height:32px;background:rgba(125,211,252,.35);',
-  'border:1.5px solid rgba(125,211,252,.55);display:flex;align-items:center;justify-content:center;}'
+  '.smsi-corner-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 8px;',
+  'border-radius:10px;background:rgba(232,224,213,.05);',
+  'cursor:pointer;font-size:12px;color:#A89E92;}',
+  '.smsi-corner-item.smsi-selected{background:rgba(232,200,138,.15);color:#E8C88A;}',
+  '.smsi-corner-preview{width:36px;height:36px;background:rgba(232,200,138,.3);',
+  'border:1.5px solid rgba(232,200,138,.5);display:flex;align-items:center;justify-content:center;}'
 ].join('');
+
 
 function injectStyle() {
   if (document.getElementById('smsi-style')) return;
@@ -364,80 +327,78 @@ function injectStyle() {
  * ================================================================== */
 
 const OVERLAY_HTML = [
-  '<div class="smsi-window">',
-  '  <div class="smsi-head">',
-  '    <div class="smsi-title"></div>',
-  '    <div class="smsi-tools">',
-  '      <button class="smsi-btn" data-act="key15" type="button">15 键</button>',
-  '      <button class="smsi-btn" data-act="key9" type="button">9 键</button>',
-  '      <button class="smsi-btn smsi-icon" data-act="theme" type="button">🎨</button>',
-  '      <button class="smsi-btn smsi-icon smsi-close" data-act="close" type="button">✕</button>',
-  '    </div>',
+  '<div class="smsi-head">',
+  '  <div class="smsi-close" data-act="close">✕</div>',
+  '  <div class="smsi-title"></div>',
+  '  <div class="smsi-tools">',
+  '    <button class="smsi-tool-btn" data-act="key15" type="button">15 键</button>',
+  '    <button class="smsi-tool-btn" data-act="key9" type="button">9 键</button>',
+  '    <button class="smsi-tool-btn smsi-tool-icon" data-act="theme" type="button">🎨</button>',
   '  </div>',
-  '  <div class="smsi-tabs">',
-  '    <div class="smsi-tab smsi-active" data-act="tab-pages">分页预览</div>',
-  '    <div class="smsi-tab" data-act="tab-long">长图预览</div>',
+  '</div>',
+  '<div class="smsi-preview">',
+  '  <div class="smsi-pages"></div>',
+  '  <div class="smsi-long-wrap" style="display:none;"></div>',
+  '</div>',
+  '<div class="smsi-tabs">',
+  '  <div class="smsi-tab smsi-active" data-act="tab-pages">分页预览</div>',
+  '  <div class="smsi-tab" data-act="tab-long">长图预览</div>',
+  '</div>',
+  '<div class="smsi-slider-bar">',
+  '  <div class="smsi-slider-row">',
+  '    <div class="smsi-slider-head">',
+  '      <span class="smsi-slider-label">每页最大行数</span>',
+  '      <span class="smsi-slider-val" data-role="rows-val">30 行</span>',
+  '    </div>',
+  '    <input type="range" class="smsi-slider" data-role="rows-slider" min="1" max="30" step="1" value="30">',
+  '    <div class="smsi-slider-range"><span>1 行</span><span>30 行</span></div>',
   '  </div>',
-  '  <div class="smsi-slider-bar">',
-  '    <div class="smsi-slider-row">',
-  '      <span class="smsi-slider-label">行</span>',
-  '      <input type="range" class="smsi-slider" data-role="rows-slider" min="6" max="20" step="1" value="15">',
-  '      <span class="smsi-slider-val" data-role="rows-val">15</span>',
+  '  <div class="smsi-slider-row">',
+  '    <div class="smsi-slider-head">',
+  '      <span class="smsi-slider-label">每行节奏数量</span>',
+  '      <span class="smsi-slider-val" data-role="cols-val">8 列</span>',
   '    </div>',
-  '    <div class="smsi-slider-row">',
-  '      <span class="smsi-slider-label">列</span>',
-  '      <input type="range" class="smsi-slider" data-role="cols-slider" min="3" max="12" step="1" value="8">',
-  '      <span class="smsi-slider-val" data-role="cols-val">8</span>',
-  '    </div>',
+  '    <input type="range" class="smsi-slider" data-role="cols-slider" min="2" max="8" step="1" value="8">',
+  '    <div class="smsi-slider-range"><span>2 列</span><span>8 列</span></div>',
   '  </div>',
-  '  <div class="smsi-body">',
-  '    <div class="smsi-pane smsi-active" data-pane="pages"><div class="smsi-pages"></div></div>',
-  '    <div class="smsi-pane" data-pane="long"><div class="smsi-long-wrap"></div></div>',
-  '    <div class="smsi-theme-panel" data-role="theme-panel">',
-  '      <div class="smsi-theme-head">',
-  '        <span>主题与样式</span>',
-  '        <button class="smsi-btn smsi-icon" data-act="theme-close" type="button">✕</button>',
-  '      </div>',
-  '      <div class="smsi-theme-section">',
-  '        <div class="smsi-theme-label">主题配色</div>',
-  '        <div class="smsi-theme-list" data-role="theme-list"></div>',
-  '      </div>',
-  '      <div class="smsi-theme-section">',
-  '        <div class="smsi-theme-label">按键样式</div>',
-  '        <div class="smsi-corner-row" data-role="corner-list"></div>',
-  '      </div>',
+  '</div>',
+  '<div class="smsi-foot">',
+  '  <div class="smsi-optrow" data-role="select-all-row">',
+  '    <div class="smsi-optlabel">',
+  '      <span>全选</span>',
+  '      <small data-role="select-count">0 / 0</small>',
   '    </div>',
+  '    <div class="smsi-switch smsi-on" data-act="select-all" role="switch"></div>',
   '  </div>',
-  '  <div class="smsi-zoombar">',
-  '    <button class="smsi-btn smsi-icon" data-act="zoom-out" type="button">−</button>',
-  '    <span class="smsi-zoom">50%</span>',
-  '    <button class="smsi-btn smsi-icon" data-act="zoom-in" type="button">+</button>',
-  '    <button class="smsi-btn smsi-icon" data-act="zoom-reset" type="button">⟲</button>',
+  '  <div class="smsi-progress" data-role="progress">',
+  '    <div class="smsi-progress-track"><div class="smsi-progress-fill"></div></div>',
+  '    <div class="smsi-progress-text">准备中…</div>',
   '  </div>',
-  '  <div class="smsi-foot">',
-  '    <div class="smsi-optrow" data-role="select-all-row">',
-  '      <div class="smsi-optlabel">',
-  '        <span>全选</span>',
-  '        <small data-role="select-count">0 / 0</small>',
-  '      </div>',
-  '      <div class="smsi-switch smsi-on" data-act="select-all" role="switch"></div>',
-  '    </div>',
-  '    <div class="smsi-progress" data-role="progress">',
-  '      <div class="smsi-progress-track"><div class="smsi-progress-fill"></div></div>',
-  '      <div class="smsi-progress-text">准备中…</div>',
-  '    </div>',
-  '    <div class="smsi-actions">',
-  '      <button class="smsi-btn smsi-icon smsi-random-inline" data-act="random" type="button" title="随机样式">🎲</button>',
-  '      <button class="smsi-btn" data-act="cancel" type="button">取消</button>',
-  '      <button class="smsi-btn smsi-long smsi-hidden" data-act="save-long" type="button">保存长图</button>',
-  '      <button class="smsi-btn smsi-primary" data-act="save" type="button">保存图片</button>',
-  '    </div>',
+  '  <div class="smsi-actions">',
+  '    <button class="smsi-btn smsi-random" data-act="random" type="button" title="随机样式">🎲</button>',
+  '    <button class="smsi-btn smsi-reset-zoom" data-act="zoom-reset" type="button" title="重置缩放">⟲</button>',
+  '    <button class="smsi-btn smsi-long smsi-hidden" data-act="save-long" type="button">保存长图</button>',
+  '    <button class="smsi-btn smsi-primary" data-act="save" type="button">保存图片</button>',
+  '  </div>',
+  '</div>',
+  '<div class="smsi-theme-panel" data-role="theme-panel">',
+  '  <div class="smsi-theme-head">',
+  '    <span>主题与样式</span>',
+  '    <div class="smsi-theme-close" data-act="theme-close">✕</div>',
+  '  </div>',
+  '  <div class="smsi-theme-section">',
+  '    <div class="smsi-theme-label">主题配色</div>',
+  '    <div class="smsi-theme-list" data-role="theme-list"></div>',
+  '  </div>',
+  '  <div class="smsi-theme-section">',
+  '    <div class="smsi-theme-label">按键样式</div>',
+  '    <div class="smsi-corner-row" data-role="corner-list"></div>',
   '  </div>',
   '</div>'
 ].join('');
 
 /* ==================================================================
- * 5. 渲染
+ * 5. 渲染（实时加载/卸载）
  * ================================================================== */
 
 let pageObserver = null;
@@ -452,6 +413,17 @@ const LOD_HIGH = 1.0;
 const LOD_MID = 0.5;
 const LOD_LOW = 0.25;
 
+let _measureCache = null;
+let _measureKey = '';
+
+function getMeasure() {
+  const key = view.rows + '|' + view.customRows + '|' + view.customCols + '|' + view.infoItems.length + '|' + JSON.stringify(view.style);
+  if (_measureKey === key && _measureCache) return _measureCache;
+  _measureCache = measurePage(view.rows, view.style, view.infoItems.length, view.customRows, view.customCols);
+  _measureKey = key;
+  return _measureCache;
+}
+
 function buildMeta() {
   return {
     rows: view.rows,
@@ -465,13 +437,27 @@ function buildMeta() {
 function renderPages() {
   const host = view.pagesHost;
   if (!host) return;
-  host.innerHTML = '';
 
   const meta = buildMeta();
-
-  const m = measurePage(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
+  const m = getMeasure();
   const w = Math.round(m.width * view.pageZoom) + 'px';
 
+  const existing = host.children;
+  if (existing.length === view.pages.length) {
+    for (let i = 0; i < view.pages.length; i++) {
+      const wrap = existing[i];
+      const page = view.pages[i];
+      wrap.style.width = w;
+      page._wrap = wrap;
+      page._canvas = wrap.querySelector('.smsi-canvas');
+      page._rendered = false;
+      page._lod = 0;
+    }
+    setupPageObserver(meta);
+    return;
+  }
+
+  host.innerHTML = '';
   const frag = document.createDocumentFragment();
 
   view.pages.forEach(function (page, index) {
@@ -504,52 +490,47 @@ function renderPages() {
 
   host.appendChild(frag);
 
-  const initial = Math.min(2, view.pages.length);
-  for (let i = 0; i < initial; i++) {
-    renderPageAt(i, meta, LOD_HIGH);
-  }
-
-  const pane = view.bodyPages;
-  if (pane) {
-    let ticking = false;
-    pane.onscroll = function () {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(function () {
-        ticking = false;
-        updateLod(meta);
-      });
-    };
-  }
+  setupPageObserver(meta);
 }
 
-function updateLod(meta) {
-  const pane = view.bodyPages;
-  if (!pane) return;
+function setupPageObserver(meta) {
+  if (pageObserver) pageObserver.disconnect();
 
-  const scrollTop = pane.scrollTop;
-  const viewH = pane.clientHeight;
+  pageObserver = new IntersectionObserver(function (entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const wrap = entry.target;
+      const index = parseInt(wrap.dataset.pageIndex, 10);
+      if (isNaN(index)) continue;
+
+      const page = view.pages[index];
+      if (!page) continue;
+
+      if (entry.isIntersecting) {
+        renderPageAt(index, meta, LOD_HIGH);
+      } else {
+        releasePageCanvas(page);
+      }
+    }
+  }, {
+    root: view.bodyPages,
+    rootMargin: '300px 0px',
+    threshold: 0
+  });
 
   for (let i = 0; i < view.pages.length; i++) {
     const page = view.pages[i];
-    if (!page._wrap) continue;
-
-    const top = page._wrap.offsetTop;
-    const bottom = top + page._wrap.offsetHeight;
-
-    let targetLod = 0;
-    if (bottom > scrollTop && top < scrollTop + viewH) {
-      targetLod = LOD_HIGH;
-    } else if (bottom > scrollTop - viewH && top < scrollTop + viewH * 2) {
-      targetLod = LOD_MID;
-    } else if (bottom > scrollTop - viewH * 2 && top < scrollTop + viewH * 3) {
-      targetLod = LOD_LOW;
-    }
-
-    if (targetLod > 0 && page._lod !== targetLod) {
-      renderPageAt(i, meta, targetLod);
-    }
+    if (page._wrap) pageObserver.observe(page._wrap);
   }
+}
+
+function releasePageCanvas(page) {
+  if (!page._canvas) return;
+  if (page._lod === 0) return;
+  page._canvas.width = 0;
+  page._canvas.height = 0;
+  page._rendered = false;
+  page._lod = 0;
 }
 
 function renderPageAt(index, meta, lod) {
@@ -577,8 +558,7 @@ function ensureLongPreview() {
   if (!view.pages.length) return;
 
   const meta = buildMeta();
-
-  const m = measurePage(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
+  const m = getMeasure();
   const logicalW = m.width;
   const logicalH = m.height;
   if (!logicalW || !logicalH) return;
@@ -605,8 +585,7 @@ function ensureLongPreview() {
     slot.dataset.pageIndex = String(i);
     slot.style.cssText =
       'width:' + slotW + 'px;height:' + slotH + 'px;' +
-      'border-radius:12px;background:#0B1120;' +
-      'box-shadow:0 8px 24px rgba(0,0,0,.45);' +
+      'border-radius:8px;background:#0B1120;' +
       'overflow:hidden;';
     frag.appendChild(slot);
   }
@@ -716,7 +695,7 @@ function updateZoomLabel() {
 }
 
 function applyPageZoom() {
-  const m = measurePage(view.rows, view.style, view.infoItems.length, view.customRows, view.customCols);
+  const m = getMeasure();
   const w = Math.round(m.width * view.pageZoom) + 'px';
   for (let i = 0; i < view.pages.length; i++) {
     const page = view.pages[i];
@@ -1121,9 +1100,9 @@ function buildCornerList() {
 
     if (key === 'skystudio') {
       preview.innerHTML = '<svg viewBox="0 0 32 32" width="32" height="32">' +
-        '<rect x="2" y="2" width="28" height="28" rx="6" fill="none" stroke="rgba(125,211,252,.6)" stroke-width="1.5"/>' +
-        '<polygon points="16,8 24,16 16,24 8,16" fill="none" stroke="rgba(125,211,252,.8)" stroke-width="1.5"/>' +
-        '<text x="16" y="19" text-anchor="middle" font-size="8" font-weight="700" fill="rgba(125,211,252,.9)">C</text>' +
+        '<rect x="2" y="2" width="28" height="28" rx="6" fill="none" stroke="rgba(232,200,138,.6)" stroke-width="1.5"/>' +
+        '<polygon points="16,8 24,16 16,24 8,16" fill="none" stroke="rgba(232,200,138,.8)" stroke-width="1.5"/>' +
+        '<text x="16" y="19" text-anchor="middle" font-size="8" font-weight="700" fill="rgba(232,200,138,.9)">C</text>' +
         '</svg>';
     }
 
@@ -1147,7 +1126,7 @@ function applyTheme(key) {
   view.style.noteShape = corner.noteShape;
 
   buildThemeLists();
-  refreshAllPages();
+  redrawVisibleCanvases();
   showToast('已切换主题：' + (THEMES[key] ? THEMES[key].name : key), 'success');
 }
 
@@ -1162,7 +1141,7 @@ function applyCorner(key) {
   });
 
   buildThemeLists();
-  refreshAllPages();
+  redrawVisibleCanvases();
   showToast('已切换按键样式：' + (CORNER_STYLES[key] ? CORNER_STYLES[key].name : key), 'success');
 }
 
@@ -1171,35 +1150,55 @@ function applyRandom() {
   view.style = getThemeStyle('random', themeState.cornerKey);
 
   buildThemeLists();
-  refreshAllPages();
+  redrawVisibleCanvases();
   showToast('已应用：' + RANDOM_STYLE.name, 'success');
 }
 
-let refreshTimer = 0;
+function redrawVisibleCanvases() {
+  _measureKey = '';
+  _measureCache = null;
 
-function refreshAllPages() {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(function () {
-    refreshTimer = 0;
-    doRefresh();
-  }, 16);
-}
+  const meta = buildMeta();
 
-function doRefresh() {
-  const pages = view.pages;
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i];
-    if (page) {
+  if (getActiveTab() === 'long') {
+    redrawLongSlots(meta);
+    return;
+  }
+
+  const pane = view.bodyPages;
+  if (!pane) return;
+
+  const scrollTop = pane.scrollTop;
+  const viewH = pane.clientHeight;
+
+  for (let i = 0; i < view.pages.length; i++) {
+    const page = view.pages[i];
+    if (!page._wrap) continue;
+
+    const top = page._wrap.offsetTop;
+    const bottom = top + page._wrap.offsetHeight;
+
+    if (bottom > scrollTop - viewH && top < scrollTop + viewH * 2) {
       page._rendered = false;
       page._lod = 0;
+      renderPageAt(i, meta, LOD_HIGH);
     }
   }
-  view.longCanvas = null;
-  renderPages();
-  if (getActiveTab() === 'long') {
-    ensureLongPreview();
+}
+
+function redrawLongSlots(meta) {
+  if (!view.longCanvas || !view.longCanvas._slots) return;
+  const slots = view.longCanvas._slots;
+
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    slot._rendered = false;
+    const index = parseInt(slot.dataset.pageIndex, 10);
+    if (isNaN(index)) continue;
+    renderLongSlot(slot, index, meta, view.longCanvas._slotW, view.longCanvas._slotH);
   }
 }
+
 
 function restoreTheme(saved) {
   if (saved.themeKey && THEMES[saved.themeKey]) {
@@ -1219,7 +1218,7 @@ function restoreTheme(saved) {
     view.style = getThemeStyle(themeState.themeKey, themeState.cornerKey);
   }
 
-  if (view.overlay) buildThemeLists();
+  if (view.root) buildThemeLists();
 }
 
 /* ==================================================================
@@ -1309,12 +1308,13 @@ function switchTab(tab) {
 
   if (view.tabPagesBtn) view.tabPagesBtn.classList.toggle('smsi-active', tab === 'pages');
   if (view.tabLongBtn) view.tabLongBtn.classList.toggle('smsi-active', tab === 'long');
-  if (view.bodyPages) view.bodyPages.classList.toggle('smsi-active', tab === 'pages');
-  if (view.bodyLong) view.bodyLong.classList.toggle('smsi-active', tab === 'long');
+  if (view.bodyPages) view.bodyPages.style.display = tab === 'pages' ? 'flex' : 'none';
+  if (view.bodyLong) view.bodyLong.style.display = tab === 'long' ? 'flex' : 'none';
 
   if (view.selectAllRow) {
     view.selectAllRow.classList.toggle('smsi-hidden', tab !== 'pages');
   }
+
   if (view.btnSave) view.btnSave.classList.toggle('smsi-hidden', tab !== 'pages');
   if (view.btnSaveLong) view.btnSaveLong.classList.toggle('smsi-hidden', tab !== 'long');
 
@@ -1327,35 +1327,35 @@ function switchTab(tab) {
 }
 
 function openOverlay() {
-  const overlay = view.overlay;
-  if (!overlay) return;
+  const root = view.root;
+  if (!root) return;
 
-  overlay.style.display = 'flex';
-  overlay.style.opacity = '0';
-  void overlay.offsetHeight;
+  root.style.display = 'flex';
+  root.style.opacity = '0';
+  void root.offsetHeight;
   requestAnimationFrame(function () {
-    overlay.classList.add('smsi-show');
-    overlay.style.opacity = '';
+    root.classList.add('smsi-show');
+    root.style.opacity = '';
   });
 }
 
 function closeOverlay() {
-  if (!view.overlay) return;
-  const overlay = view.overlay;
-  overlay.classList.remove('smsi-show');
+  if (!view.root) return;
+  const root = view.root;
+  root.classList.remove('smsi-show');
   document.body.style.overflow = '';
 
   disposeObservers();
 
   setTimeout(function () {
-    overlay.style.display = 'none';
+    root.style.display = 'none';
     if (view.pagesHost) view.pagesHost.innerHTML = '';
     if (view.longHost) view.longHost.innerHTML = '';
     if (view.themePanel) view.themePanel.classList.remove('smsi-show');
     view.pages = [];
     view.selected = [];
     view.longCanvas = null;
-  }, 220);
+  }, 200);
   setNativeTopBarVisible(true);
 }
 
@@ -1381,6 +1381,8 @@ function rebuild() {
   );
   view.selected = new Array(view.pages.length).fill(true);
   view.longCanvas = null;
+  _measureKey = '';
+  _measureCache = null;
 
   if (view.titleEl) view.titleEl.textContent = view.title;
   if (view.key15Btn) view.key15Btn.classList.toggle('smsi-on', view.rows === 15);
@@ -1413,15 +1415,19 @@ let sliderTimer = 0;
 function bindSliders() {
   if (view.rowsSlider) {
     view.rowsSlider.addEventListener('input', function () {
-      view.customRows = parseInt(view.rowsSlider.value, 10) || 15;
-      if (view.rowsValEl) view.rowsValEl.textContent = String(view.customRows);
+      view.customRows = parseInt(view.rowsSlider.value, 10) || 30;
+      if (view.rowsValEl) view.rowsValEl.textContent = view.customRows + ' 行';
+    });
+    view.rowsSlider.addEventListener('change', function () {
       scheduleRebuild();
     });
   }
   if (view.colsSlider) {
     view.colsSlider.addEventListener('input', function () {
       view.customCols = parseInt(view.colsSlider.value, 10) || 8;
-      if (view.colsValEl) view.colsValEl.textContent = String(view.customCols);
+      if (view.colsValEl) view.colsValEl.textContent = view.customCols + ' 列';
+    });
+    view.colsSlider.addEventListener('change', function () {
       scheduleRebuild();
     });
   }
@@ -1432,18 +1438,51 @@ function scheduleRebuild() {
   sliderTimer = setTimeout(function () {
     sliderTimer = 0;
     rebuild();
-    renderPages();
+    resizePages();
     updateSelectUI();
     if (getActiveTab() === 'long') ensureLongPreview();
-  }, 120);
+  }, 80);
+}
+
+function resizePages() {
+  const m = getMeasure();
+  const w = Math.round(m.width * view.pageZoom) + 'px';
+
+  for (let i = 0; i < view.pages.length; i++) {
+    const page = view.pages[i];
+    if (!page._wrap) continue;
+    page._wrap.style.width = w;
+    page._rendered = false;
+    page._lod = 0;
+  }
+
+  const meta = buildMeta();
+  const pane = view.bodyPages;
+  if (!pane) return;
+
+  const scrollTop = pane.scrollTop;
+  const viewH = pane.clientHeight;
+
+  for (let i = 0; i < view.pages.length; i++) {
+    const page = view.pages[i];
+    if (!page._wrap) continue;
+
+    const top = page._wrap.offsetTop;
+    const bottom = top + page._wrap.offsetHeight;
+
+    if (bottom > scrollTop - viewH && top < scrollTop + viewH * 2) {
+      renderPageAt(i, meta, LOD_HIGH);
+    }
+  }
 }
 
 function updateStepperUI() {
   if (view.rowsSlider) view.rowsSlider.value = String(view.customRows);
   if (view.colsSlider) view.colsSlider.value = String(view.customCols);
-  if (view.rowsValEl) view.rowsValEl.textContent = String(view.customRows);
-  if (view.colsValEl) view.colsValEl.textContent = String(view.customCols);
+  if (view.rowsValEl) view.rowsValEl.textContent = view.customRows + ' 行';
+  if (view.colsValEl) view.colsValEl.textContent = view.customCols + ' 列';
 }
+
 
 /* ==================================================================
  * 13. 事件
@@ -1486,14 +1525,7 @@ function onOverlayClick(ev) {
 
   switch (act) {
     case 'close':
-    case 'cancel':
       closeOverlay();
-      break;
-    case 'zoom-in':
-      setZoom(currentZoom() + 0.15);
-      break;
-    case 'zoom-out':
-      setZoom(currentZoom() - 0.15);
       break;
     case 'zoom-reset':
       setZoom(DEFAULT_ZOOM);
@@ -1535,89 +1567,61 @@ function onOverlayClick(ev) {
  * ================================================================== */
 
 function ensureOverlay() {
-  if (view.overlay) return view.overlay;
+  if (view.root) return view.root;
   injectStyle();
 
-  const overlay = document.createElement('div');
-  overlay.className = 'smsi-overlay';
-  overlay.innerHTML = OVERLAY_HTML;
+  const root = document.createElement('div');
+  root.className = 'smsi-root';
+  root.innerHTML = OVERLAY_HTML;
 
-  overlay.addEventListener('click', onOverlayClick);
-  document.body.appendChild(overlay);
+  root.addEventListener('click', onOverlayClick);
+  document.body.appendChild(root);
 
-  view.overlay = overlay;
-  view.titleEl = overlay.querySelector('.smsi-title');
-  view.pagesHost = overlay.querySelector('.smsi-pages');
-  view.longHost = overlay.querySelector('.smsi-long-wrap');
-  view.zoomLabel = overlay.querySelector('.smsi-zoom');
-  view.key15Btn = overlay.querySelector('[data-act="key15"]');
-  view.key9Btn = overlay.querySelector('[data-act="key9"]');
-  view.selectAllRow = overlay.querySelector('[data-role="select-all-row"]');
-  view.selectAllSwitch = overlay.querySelector('.smsi-switch[data-act="select-all"]');
-  view.selectCountEl = overlay.querySelector('[data-role="select-count"]');
-  view.progressBar = overlay.querySelector('[data-role="progress"]');
-  view.progressFill = overlay.querySelector('.smsi-progress-fill');
-  view.progressText = overlay.querySelector('.smsi-progress-text');
-  view.tabPagesBtn = overlay.querySelector('[data-act="tab-pages"]');
-  view.tabLongBtn = overlay.querySelector('[data-act="tab-long"]');
-  view.bodyPages = overlay.querySelector('[data-pane="pages"]');
-  view.bodyLong = overlay.querySelector('[data-pane="long"]');
-  view.btnSave = overlay.querySelector('[data-act="save"]');
-  view.btnSaveLong = overlay.querySelector('[data-act="save-long"]');
+  view.root = root;
+  view.titleEl = root.querySelector('.smsi-title');
+  view.pagesHost = root.querySelector('.smsi-pages');
+  view.longHost = root.querySelector('.smsi-long-wrap');
+  view.zoomLabel = root.querySelector('.smsi-zoom');
+  view.key15Btn = root.querySelector('[data-act="key15"]');
+  view.key9Btn = root.querySelector('[data-act="key9"]');
+  view.themeBtn = root.querySelector('[data-act="theme"]');
+  view.selectAllRow = root.querySelector('[data-role="select-all-row"]');
+  view.selectAllSwitch = root.querySelector('.smsi-switch[data-act="select-all"]');
+  view.selectCountEl = root.querySelector('[data-role="select-count"]');
+  view.progressBar = root.querySelector('[data-role="progress"]');
+  view.progressFill = root.querySelector('.smsi-progress-fill');
+  view.progressText = root.querySelector('.smsi-progress-text');
+  view.tabPagesBtn = root.querySelector('[data-act="tab-pages"]');
+  view.tabLongBtn = root.querySelector('[data-act="tab-long"]');
+  view.bodyPages = root.querySelector('.smsi-pages');
+  view.bodyLong = root.querySelector('.smsi-long-wrap');
+  view.btnSave = root.querySelector('[data-act="save"]');
+  view.btnSaveLong = root.querySelector('[data-act="save-long"]');
 
-  view.themeBtn = overlay.querySelector('[data-act="theme"]');
-  view.themePanel = overlay.querySelector('[data-role="theme-panel"]');
-  view.themeList = overlay.querySelector('[data-role="theme-list"]');
-  view.cornerList = overlay.querySelector('[data-role="corner-list"]');
-  view.themeCloseBtn = overlay.querySelector('[data-act="theme-close"]');
+  view.themePanel = root.querySelector('[data-role="theme-panel"]');
+  view.themeList = root.querySelector('[data-role="theme-list"]');
+  view.cornerList = root.querySelector('[data-role="corner-list"]');
+  view.themeCloseBtn = root.querySelector('[data-act="theme-close"]');
 
-  view.rowsSlider = overlay.querySelector('[data-role="rows-slider"]');
-  view.colsSlider = overlay.querySelector('[data-role="cols-slider"]');
-  view.rowsValEl = overlay.querySelector('[data-role="rows-val"]');
-  view.colsValEl = overlay.querySelector('[data-role="cols-val"]');
+  view.rowsSlider = root.querySelector('[data-role="rows-slider"]');
+  view.colsSlider = root.querySelector('[data-role="cols-slider"]');
+  view.rowsValEl = root.querySelector('[data-role="rows-val"]');
+  view.colsValEl = root.querySelector('[data-role="cols-val"]');
 
   buildThemeLists();
   updateStepperUI();
   bindSliders();
 
-  blockScrollChaining(overlay);
-  blockScrollChaining(view.bodyPages);
-  blockScrollChaining(view.bodyLong);
-
   bindPinchZoom(view.bodyPages, 'pages');
   bindPinchZoom(view.bodyLong, 'long');
 
-  return overlay;
-}
-
-function blockScrollChaining(el) {
-  if (!el) return;
-  el.addEventListener('touchmove', function (e) {
-    if (e.touches.length >= 2) return;
-    const target = e.currentTarget;
-    const atTop = target.scrollTop <= 0;
-    const atBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 1;
-    const dy = e.touches[0].clientY - (target._lastY || e.touches[0].clientY);
-    target._lastY = e.touches[0].clientY;
-    if ((atTop && dy > 0) || (atBottom && dy < 0)) {
-      e.preventDefault();
-    }
-  }, { passive: false });
-
-  el.addEventListener('touchend', function () {
-    el._lastY = null;
-  }, { passive: true });
+  return root;
 }
 
 /* ==================================================================
  * 对外入口
  * ================================================================== */
 
-/**
- * 打开谱面图片预览
- * @param {Object} sheet 谱面数据（songNotes 等）
- * @param {Object} opts { songName, author, model, transcriber, bpm, keyCount, toleranceMs }
- */
 export function openSheetImagePreview(sheet, opts) {
   opts = opts || {};
 
@@ -1634,7 +1638,7 @@ export function openSheetImagePreview(sheet, opts) {
   view.pageZoom = DEFAULT_ZOOM;
   view.longZoom = DEFAULT_ZOOM;
   view.customCols = 8;
-  view.customRows = 15;
+  view.customRows = 30;
 
   ensureOverlay();
 
