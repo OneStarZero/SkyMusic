@@ -119,6 +119,41 @@ export const OVERLAY_CSS = [
   '.smsi-btn.smsi-long{border:none;color:#0B1120;',
   'background:linear-gradient(135deg,#A78BFA,#C4B5FD);',
   'box-shadow:0 5px 16px rgba(167,139,250,.26);}'
+    // 主题面板
+  '.smsi-theme-panel{position:absolute;top:0;right:0;bottom:0;width:min(82%,320px);',
+  'background:rgba(11,17,32,.98);border-left:1px solid rgba(125,211,252,.14);',
+  'transform:translateX(100%);transition:transform .24s cubic-bezier(.34,1.56,.64,1);',
+  'display:flex;flex-direction:column;z-index:10;overflow-y:auto;}',
+  '.smsi-theme-panel.smsi-show{transform:translateX(0);}',
+
+  '.smsi-theme-head{display:flex;align-items:center;justify-content:space-between;',
+  'padding:12px 14px;border-bottom:1px solid rgba(125,211,252,.10);',
+  'font-size:13px;font-weight:700;color:#F8FAFC;}',
+
+  '.smsi-theme-section{padding:12px 14px;}',
+  '.smsi-theme-label{font-size:11.5px;color:#94A3B8;margin-bottom:8px;font-weight:600;letter-spacing:.5px;}',
+
+  '.smsi-theme-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}',
+  '.smsi-theme-item{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;',
+  'border-radius:10px;border:1px solid rgba(125,211,252,.10);background:rgba(30,41,59,.32);',
+  'cursor:pointer;transition:all .16s ease;font-size:11px;color:#CBD5E1;}',
+  '.smsi-theme-item:active{transform:scale(.95);}',
+  '.smsi-theme-item.smsi-selected{border-color:rgba(125,211,252,.7);',
+  'background:rgba(125,211,252,.14);color:#7DD3FC;}',
+  '.smsi-theme-swatch{width:100%;height:28px;border-radius:6px;}',
+  '.smsi-theme-swatch.smsi-rainbow{animation:rainbowSpin 3s linear infinite;}',
+  '@keyframes rainbowSpin{to{filter:hue-rotate(360deg);}}',
+
+  '.smsi-corner-row{display:flex;gap:8px;}',
+  '.smsi-corner-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px;',
+  'border-radius:10px;border:1px solid rgba(125,211,252,.10);background:rgba(30,41,59,.32);',
+  'cursor:pointer;transition:all .16s ease;font-size:11px;color:#CBD5E1;}',
+  '.smsi-corner-item:active{transform:scale(.95);}',
+  '.smsi-corner-item.smsi-selected{border-color:rgba(125,211,252,.7);',
+  'background:rgba(125,211,252,.14);color:#7DD3FC;}',
+  '.smsi-corner-preview{width:32px;height:32px;background:rgba(125,211,252,.4);',
+  'border:1.5px solid rgba(125,211,252,.6);}',
+
 ].join('');
 
 export function injectStyle() {
