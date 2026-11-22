@@ -200,7 +200,7 @@ export function initMidi() {
     let currentSource = null;
     let previewBusy = false;
     let lastTotalMs = 0;
-    // 忽略后续原生回调（stopAllPreview 后）
+    // 忽略后续原生回调（stopAllPreview / 切换来源时）
     let ignoreNextState = false;
     // ended 延迟重置定时器
     let endedResetTimer = null;
@@ -221,8 +221,7 @@ export function initMidi() {
             const rect = progressEl.getBoundingClientRect();
             const clientX = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
             const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-            const ms = Math.round(ratio * lastTotalMs);
-            seekPreview(ms);
+            seekPreview(Math.round(ratio * lastTotalMs));
         }
 
         progressEl.addEventListener('touchstart', function (e) {
@@ -306,7 +305,7 @@ export function initMidi() {
             else stateEl.textContent = '未播放';
         }
 
-        // 播放结束：延迟重置，让用户看到「播放结束」状态
+        // 播放结束：延迟重置，让用户看到「已结束」状态
         if (state === 'ended') {
             showToast('播放结束', 'success');
             if (stateEl) stateEl.textContent = '已结束';
@@ -326,20 +325,22 @@ export function initMidi() {
             return;
         }
 
+        // 停止/错误：只在主动停止时清空，播放切换时忽略
         if (state === 'stopped' || state === 'error') {
-            if (fillEl) fillEl.style.width = '0%';
-            if (timeEl) timeEl.textContent = '0:00 / 0:00';
-            if (stateEl) stateEl.textContent = '未播放';
-            if (toggleEl) { toggleEl.hidden = true; toggleEl.classList.remove('is-paused'); }
-            if (stopEl) stopEl.hidden = true;
-            if (playEl) playEl.disabled = false;
-            currentSource = null;
+            if (ignoreNextState) {
+                if (fillEl) fillEl.style.width = '0%';
+                if (timeEl) timeEl.textContent = '0:00 / 0:00';
+                if (stateEl) stateEl.textContent = '未播放';
+                if (toggleEl) { toggleEl.hidden = true; toggleEl.classList.remove('is-paused'); }
+                if (stopEl) stopEl.hidden = true;
+                if (playEl) playEl.disabled = false;
+                currentSource = null;
+            }
         }
     }
 
     // 监听原生播放状态
     window.addEventListener('skymusic:preview-state', function (e) {
-        if (ignoreNextState) return;
         const d = e.detail;
         if (!currentSource) return;
         updatePanelUI(currentSource, d.state, d.progressMs, d.totalMs);
@@ -387,15 +388,18 @@ export function initMidi() {
                 }
             }
 
-            // 切换来源前先停掉旧的
-            if (endedResetTimer) { clearTimeout(endedResetTimer); endedResetTimer = null; }
+            // 先设置 currentSource，再停止旧的
+            currentSource = source;
+            lastTotalMs = calcTotalMs(notes);
+
+            // 停止旧的（忽略 stopped 回调，避免清空 currentSource）
+            ignoreNextState = true;
             stopPreview();
             resetPanelUI(source === 'src' ? 'sheet' : 'src');
 
-            const totalMs = calcTotalMs(notes);
-            currentSource = source;
-            lastTotalMs = totalMs;
-            const res = playPreview(notes, totalMs + 500);
+            const res = playPreview(notes, lastTotalMs + 500);
+            ignoreNextState = false;
+
             if (!res.ok) {
                 currentSource = null;
                 showToast(res.error || '播放失败', 'error');

@@ -26,6 +26,7 @@ object SheetImageExporter {
     private const val APP_NAME = "SkyMusic"
     private const val LONG_SUFFIX = "-Full"
     private const val FALLBACK_BG = "#0B1120"
+    private const val TARGET_SCALE = 3f
 
     fun export(
         baseDir: File,
@@ -43,10 +44,9 @@ object SheetImageExporter {
             val infoItems = parseInfoItems(root.optJSONArray("infoItems"))
             val pagesArr = root.optJSONArray("pages")
 
-            SkyLog.i("导出参数: bg=${st.bg}, noteFill=${st.noteFill}, noteFillAlt=${st.noteFillAlt}, " +
-                    "gridLine=${st.gridLine}, cell=${st.cell}, pad=${st.pad}, gridRadius=${st.gridRadius}, " +
-                    "cols=${st.cols}, rowsPerPage=${st.rowsPerPage}, noteShape=${st.noteShape}, " +
-                    "bgPattern=${st.bgPattern}, decoType=${st.decoType}, longOnly=$longOnly, mergeLong=$mergeLong")
+            SkyLog.i("导出参数: bg=${st.bg}, noteFill=${st.noteFill}, cell=${st.cell}, pad=${st.pad}, " +
+                    "gridRadius=${st.gridRadius}, cols=${st.cols}, noteShape=${st.noteShape}, " +
+                    "longOnly=$longOnly, mergeLong=$mergeLong")
 
             if (pagesArr == null || pagesArr.length() == 0) {
                 SkyLog.w("没有选中任何页面")
@@ -80,9 +80,22 @@ object SheetImageExporter {
                     val pageIndex = pagesArr.optJSONObject(i)?.optInt("index", i) ?: i
                     onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 80) / total)
 
+                    val isFirst = (i == 0)
+                    val isLast = (i == parsedPages.size - 1)
+                    val isLongMode = (longOnly || mergeLong)
+
+                    // 分页模式：每页都完整
+                    // 长图模式：第一页显示标题+信息，最后一页显示底部水印
+                    val showTitle = if (isLongMode) isFirst else true
+                    val showInfo = if (isLongMode) isFirst else true
+                    val showWatermark = if (isLongMode) isLast else true
+                    // 长图非首页：裁掉底部信息面板留白
+                    val trimBottom = isLongMode && !isFirst
+
                     val bitmap = drawPageFast(
                         parsedPages[i], songName, rows, st, pageIndex, pageCount,
-                        infoItems, size, scale
+                        infoItems, size, scale,
+                        showTitle, showInfo, showWatermark, trimBottom
                     ) ?: return fail("绘制失败")
 
                     if (!longOnly && pageDir != null) {
@@ -166,7 +179,35 @@ object SheetImageExporter {
             canvas.drawBitmap(bmp, null, RectF(left, y, left + dstW, y + dstH), paint)
             y += dstH + gap * scale
         }
+
+        // 整体铺满水印
+        drawTiledWatermark(canvas, outW, outH, st)
+
         return longBitmap
+    }
+
+    private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.watermarkColor, 0.04f)
+            textSize = 40f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+        }
+        val text = WATERMARK_TEXT
+        val stepX = 400f
+        val stepY = 300f
+        var y = 100f
+        while (y < h) {
+            var x = 100f
+            while (x < w) {
+                canvas.save()
+                canvas.rotate(-30f, x, y)
+                canvas.drawText(text, x, y, paint)
+                canvas.restore()
+                x += stepX
+            }
+            y += stepY
+        }
     }
 
     // ============================ 解析 ============================
@@ -206,7 +247,7 @@ object SheetImageExporter {
         return if (s.isEmpty() || s == "." || s == "..") "未命名乐谱" else s
     }
 
-    // ============================ 颜色解析（宽松匹配 + 兜底） ============================
+    // ============================ 颜色解析 ============================
 
     private fun argb(hex: String, alpha: Float): Int {
         val c = parseColorSafe(hex)
@@ -280,8 +321,12 @@ object SheetImageExporter {
     // ============================ 尺寸 ============================
 
     private fun computeScale(w: Int, h: Int): Float {
-        val pixels = w.toDouble() * h.toDouble()
-        return if (pixels > 24_000_000.0) sqrt(24_000_000.0 / pixels).toFloat() else 1f
+        val pixels = w.toDouble() * h.toDouble() * TARGET_SCALE * TARGET_SCALE
+        return if (pixels > 24_000_000.0) {
+            sqrt(24_000_000.0 / (w.toDouble() * h.toDouble())).toFloat()
+        } else {
+            TARGET_SCALE
+        }
     }
 
     private fun measure(rows: Int, st: Style, infoCount: Int): Size {
@@ -300,40 +345,47 @@ object SheetImageExporter {
     private fun drawPageFast(
         page: PageData, songName: String, rows: Int, st: Style,
         pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
-        size: Size, scale: Float
+        size: Size, scale: Float,
+        showTitle: Boolean = true,
+        showInfo: Boolean = true,
+        showWatermark: Boolean = true,
+        trimBottom: Boolean = false
     ): Bitmap? {
+        // 裁掉底部时，实际高度减少
+        val actualH = if (trimBottom) {
+            size.height - 120 - infoItems.size * 22
+        } else {
+            size.height
+        }
+
         val w = (size.width * scale).roundToInt().coerceAtLeast(1)
-        val h = (size.height * scale).roundToInt().coerceAtLeast(1)
+        val h = (actualH * scale).roundToInt().coerceAtLeast(1)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
 
-        // 先铺底色（不受 scale 影响）
         canvas.drawColor(argb(st.bg, 1f))
-
-        // 再缩放绘制内容
         canvas.save()
         canvas.scale(scale, scale)
 
         drawBgPattern(canvas, size, st)
         drawDeco(canvas, size, st)
 
-        // 标题
-        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.titleColor, 1f)
-            textSize = st.titleSize
-            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-            textAlign = when (st.titleAlign) {
-                "left" -> Paint.Align.LEFT
-                "right" -> Paint.Align.RIGHT
-                else -> Paint.Align.CENTER
+        // 标题（自动缩小）
+        if (showTitle) {
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = argb(st.titleColor, 1f)
+                textSize = st.titleSize
+                typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
             }
+            val maxTitleWidth = size.width - st.pad * 2
+            var titleSize = st.titleSize
+            while (titlePaint.measureText(songName) > maxTitleWidth && titleSize > 10f) {
+                titleSize -= 1f
+                titlePaint.textSize = titleSize
+            }
+            canvas.drawText(songName, size.width / 2f, st.pad + titleSize, titlePaint)
         }
-        val titleX = when (st.titleAlign) {
-            "left" -> st.pad.toFloat()
-            "right" -> (size.width - st.pad).toFloat()
-            else -> size.width / 2f
-        }
-        canvas.drawText(songName, titleX, st.pad + st.titleSize, titlePaint)
 
         // 页码
         val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -341,17 +393,19 @@ object SheetImageExporter {
             textSize = st.metaSize
             textAlign = Paint.Align.RIGHT
         }
-        canvas.drawText("${pageIndex + 1} / $pageCount", (size.width - st.pad).toFloat(), st.pad + st.titleSize, pagePaint)
+        canvas.drawText("${pageIndex + 1} / $pageCount", (size.width - st.pad).toFloat(), st.pad + st.metaSize, pagePaint)
 
         // 网格
         val gridTop = st.pad + st.titleSize + 30f
         drawKeyGrid(canvas, page, rows, st, st.pad.toFloat(), gridTop)
 
         // 信息面板
-        drawInfoPanel(canvas, infoItems, st, size, gridTop + rows * (st.cell + st.cellGap) + 20f)
+        if (showInfo) {
+            drawInfoPanel(canvas, infoItems, st, size, gridTop + rows * (st.cell + st.cellGap) + 20f)
+        }
 
         // 水印
-        if (st.showWatermark) drawWatermark(canvas, size, st)
+        if (showWatermark && st.showWatermark) drawWatermark(canvas, size, st)
 
         canvas.restore()
         return bmp
@@ -376,7 +430,6 @@ object SheetImageExporter {
             color = argb(st.noteFillAlt, 1f)
         }
 
-        // 绘制所有格子
         for (r in 0 until rows) {
             for (c in 0 until cols) {
                 val x = left + c * (cell + gap)
@@ -386,7 +439,6 @@ object SheetImageExporter {
             }
         }
 
-        // 绘制激活音符
         for (col in page.columns) {
             for (rowIdx in col.rows) {
                 if (rowIdx < 0 || rowIdx >= rows) continue
