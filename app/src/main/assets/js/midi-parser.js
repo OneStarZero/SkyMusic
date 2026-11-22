@@ -13,7 +13,6 @@ import {
 // 兼容 UMD 打包的 default 导出
 const Midi = ToneMidi.Midi || ToneMidi.default || ToneMidi;
 
-
 const KEY_MAP = { 60: "1Key0", 62: "1Key1", 64: "1Key2", 65: "1Key3", 67: "1Key4", 69: "1Key5", 71: "1Key6", 72: "1Key7", 74: "1Key8", 76: "1Key9" };
 const VALID_KEYS = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76];
 
@@ -107,6 +106,8 @@ function ensureSheetImageButton(container, onClick) {
 
 /**
  * 收集原始 MIDI 音符（转换前）
+ * @param {Midi} midiData
+ * @param {Set<number>} selectedIndices 试听选中的轨道索引
  */
 function collectOriginalNotes(midiData, selectedIndices) {
     const notes = [];
@@ -178,21 +179,28 @@ export function initMidi() {
     let selectedTrackIndices = new Set();
     let hideResultTimeout = null;
 
-    // 最近一次转换的上下文，供「生成谱面图片」和「试听」复用
+    // 最近一次转换的上下文，供「生成谱面图片」和「试听谱面」复用
     let lastConvertContext = null;
 
     /* ==================== 试听 UI ==================== */
 
     const previewPanel = document.getElementById('previewPanel');
     const previewTime = document.getElementById('previewTime');
+    const previewSource = document.getElementById('previewSource');
     const previewProgressFill = document.getElementById('previewProgressFill');
+    const previewHint = document.getElementById('previewHint');
     const btnPreviewBefore = document.getElementById('btnPreviewBefore');
     const btnPreviewAfter = document.getElementById('btnPreviewAfter');
     const btnPreviewToggle = document.getElementById('btnPreviewToggle');
     const btnPreviewStop = document.getElementById('btnPreviewStop');
 
-    if (previewPanel && isPreviewSupported()) {
-        previewPanel.hidden = false;
+    // 当前播放来源：'src' | 'sheet' | null
+    let currentSource = null;
+    // 防连点锁
+    let previewBusy = false;
+
+    if (previewPanel && !isPreviewSupported()) {
+        previewPanel.hidden = true;
     }
 
     /** 更新进度条与时间 */
@@ -206,17 +214,37 @@ export function initMidi() {
         }
 
         const active = (state === 'playing' || state === 'paused');
+
         if (btnPreviewToggle) {
             btnPreviewToggle.hidden = !active;
-            btnPreviewToggle.textContent = (state === 'paused') ? '▶️' : '⏸';
+            if (state === 'paused') {
+                btnPreviewToggle.textContent = '▶️';
+                btnPreviewToggle.classList.add('is-paused');
+            } else {
+                btnPreviewToggle.textContent = '⏸';
+                btnPreviewToggle.classList.remove('is-paused');
+            }
         }
         if (btnPreviewStop) {
             btnPreviewStop.hidden = !active;
         }
 
+        // 播放中禁用「原曲/谱面」按钮，避免重复触发
+        if (btnPreviewBefore) btnPreviewBefore.disabled = active;
+        if (btnPreviewAfter) btnPreviewAfter.disabled = active;
+
+        if (previewSource) {
+            if (state === 'playing' || state === 'paused') {
+                previewSource.textContent = currentSource === 'sheet' ? '谱面' : '原曲';
+            } else {
+                previewSource.textContent = '未播放';
+            }
+        }
+
         if (state === 'stopped' || state === 'ended' || state === 'error') {
             if (previewProgressFill) previewProgressFill.style.width = '0%';
             if (previewTime) previewTime.textContent = '0:00 / 0:00';
+            currentSource = null;
         }
     }
 
@@ -226,49 +254,70 @@ export function initMidi() {
         updatePreviewUI(d.state, d.progressMs, d.totalMs);
     });
 
+    /** 统一播放入口 */
+    function startPreview(source) {
+        if (previewBusy) return;
+        previewBusy = true;
+
+        try {
+            let notes = null;
+
+            if (source === 'src') {
+                if (!currentMidiData) {
+                    showToast('请先选择 MIDI 文件', 'error');
+                    return;
+                }
+                notes = collectOriginalNotes(currentMidiData, selectedTrackIndices);
+                if (!notes.length) {
+                    showToast('请至少勾选一个音轨', 'error');
+                    return;
+                }
+            } else {
+                if (!lastConvertContext || !lastConvertContext.allNotes) {
+                    showToast('请先完成一次转谱', 'error');
+                    return;
+                }
+                notes = collectSheetNotes(lastConvertContext.allNotes);
+                if (!notes.length) {
+                    showToast('没有可试听的音符', 'error');
+                    return;
+                }
+            }
+
+            const totalMs = calcTotalMs(notes);
+            currentSource = source;
+            const res = playPreview(notes, totalMs + 500);
+            if (!res.ok) {
+                currentSource = null;
+                showToast(res.error || '播放失败', 'error');
+            }
+        } finally {
+            // 给原生一点时间，避免连点
+            setTimeout(function () { previewBusy = false; }, 300);
+        }
+    }
+
     // 试听原曲
     if (btnPreviewBefore) {
         btnPreviewBefore.addEventListener('click', function () {
-            if (!currentMidiData) {
-                showToast('请先选择 MIDI 文件', 'error');
-                return;
-            }
-            const notes = collectOriginalNotes(currentMidiData, selectedTrackIndices);
-            if (!notes.length) {
-                showToast('没有可试听的音符', 'error');
-                return;
-            }
-            const totalMs = calcTotalMs(notes);
-            const res = playPreview(notes, totalMs + 500);
-            if (!res.ok) showToast(res.error || '播放失败', 'error');
+            startPreview('src');
         });
     }
 
     // 试听谱面
     if (btnPreviewAfter) {
         btnPreviewAfter.addEventListener('click', function () {
-            if (!lastConvertContext || !lastConvertContext.allNotes) {
-                showToast('请先完成一次转谱', 'error');
-                return;
-            }
-            const notes = collectSheetNotes(lastConvertContext.allNotes);
-            if (!notes.length) {
-                showToast('没有可试听的音符', 'error');
-                return;
-            }
-            const totalMs = calcTotalMs(notes);
-            const res = playPreview(notes, totalMs + 500);
-            if (!res.ok) showToast(res.error || '播放失败', 'error');
+            startPreview('sheet');
         });
     }
 
-    // 暂停 / 恢复
+    // 暂停 / 继续
     if (btnPreviewToggle) {
         btnPreviewToggle.addEventListener('click', function () {
-            if (btnPreviewToggle.textContent === '⏸') {
-                pausePreview();
-            } else {
+            if (btnPreviewToggle.classList.contains('is-paused')) {
                 resumePreview();
+            } else {
+                pausePreview();
             }
         });
     }
@@ -343,6 +392,10 @@ export function initMidi() {
     async function processMidiData(arrayBuffer, fileName) {
         if (!arrayBuffer || arrayBuffer.byteLength === 0) { showToast('文件内容为空', 'error'); return; }
 
+        // 换文件时先停止试听
+        stopPreview();
+        currentSource = null;
+
         dropZone.classList.add('has-file');
         dropText.innerHTML = `✅ 已选择：<br><span class="filename">${fileName}</span>`;
 
@@ -390,6 +443,7 @@ export function initMidi() {
                         if (n.time > maxTime) maxTime = n.time;
                     });
 
+                    // 默认全选（除第 10 轨鼓组）
                     if (index !== 9) selectedTrackIndices.add(index);
 
                     const item = document.createElement('div');
@@ -418,11 +472,21 @@ export function initMidi() {
             configPanel.style.display = 'block';
             convertBtn.disabled = false;
             statusDiv.textContent = '准备就绪';
+
+            // 选 MIDI 后显示试听面板（原曲可试听）
+            if (previewPanel && isPreviewSupported()) {
+                previewPanel.hidden = false;
+            }
+            if (btnPreviewBefore) btnPreviewBefore.disabled = false;
+            if (previewHint) {
+                previewHint.textContent = '试听原曲将播放上方「提取音轨」中勾选的轨道';
+            }
         } catch (err) {
             statusDiv.textContent = '❌ 解析失败';
             showToast('解析失败: ' + err.message, 'error');
             dropZone.classList.remove('has-file');
             dropText.textContent = "点击选择或拖拽 MIDI 文件";
+            if (previewPanel) previewPanel.hidden = true;
         }
     }
 
@@ -543,7 +607,7 @@ export function initMidi() {
 
                 pendingTxtContent = JSON.stringify(skyStudioData);
 
-                // 记录本次转换上下文，供「生成谱面图片」和「试听」使用
+                // 记录本次转换上下文，供「生成谱面图片」和「试听谱面」使用
                 lastConvertContext = {
                     sheet: skyStudioData[0],
                     songName: finalSongName,
@@ -579,6 +643,15 @@ export function initMidi() {
                 statusDiv.textContent = '✅ 提取完成！';
 
                 setTimeout(() => resultCard.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+
+                // 转谱完成后显示「试听谱面」按钮
+                if (btnPreviewAfter) {
+                    btnPreviewAfter.hidden = false;
+                    btnPreviewAfter.disabled = false;
+                }
+                if (previewHint) {
+                    previewHint.textContent = '可试听原曲或转换后的谱面';
+                }
 
                 const isApp = typeof window.AndroidBridge !== 'undefined';
                 const appActions = document.getElementById('appActions');

@@ -62,16 +62,16 @@ jobs:
         run: |
           cd app/build/outputs/apk/release/
           if [ -f "app-release.apk" ]; then
-            mv app-release.apk SkyMusic-0.0.9.apk
+            mv app-release.apk SkyMusic-0.1.0.apk
           elif ls *.apk >/dev/null 2>&1; then
-            mv "$(ls *.apk | head -n 1)" SkyMusic-0.0.9.apk
+            mv "$(ls *.apk | head -n 1)" SkyMusic-0.1.0.apk
           fi
-          ls -lh SkyMusic-0.0.9.apk
+          ls -lh SkyMusic-0.1.0.apk
 
       # 上传打包好的 APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SkyMusic-Release-0.0.9
-          path: app/build/outputs/apk/release/SkyMusic-0.0.9.apk
+          name: SkyMusic-Release-0.1.0
+          path: app/build/outputs/apk/release/SkyMusic-0.1.0.apk
           retention-days: 7

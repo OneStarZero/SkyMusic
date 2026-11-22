@@ -328,12 +328,8 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
 .result-details { margin-bottom: 20px; }
 
 /* ================= 试听面板 ================= */
-.preview-panel {
-    background: rgba(0, 0, 0, 0.12);
-    border: 1px solid rgba(125, 211, 252, 0.15);
-    border-radius: var(--radius-md);
-    padding: 16px;
-    margin-bottom: 20px;
+.preview-card {
+    border-color: rgba(125, 211, 252, 0.2);
 }
 
 .preview-head {
@@ -342,16 +338,19 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
     align-items: center;
     margin-bottom: 10px;
 }
-.preview-title {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--cloud-blue);
-}
 .preview-time {
-    font-size: 0.75rem;
-    color: var(--text-soft);
+    font-size: 0.8rem;
+    color: var(--cloud-blue);
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+.preview-source {
+    font-size: 0.72rem;
+    color: var(--text-soft);
+    padding: 2px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .preview-progress {
@@ -385,22 +384,46 @@ input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; 
     font-weight: 700;
     font-size: 0.9rem;
     cursor: pointer;
-    transition: transform 0.15s ease, opacity 0.2s ease;
+    transition: transform 0.15s ease, opacity 0.2s ease, background 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
 }
-.preview-btn:active { transform: scale(0.95); }
+.preview-btn:active:not(:disabled) { transform: scale(0.95); }
+.preview-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+}
 .preview-btn-src { background: linear-gradient(135deg, #38BDF8, #6366F1); }
 .preview-btn-sheet { background: linear-gradient(135deg, #34D399, #10B981); }
+
+/* 暂停/继续：图标 + 状态色 */
 .preview-btn-toggle {
     flex: 0 0 auto;
     padding: 12px 18px;
-    background: linear-gradient(135deg, #FBBF24, #F59E0B);
     font-size: 1rem;
+    background: linear-gradient(135deg, #FBBF24, #F59E0B);
+    min-width: 56px;
 }
+.preview-btn-toggle.is-paused {
+    background: linear-gradient(135deg, #34D399, #10B981);
+}
+
 .preview-btn-stop {
     flex: 0 0 auto;
     padding: 12px 18px;
-    background: linear-gradient(135deg, #F87171, #DC2626);
     font-size: 1rem;
+    background: linear-gradient(135deg, #F87171, #DC2626);
+    min-width: 56px;
+}
+
+.preview-hint {
+    margin-top: 10px;
+    font-size: 0.72rem;
+    color: rgba(148, 163, 184, 0.75);
+    text-align: center;
+    line-height: 1.5;
+}
+
 }
 
 /* ================= 操作按钮区 ================= */
