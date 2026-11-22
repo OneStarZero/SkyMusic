@@ -11,13 +11,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Locale
 import java.util.Random
-import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 object SheetImageExporter {
@@ -163,7 +160,7 @@ object SheetImageExporter {
         return longBitmap
     }
 
-    // ============================ 以下为原有绘制逻辑（保持不变） ============================
+    // ============================ 解析 ============================
 
     private fun parsePage(obj: JSONObject, rows: Int): PageData {
         val columns = ArrayList<ColumnData>()
@@ -200,11 +197,81 @@ object SheetImageExporter {
         return if (s.isEmpty() || s == "." || s == "..") "未命名乐谱" else s
     }
 
+    // ============================ 颜色解析（支持 hsl/rgb/hex） ============================
+
     private fun argb(hex: String, alpha: Float): Int {
-        val c = try { Color.parseColor(hex) } catch (_: Exception) { Color.WHITE }
+        val c = parseColorSafe(hex)
         val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
         return Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
     }
+
+    /** 支持 #RRGGBB / #AARRGGBB / hsl(h,s%,l%) / rgb(r,g,b) */
+    private fun parseColorSafe(input: String): Int {
+        val s = input.trim()
+        if (s.isEmpty()) return Color.WHITE
+
+        // hsl(h, s%, l%)
+        if (s.startsWith("hsl", ignoreCase = true)) {
+            val m = Regex("""hsl\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)""").find(s)
+            if (m != null) {
+                val h = m.groupValues[1].toFloat() / 360f
+                val sat = m.groupValues[2].toFloat() / 100f
+                val light = m.groupValues[3].toFloat() / 100f
+                return hslToColor(h, sat, light)
+            }
+            return Color.WHITE
+        }
+
+        // rgb(r, g, b) / rgba(r, g, b, a)
+        if (s.startsWith("rgb", ignoreCase = true)) {
+            val m = Regex("""rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)""").find(s)
+            if (m != null) {
+                val r = m.groupValues[1].toInt().coerceIn(0, 255)
+                val g = m.groupValues[2].toInt().coerceIn(0, 255)
+                val b = m.groupValues[3].toInt().coerceIn(0, 255)
+                return Color.rgb(r, g, b)
+            }
+            return Color.WHITE
+        }
+
+        // #RRGGBB / #AARRGGBB
+        return try {
+            Color.parseColor(s)
+        } catch (_: Exception) {
+            Color.WHITE
+        }
+    }
+
+    private fun hslToColor(h: Float, s: Float, l: Float): Int {
+        if (s == 0f) {
+            val v = (l * 255).toInt().coerceIn(0, 255)
+            return Color.rgb(v, v, v)
+        }
+        val q = if (l < 0.5f) l * (1 + s) else l + s - l * s
+        val p = 2 * l - q
+        val r = hue2rgb(p, q, h + 1f / 3f)
+        val g = hue2rgb(p, q, h)
+        val b = hue2rgb(p, q, h - 1f / 3f)
+        return Color.rgb(
+            (r * 255).toInt().coerceIn(0, 255),
+            (g * 255).toInt().coerceIn(0, 255),
+            (b * 255).toInt().coerceIn(0, 255)
+        )
+    }
+
+    private fun hue2rgb(p: Float, q: Float, t0: Float): Float {
+        var t = t0
+        if (t < 0f) t += 1f
+        if (t > 1f) t -= 1f
+        return when {
+            t < 1f / 6f -> p + (q - p) * 6f * t
+            t < 1f / 2f -> q
+            t < 2f / 3f -> p + (q - p) * (2f / 3f - t) * 6f
+            else -> p
+        }
+    }
+
+    // ============================ 尺寸 ============================
 
     private fun computeScale(w: Int, h: Int): Float {
         val pixels = w.toDouble() * h.toDouble()
@@ -222,6 +289,8 @@ object SheetImageExporter {
         return Size(w, h)
     }
 
+    // ============================ 绘制 ============================
+
     private fun drawPageFast(
         page: PageData, songName: String, rows: Int, st: Style,
         pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
@@ -231,9 +300,14 @@ object SheetImageExporter {
         val h = (size.height * scale).roundToInt().coerceAtLeast(1)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
+
+        // 先铺底色（不受 scale 影响）
+        canvas.drawColor(argb(st.bg, 1f))
+
+        // 再缩放绘制内容
+        canvas.save()
         canvas.scale(scale, scale)
 
-        canvas.drawColor(argb(st.bg, 1f))
         drawBgPattern(canvas, size, st)
         drawDeco(canvas, size, st)
 
@@ -273,6 +347,7 @@ object SheetImageExporter {
         // 水印
         if (st.showWatermark) drawWatermark(canvas, size, st)
 
+        canvas.restore()
         return bmp
     }
 
@@ -320,7 +395,6 @@ object SheetImageExporter {
 
                 if (st.noteShape == "skystudio") {
                     canvas.drawRoundRect(rect, radius, radius, paint)
-                    // 内部菱形
                     val diamondPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                         style = Paint.Style.FILL
                         color = Color.argb(217, 11, 17, 32)

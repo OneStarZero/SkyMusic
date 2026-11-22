@@ -176,6 +176,7 @@ export function initMidi() {
     /* ==================== 原曲试听 UI ==================== */
 
     const srcPanel = document.getElementById('previewSrcPanel');
+    const srcTime = document.getElementById
     const srcTime = document.getElementById('previewSrcTime');
     const srcState = document.getElementById('previewSrcState');
     const srcFill = document.getElementById('previewSrcFill');
@@ -200,6 +201,10 @@ export function initMidi() {
     let currentSource = null;
     let previewBusy = false;
     let lastTotalMs = 0;
+    // 忽略后续原生回调（stopAllPreview 后）
+    let ignoreNextState = false;
+    // ended 延迟重置定时器
+    let endedResetTimer = null;
 
     if (!isPreviewSupported()) {
         if (srcPanel) srcPanel.hidden = true;
@@ -302,21 +307,40 @@ export function initMidi() {
             else stateEl.textContent = '未播放';
         }
 
-        // 播放结束提示（在清空 currentSource 之前）
+        // 播放结束：延迟重置，让用户看到「播放结束」状态
         if (state === 'ended') {
             showToast('播放结束', 'success');
+            if (stateEl) stateEl.textContent = '已结束';
+            if (toggleEl) { toggleEl.hidden = true; toggleEl.classList.remove('is-paused'); }
+            if (stopEl) stopEl.hidden = true;
+            if (playEl) playEl.disabled = false;
+
+            if (endedResetTimer) clearTimeout(endedResetTimer);
+            endedResetTimer = setTimeout(function () {
+                endedResetTimer = null;
+                if (currentSource !== which) return;
+                if (fillEl) fillEl.style.width = '0%';
+                if (timeEl) timeEl.textContent = '0:00 / 0:00';
+                if (stateEl) stateEl.textContent = '未播放';
+                currentSource = null;
+            }, 800);
+            return;
         }
 
-        if (state === 'stopped' || state === 'ended' || state === 'error') {
+        if (state === 'stopped' || state === 'error') {
             if (fillEl) fillEl.style.width = '0%';
             if (timeEl) timeEl.textContent = '0:00 / 0:00';
             if (stateEl) stateEl.textContent = '未播放';
+            if (toggleEl) { toggleEl.hidden = true; toggleEl.classList.remove('is-paused'); }
+            if (stopEl) stopEl.hidden = true;
+            if (playEl) playEl.disabled = false;
             currentSource = null;
         }
     }
 
     // 监听原生播放状态
     window.addEventListener('skymusic:preview-state', function (e) {
+        if (ignoreNextState) return;
         const d = e.detail;
         if (!currentSource) return;
         updatePanelUI(currentSource, d.state, d.progressMs, d.totalMs);
@@ -324,10 +348,14 @@ export function initMidi() {
 
     /** 停止当前播放并重置两个面板 */
     function stopAllPreview() {
+        ignoreNextState = true;
+        if (endedResetTimer) { clearTimeout(endedResetTimer); endedResetTimer = null; }
         stopPreview();
         currentSource = null;
+        lastTotalMs = 0;
         resetPanelUI('src');
         resetPanelUI('sheet');
+        setTimeout(function () { ignoreNextState = false; }, 300);
     }
 
     /** 统一播放入口 */
@@ -361,6 +389,7 @@ export function initMidi() {
             }
 
             // 切换来源前先停掉旧的
+            if (endedResetTimer) { clearTimeout(endedResetTimer); endedResetTimer = null; }
             stopPreview();
             resetPanelUI(source === 'src' ? 'sheet' : 'src');
 
