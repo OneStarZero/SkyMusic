@@ -16,7 +16,6 @@ import java.util.Random
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 object SheetImageExporter {
 
@@ -81,21 +80,17 @@ object SheetImageExporter {
                     onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 80) / total)
 
                     val isFirst = (i == 0)
-                    val isLast = (i == parsedPages.size - 1)
                     val isLongMode = (longOnly || mergeLong)
 
-                    // 分页模式：每页都完整
-                    // 长图模式：第一页显示标题+信息，最后一页显示底部水印
-                    val showTitle = if (isLongMode) isFirst else true
+                    // 长图模式：所有页都显示标题+页码+底部水印，只有第 1 页显示信息面板
+                    val showTitle = true
                     val showInfo = if (isLongMode) isFirst else true
-                    val showWatermark = if (isLongMode) isLast else true
-                    // 长图非首页：裁掉底部信息面板留白
-                    val trimBottom = isLongMode && !isFirst
+                    val showWatermark = true
 
                     val bitmap = drawPageFast(
                         parsedPages[i], songName, rows, st, pageIndex, pageCount,
                         infoItems, size, scale,
-                        showTitle, showInfo, showWatermark, trimBottom
+                        showTitle, showInfo, showWatermark
                     ) ?: return fail("绘制失败")
 
                     if (!longOnly && pageDir != null) {
@@ -144,11 +139,11 @@ object SheetImageExporter {
         }
     }
 
-    // ============================ 长图拼接 ============================
+    // ============================ 长图拼接（不降级） ============================
 
     private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
         if (pages.isEmpty()) return null
-        val gap = (st.pad * 0.6f).roundToInt().coerceAtLeast(8)
+        val gap = (st.pad * 0.6f * TARGET_SCALE).roundToInt().coerceAtLeast(8)
         var maxW = 0
         var totalH = 0L
         for (bmp in pages) {
@@ -159,12 +154,8 @@ object SheetImageExporter {
 
         if (maxW <= 0 || totalH <= 0) return null
 
-        var scale = 1f
-        val pixels = maxW.toDouble() * totalH.toDouble()
-        if (pixels > 40_000_000.0) scale = sqrt(40_000_000.0 / pixels).toFloat()
-
-        val outW = max(1, (maxW * scale).roundToInt())
-        val outH = max(1, (totalH * scale).roundToInt())
+        val outW = maxW
+        val outH = totalH.toInt()
 
         val longBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(longBitmap)
@@ -173,14 +164,12 @@ object SheetImageExporter {
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         var y = 0f
         for (bmp in pages) {
-            val dstW = bmp.width * scale
-            val dstH = bmp.height * scale
-            val left = (outW - dstW) / 2f
-            canvas.drawBitmap(bmp, null, RectF(left, y, left + dstW, y + dstH), paint)
-            y += dstH + gap * scale
+            val left = (outW - bmp.width) / 2f
+            canvas.drawBitmap(bmp, left, y, paint)
+            y += bmp.height + gap
         }
 
-        // 整体铺满水印
+        // 商业级斜向水印（铺满整张长图）
         drawTiledWatermark(canvas, outW, outH, st)
 
         return longBitmap
@@ -188,17 +177,17 @@ object SheetImageExporter {
 
     private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.watermarkColor, 0.04f)
-            textSize = 40f
+            color = argb(st.watermarkColor, 0.035f)
+            textSize = 36f * TARGET_SCALE
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
         }
         val text = WATERMARK_TEXT
-        val stepX = 400f
-        val stepY = 300f
-        var y = 100f
+        val stepX = 380f * TARGET_SCALE
+        val stepY = 260f * TARGET_SCALE
+        var y = 80f * TARGET_SCALE
         while (y < h) {
-            var x = 100f
+            var x = 80f * TARGET_SCALE
             while (x < w) {
                 canvas.save()
                 canvas.rotate(-30f, x, y)
@@ -321,12 +310,8 @@ object SheetImageExporter {
     // ============================ 尺寸 ============================
 
     private fun computeScale(w: Int, h: Int): Float {
-        val pixels = w.toDouble() * h.toDouble() * TARGET_SCALE * TARGET_SCALE
-        return if (pixels > 24_000_000.0) {
-            sqrt(24_000_000.0 / (w.toDouble() * h.toDouble())).toFloat()
-        } else {
-            TARGET_SCALE
-        }
+        // 固定 3 倍分辨率，不降级
+        return TARGET_SCALE
     }
 
     private fun measure(rows: Int, st: Style, infoCount: Int): Size {
@@ -348,18 +333,10 @@ object SheetImageExporter {
         size: Size, scale: Float,
         showTitle: Boolean = true,
         showInfo: Boolean = true,
-        showWatermark: Boolean = true,
-        trimBottom: Boolean = false
+        showWatermark: Boolean = true
     ): Bitmap? {
-        // 裁掉底部时，实际高度减少
-        val actualH = if (trimBottom) {
-            size.height - 120 - infoItems.size * 22
-        } else {
-            size.height
-        }
-
         val w = (size.width * scale).roundToInt().coerceAtLeast(1)
-        val h = (actualH * scale).roundToInt().coerceAtLeast(1)
+        val h = (size.height * scale).roundToInt().coerceAtLeast(1)
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
 
@@ -370,7 +347,17 @@ object SheetImageExporter {
         drawBgPattern(canvas, size, st)
         drawDeco(canvas, size, st)
 
+        // 页码（先算，用于标题宽度限制）
+        val pageText = "${pageIndex + 1} / $pageCount"
+        val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.metaColor, 1f)
+            textSize = st.metaSize
+            textAlign = Paint.Align.RIGHT
+        }
+        val pageWidth = pagePaint.measureText(pageText)
+
         // 标题（自动缩小）
+        var titleSize = st.titleSize
         if (showTitle) {
             val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = argb(st.titleColor, 1f)
@@ -378,8 +365,7 @@ object SheetImageExporter {
                 typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
                 textAlign = Paint.Align.CENTER
             }
-            val maxTitleWidth = size.width - st.pad * 2
-            var titleSize = st.titleSize
+            val maxTitleWidth = size.width - st.pad * 2 - pageWidth - 16f
             while (titlePaint.measureText(songName) > maxTitleWidth && titleSize > 10f) {
                 titleSize -= 1f
                 titlePaint.textSize = titleSize
@@ -387,24 +373,24 @@ object SheetImageExporter {
             canvas.drawText(songName, size.width / 2f, st.pad + titleSize, titlePaint)
         }
 
-        // 页码
-        val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.metaColor, 1f)
-            textSize = st.metaSize
-            textAlign = Paint.Align.RIGHT
+        // 页码（标题下方，右对齐）
+        val pageY = if (showTitle) {
+            st.pad + titleSize + st.metaSize + 8f
+        } else {
+            st.pad + st.metaSize
         }
-        canvas.drawText("${pageIndex + 1} / $pageCount", (size.width - st.pad).toFloat(), st.pad + st.metaSize, pagePaint)
+        canvas.drawText(pageText, (size.width - st.pad).toFloat(), pageY, pagePaint)
 
         // 网格
-        val gridTop = st.pad + st.titleSize + 30f
+        val gridTop = pageY + 20f
         drawKeyGrid(canvas, page, rows, st, st.pad.toFloat(), gridTop)
 
-        // 信息面板
+        // 信息面板（只有第 1 页显示，其他页留空）
         if (showInfo) {
             drawInfoPanel(canvas, infoItems, st, size, gridTop + rows * (st.cell + st.cellGap) + 20f)
         }
 
-        // 水印
+        // 底部水印（所有页都显示）
         if (showWatermark && st.showWatermark) drawWatermark(canvas, size, st)
 
         canvas.restore()
