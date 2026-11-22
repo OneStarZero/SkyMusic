@@ -20,12 +20,11 @@ object SheetImageExporter {
     private const val MAX_NAME_LENGTH = 60
     private const val FONT_STACK = "sans-serif"
     private const val WATERMARK_TEXT = "Bilibili@_OneStar"
+    private const val WATERMARK_UID = "Bilibili UID: 1283676246"
     private const val APP_NAME = "SkyMusic"
     private const val LONG_SUFFIX = "-Full"
     private const val FALLBACK_BG = "#0B1120"
     private const val SIZE_MULT = 5f
-
-    /** 长图分块高度（像素），避免一次性创建超大 Bitmap */
     private const val CHUNK_H = 8000
 
     fun export(
@@ -67,7 +66,6 @@ object SheetImageExporter {
 
             val size = measure(rows, st, infoItems.size)
 
-            // 分页模式：逐页绘制 + 保存
             if (!longOnly) {
                 for (i in parsedPages.indices) {
                     val pageIndex = pagesArr.optJSONObject(i)?.optInt("index", i) ?: i
@@ -85,7 +83,6 @@ object SheetImageExporter {
                 }
             }
 
-            // 长图模式：分块流式写入
             if (mergeLong || longOnly) {
                 onProgress?.invoke("正在生成长图…", 10)
                 val longName = "$safeName$LONG_SUFFIX.png"
@@ -114,14 +111,6 @@ object SheetImageExporter {
         }
     }
 
-    /**
-     * 长图分块流式写入：
-     * 1. 先计算总高度
-     * 2. 按 CHUNK_H 分块，每块创建 Bitmap，绘制对应区域，写入临时文件
-     * 3. 最后合并（这里简化为直接逐块写入同一个 PNG 流不可行，改为分块保存后提示）
-     *
-     * 实际实现：直接创建完整 Bitmap（如果内存允许），否则分块保存为多张。
-     */
     private fun writeLongImage(
         target: File,
         pages: List<PageData>,
@@ -140,7 +129,6 @@ object SheetImageExporter {
         val totalH = pageH * pages.size + gap * (pages.size - 1)
         val outW = size.width
 
-        // 尝试一次性创建（内存足够时）
         try {
             val longBitmap = Bitmap.createBitmap(outW, totalH, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(longBitmap)
@@ -159,19 +147,17 @@ object SheetImageExporter {
                 y += pageH + gap
             }
 
-            // 铺满水印
+            // 长图整体重新铺水印（跨页连贯）
             drawTiledWatermark(canvas, outW, totalH, st)
 
             writeBitmap(longBitmap, target)
             longBitmap.recycle()
             return true
         } catch (oom: OutOfMemoryError) {
-            // 内存不足，分块保存
             return writeLongImageChunked(target, pages, songName, rows, st, pageCount, infoItems, size, gap, onProgress)
         }
     }
 
-    /** 分块保存（内存不足时） */
     private fun writeLongImageChunked(
         target: File,
         pages: List<PageData>,
@@ -200,7 +186,6 @@ object SheetImageExporter {
             val canvas = Canvas(chunkBmp)
             canvas.drawColor(argb(st.bg, 1f))
 
-            var y = 0
             for (i in pages.indices) {
                 val pageTop = i * (pageH + gap)
                 val pageBottom = pageTop + pageH
@@ -216,7 +201,8 @@ object SheetImageExporter {
                 pageBmp.recycle()
             }
 
-            drawTiledWatermark(canvas, outW, chunkH, st)
+            // 分块内铺水印（偏移量按 chunkTop 计算，保证跨块连贯）
+            drawTiledWatermark(canvas, outW, chunkH, st, chunkTop)
 
             val chunkFile = File(target.parentFile, "$baseName-${c + 1}.png")
             writeBitmap(chunkBmp, chunkFile)
@@ -228,34 +214,52 @@ object SheetImageExporter {
         return true
     }
 
-    private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style) {
-        // 斜向水印（密集）
+    /**
+     * 斜向水印铺满（三种内容交替）
+     * @param offsetY 全局 Y 偏移（分块时保证跨块连贯）
+     */
+    private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style, offsetY: Int = 0) {
+        val wmSize = 26f * SIZE_MULT
+        val logoSize = 30f * SIZE_MULT
+        val uidSize = 22f * SIZE_MULT
+
         val wmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.watermarkColor, 0.05f)
-            textSize = 28f * SIZE_MULT
+            textSize = wmSize
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
         }
         val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.logoColor, 0.06f)
-            textSize = 32f * SIZE_MULT
+            textSize = logoSize
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
         }
+        val uidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.watermarkColor, 0.045f)
+            textSize = uidSize
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
+        }
 
-        val stepX = 220f * SIZE_MULT
-        val stepY = 160f * SIZE_MULT
-        var y = 60f * SIZE_MULT
-        var row = 0
+        val stepX = 200f * SIZE_MULT
+        val stepY = 140f * SIZE_MULT
+
+        // 全局起始 Y（考虑 offsetY，保证分块连贯）
+        val startY = (60f * SIZE_MULT) - (offsetY % stepY.toInt())
+
+        var y = startY
+        var row = ((offsetY / stepY.toInt()) % 3 + 3) % 3
+
         while (y < h) {
             var x = 60f * SIZE_MULT
             while (x < w) {
                 canvas.save()
                 canvas.rotate(-30f, x, y)
-                if (row % 2 == 0) {
-                    canvas.drawText(WATERMARK_TEXT, x, y, wmPaint)
-                } else {
-                    canvas.drawText(APP_NAME, x, y, logoPaint)
+                when (row % 3) {
+                    0 -> canvas.drawText(APP_NAME, x, y, logoPaint)
+                    1 -> canvas.drawText(WATERMARK_TEXT, x, y, wmPaint)
+                    else -> canvas.drawText(WATERMARK_UID, x, y, uidPaint)
                 }
                 canvas.restore()
                 x += stepX
@@ -371,7 +375,6 @@ object SheetImageExporter {
         val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
         val timeH = (st.timeSize * 2.2f).roundToInt()
 
-        // 标题行 + 信息面板行（不重叠）
         val titleH = (st.titleSize * 1.4f).roundToInt()
         val metaH = (st.metaSize * 1.6f).roundToInt()
         val headerH = titleH + metaH + 20
@@ -416,7 +419,6 @@ object SheetImageExporter {
         drawBgPattern(canvas, logicalW, logicalH, st)
         drawDeco(canvas, logicalW, logicalH, st)
 
-        // 标题（居中，自动缩小）
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.titleColor, 1f)
             textSize = st.titleSize
@@ -432,7 +434,6 @@ object SheetImageExporter {
         val titleY = st.pad + titleSize
         canvas.drawText(songName, logicalW / 2f, titleY, titlePaint)
 
-        // 页码（标题下方，右对齐）
         val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.metaColor, 1f)
             textSize = st.metaSize
@@ -441,7 +442,6 @@ object SheetImageExporter {
         val pageY = titleY + st.metaSize + 8f
         canvas.drawText("${pageIndex + 1} / $pageCount", logicalW - st.pad, pageY, pagePaint)
 
-        // 信息面板（页码下方，不重叠）
         var infoBottom = pageY
         if (st.showInfoPanel && infoItems.isNotEmpty()) {
             val infoTop = pageY + st.metaSize + 12f
@@ -450,7 +450,6 @@ object SheetImageExporter {
             infoBottom = infoTop + infoRows * (st.infoSize * 2.0f) + 16f
         }
 
-        // 网格区
         val gCols = if (rows == 9) 3 else 5
         val gRows = 3
         val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
@@ -482,12 +481,16 @@ object SheetImageExporter {
             canvas.drawText(formatMs(col.t), cellLeft + gridW / 2f, cellTop + gridH + timeH * 0.8f, timePaint)
         }
 
-        // 底部水印
+        // 底部 Logo + 水印
         if (st.showWatermark) {
-            drawWatermark(canvas, logicalW, logicalH, st)
+            drawFooter(canvas, logicalW, logicalH, st)
         }
 
         canvas.restore()
+
+        // 页面内铺水印（在 scale 之外，保证密度一致）
+        drawTiledWatermark(canvas, w, h, st)
+
         return bmp
     }
 
@@ -634,7 +637,7 @@ object SheetImageExporter {
         }
     }
 
-    private fun drawWatermark(canvas: Canvas, logicalW: Float, logicalH: Float, st: Style) {
+    private fun drawFooter(canvas: Canvas, logicalW: Float, logicalH: Float, st: Style) {
         val baseY = logicalH - st.pad / 2f
 
         val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -740,4 +743,3 @@ object SheetImageExporter {
         }
     }
 }
-
