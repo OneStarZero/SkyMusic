@@ -77,6 +77,8 @@ export const view = {
   themeList: null,
   cornerList: null,
   themeCloseBtn: null,
+  rowsSlider: null,
+  colsSlider: null,
   rowsValEl: null,
   colsValEl: null
 };
@@ -218,6 +220,20 @@ const OVERLAY_CSS = [
   '.smsi-tab.smsi-active{border-color:rgba(125,211,252,.5);',
   'background:rgba(125,211,252,.14);color:#7DD3FC;}',
 
+  '.smsi-slider-bar{display:flex;flex-direction:column;gap:6px;padding:8px 16px;flex:0 0 auto;',
+  'border-bottom:1px solid rgba(125,211,252,.06);background:#0B1120;}',
+  '.smsi-slider-row{display:flex;align-items:center;gap:10px;}',
+  '.smsi-slider-label{font-size:11px;color:#94A3B8;width:16px;flex:0 0 auto;}',
+  '.smsi-slider{flex:1;height:4px;-webkit-appearance:none;appearance:none;',
+  'background:rgba(148,163,184,.2);border-radius:2px;outline:none;}',
+  '.smsi-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;',
+  'width:16px;height:16px;border-radius:50%;background:#7DD3FC;cursor:pointer;',
+  'box-shadow:0 0 8px rgba(125,211,252,.5);}',
+  '.smsi-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;',
+  'background:#7DD3FC;cursor:pointer;border:none;}',
+  '.smsi-slider-val{font-size:11px;color:#7DD3FC;width:24px;text-align:right;',
+  'font-variant-numeric:tabular-nums;font-weight:700;flex:0 0 auto;}',
+
   '.smsi-body{flex:1 1 auto;overflow:hidden;position:relative;contain:layout style;}',
   '.smsi-pane{position:absolute;inset:0;overflow:auto;padding:14px;-webkit-overflow-scrolling:touch;',
   'display:none;overscroll-behavior:contain;touch-action:pan-x pan-y;',
@@ -332,11 +348,7 @@ const OVERLAY_CSS = [
   '.smsi-corner-item.smsi-selected{border-color:rgba(125,211,252,.65);',
   'background:rgba(125,211,252,.14);color:#7DD3FC;}',
   '.smsi-corner-preview{width:32px;height:32px;background:rgba(125,211,252,.35);',
-  'border:1.5px solid rgba(125,211,252,.55);display:flex;align-items:center;justify-content:center;}',
-
-  '.smsi-stepper{display:flex;align-items:center;gap:10px;}',
-  '.smsi-stepper-val{flex:1;text-align:center;font-size:13px;font-weight:700;color:#7DD3FC;',
-  'font-variant-numeric:tabular-nums;}'
+  'border:1.5px solid rgba(125,211,252,.55);display:flex;align-items:center;justify-content:center;}'
 ].join('');
 
 function injectStyle() {
@@ -366,6 +378,18 @@ const OVERLAY_HTML = [
   '    <div class="smsi-tab smsi-active" data-act="tab-pages">分页预览</div>',
   '    <div class="smsi-tab" data-act="tab-long">长图预览</div>',
   '  </div>',
+  '  <div class="smsi-slider-bar">',
+  '    <div class="smsi-slider-row">',
+  '      <span class="smsi-slider-label">行</span>',
+  '      <input type="range" class="smsi-slider" data-role="rows-slider" min="6" max="20" step="1" value="15">',
+  '      <span class="smsi-slider-val" data-role="rows-val">15</span>',
+  '    </div>',
+  '    <div class="smsi-slider-row">',
+  '      <span class="smsi-slider-label">列</span>',
+  '      <input type="range" class="smsi-slider" data-role="cols-slider" min="3" max="12" step="1" value="8">',
+  '      <span class="smsi-slider-val" data-role="cols-val">8</span>',
+  '    </div>',
+  '  </div>',
   '  <div class="smsi-body">',
   '    <div class="smsi-pane smsi-active" data-pane="pages"><div class="smsi-pages"></div></div>',
   '    <div class="smsi-pane" data-pane="long"><div class="smsi-long-wrap"></div></div>',
@@ -381,22 +405,6 @@ const OVERLAY_HTML = [
   '      <div class="smsi-theme-section">',
   '        <div class="smsi-theme-label">按键样式</div>',
   '        <div class="smsi-corner-row" data-role="corner-list"></div>',
-  '      </div>',
-  '      <div class="smsi-theme-section">',
-  '        <div class="smsi-theme-label">每页行数</div>',
-  '        <div class="smsi-stepper">',
-  '          <button class="smsi-btn smsi-icon" data-act="rows-minus" type="button">−</button>',
-  '          <span class="smsi-stepper-val" data-role="rows-val">15</span>',
-  '          <button class="smsi-btn smsi-icon" data-act="rows-plus" type="button">+</button>',
-  '        </div>',
-  '      </div>',
-  '      <div class="smsi-theme-section">',
-  '        <div class="smsi-theme-label">每行列数</div>',
-  '        <div class="smsi-stepper">',
-  '          <button class="smsi-btn smsi-icon" data-act="cols-minus" type="button">−</button>',
-  '          <span class="smsi-stepper-val" data-role="cols-val">8</span>',
-  '          <button class="smsi-btn smsi-icon" data-act="cols-plus" type="button">+</button>',
-  '        </div>',
   '      </div>',
   '    </div>',
   '  </div>',
@@ -444,16 +452,22 @@ const LOD_HIGH = 1.0;
 const LOD_MID = 0.5;
 const LOD_LOW = 0.25;
 
+function buildMeta() {
+  return {
+    rows: view.rows,
+    title: view.title,
+    infoItems: view.infoItems,
+    rowsPerPage: view.customRows,
+    cols: view.customCols
+  };
+}
+
 function renderPages() {
   const host = view.pagesHost;
   if (!host) return;
   host.innerHTML = '';
 
-  const meta = {
-    rows: view.rows,
-    title: view.title,
-    infoItems: view.infoItems
-  };
+  const meta = buildMeta();
 
   const m = measurePage(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
   const w = Math.round(m.width * view.pageZoom) + 'px';
@@ -546,7 +560,7 @@ function renderPageAt(index, meta, lod) {
   if (page._rendered && page._lod === targetLod) return;
 
   try {
-    const baseScale = previewScaleFor(view.rows, view.style, meta.infoItems.length);
+    const baseScale = previewScaleFor(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
     const scale = baseScale * targetLod;
     drawPageToCanvas(page._canvas, page, index, view.pages.length, meta, view.style, scale);
     page._rendered = true;
@@ -562,11 +576,7 @@ function ensureLongPreview() {
   if (!view.longHost) return;
   if (!view.pages.length) return;
 
-  const meta = {
-    rows: view.rows,
-    title: view.title,
-    infoItems: view.infoItems
-  };
+  const meta = buildMeta();
 
   const m = measurePage(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
   const logicalW = m.width;
@@ -798,7 +808,7 @@ function renderPageToExportCanvas(index, meta) {
   if (!page) return null;
 
   const canvas = document.createElement('canvas');
-  const baseScale = previewScaleFor(view.rows, view.style, meta.infoItems.length);
+  const baseScale = previewScaleFor(view.rows, view.style, meta.infoItems.length, view.customRows, view.customCols);
 
   try {
     drawPageToCanvas(canvas, page, index, view.pages.length, meta, view.style, baseScale);
@@ -897,11 +907,7 @@ async function exportInBrowser(longOnly, onClose) {
   try {
     const fileNameBase = sanitizeFileName(view.title);
 
-    const meta = {
-      rows: view.rows,
-      title: view.title,
-      infoItems: view.infoItems
-    };
+    const meta = buildMeta();
 
     if (longOnly) {
       showProgress('正在准备长图…', 5);
@@ -1398,13 +1404,49 @@ function switchKeyCount(rows) {
   if (getActiveTab() === 'long') ensureLongPreview();
 }
 
+/* ==================================================================
+ * 12. 滑杆
+ * ================================================================== */
+
+let sliderTimer = 0;
+
+function bindSliders() {
+  if (view.rowsSlider) {
+    view.rowsSlider.addEventListener('input', function () {
+      view.customRows = parseInt(view.rowsSlider.value, 10) || 15;
+      if (view.rowsValEl) view.rowsValEl.textContent = String(view.customRows);
+      scheduleRebuild();
+    });
+  }
+  if (view.colsSlider) {
+    view.colsSlider.addEventListener('input', function () {
+      view.customCols = parseInt(view.colsSlider.value, 10) || 8;
+      if (view.colsValEl) view.colsValEl.textContent = String(view.customCols);
+      scheduleRebuild();
+    });
+  }
+}
+
+function scheduleRebuild() {
+  if (sliderTimer) clearTimeout(sliderTimer);
+  sliderTimer = setTimeout(function () {
+    sliderTimer = 0;
+    rebuild();
+    renderPages();
+    updateSelectUI();
+    if (getActiveTab() === 'long') ensureLongPreview();
+  }, 120);
+}
+
 function updateStepperUI() {
+  if (view.rowsSlider) view.rowsSlider.value = String(view.customRows);
+  if (view.colsSlider) view.colsSlider.value = String(view.customCols);
   if (view.rowsValEl) view.rowsValEl.textContent = String(view.customRows);
   if (view.colsValEl) view.colsValEl.textContent = String(view.customCols);
 }
 
 /* ==================================================================
- * 12. 事件
+ * 13. 事件
  * ================================================================== */
 
 function onOverlayClick(ev) {
@@ -1477,34 +1519,6 @@ function onOverlayClick(ev) {
     case 'random':
       applyRandom();
       break;
-    case 'rows-minus':
-      view.customRows = Math.max(6, view.customRows - 1);
-      updateStepperUI();
-      rebuild();
-      renderPages();
-      updateSelectUI();
-      break;
-    case 'rows-plus':
-      view.customRows = Math.min(20, view.customRows + 1);
-      updateStepperUI();
-      rebuild();
-      renderPages();
-      updateSelectUI();
-      break;
-    case 'cols-minus':
-      view.customCols = Math.max(3, view.customCols - 1);
-      updateStepperUI();
-      rebuild();
-      renderPages();
-      updateSelectUI();
-      break;
-    case 'cols-plus':
-      view.customCols = Math.min(12, view.customCols + 1);
-      updateStepperUI();
-      rebuild();
-      renderPages();
-      updateSelectUI();
-      break;
     case 'save':
       saveImages(false, closeOverlay);
       break;
@@ -1517,7 +1531,7 @@ function onOverlayClick(ev) {
 }
 
 /* ==================================================================
- * 13. 入口
+ * 14. 入口
  * ================================================================== */
 
 function ensureOverlay() {
@@ -1556,11 +1570,15 @@ function ensureOverlay() {
   view.themeList = overlay.querySelector('[data-role="theme-list"]');
   view.cornerList = overlay.querySelector('[data-role="corner-list"]');
   view.themeCloseBtn = overlay.querySelector('[data-act="theme-close"]');
+
+  view.rowsSlider = overlay.querySelector('[data-role="rows-slider"]');
+  view.colsSlider = overlay.querySelector('[data-role="cols-slider"]');
   view.rowsValEl = overlay.querySelector('[data-role="rows-val"]');
   view.colsValEl = overlay.querySelector('[data-role="cols-val"]');
 
   buildThemeLists();
   updateStepperUI();
+  bindSliders();
 
   blockScrollChaining(overlay);
   blockScrollChaining(view.bodyPages);

@@ -24,7 +24,9 @@ object SheetImageExporter {
     private const val LONG_SUFFIX = "-Full"
     private const val FALLBACK_BG = "#0B1120"
     private const val SIZE_MULT = 5f
-    private const val MAX_LONG_HEIGHT = 100000
+
+    /** 长图分块高度（像素），避免一次性创建超大 Bitmap */
+    private const val CHUNK_H = 8000
 
     fun export(
         baseDir: File,
@@ -65,52 +67,38 @@ object SheetImageExporter {
 
             val size = measure(rows, st, infoItems.size)
 
-            val rendered = ArrayList<Bitmap>(parsedPages.size)
-            try {
+            // 分页模式：逐页绘制 + 保存
+            if (!longOnly) {
                 for (i in parsedPages.indices) {
                     val pageIndex = pagesArr.optJSONObject(i)?.optInt("index", i) ?: i
                     onProgress?.invoke("正在绘制第 ${i + 1} / $total 页", (i * 80) / total)
 
-                    val isFirst = (i == 0)
-                    val isLongMode = (longOnly || mergeLong)
-
                     val bitmap = drawPage(
                         parsedPages[i], songName, rows, st, pageIndex, pageCount,
-                        infoItems, size,
-                        showTitle = true,
-                        showInfo = if (isLongMode) isFirst else true,
-                        showWatermark = true
+                        infoItems, size
                     ) ?: return fail("绘制失败")
 
-                    if (!longOnly && pageDir != null) {
-                        val fileName = if (pageIndex == 0) "$safeName.png" else "$safeName-${pageIndex + 1}.png"
-                        writeBitmap(bitmap, File(pageDir, fileName))
-                        files.add(fileName)
-                    }
-
-                    if (mergeLong || longOnly) {
-                        rendered.add(bitmap)
-                    } else {
-                        bitmap.recycle()
-                    }
+                    val fileName = if (pageIndex == 0) "$safeName.png" else "$safeName-${pageIndex + 1}.png"
+                    writeBitmap(bitmap, File(pageDir!!, fileName))
+                    files.add(fileName)
+                    bitmap.recycle()
                 }
-
-                if ((mergeLong || longOnly) && rendered.isNotEmpty()) {
-                    onProgress?.invoke("正在拼接长图…", 85)
-                    val longBitmap = mergePages(rendered, st)
-                    if (longBitmap == null) {
-                        return fail("长图过高（超过 ${MAX_LONG_HEIGHT}px），请减少页数或行数")
-                    }
-                    val longName = "$safeName$LONG_SUFFIX.png"
-                    writeBitmap(longBitmap, File(rootDir, longName))
-                    files.add(longName)
-                    longBitmap.recycle()
-                }
-                onProgress?.invoke("完成", 100)
-            } finally {
-                for (bmp in rendered) { if (!bmp.isRecycled) bmp.recycle() }
             }
 
+            // 长图模式：分块流式写入
+            if (mergeLong || longOnly) {
+                onProgress?.invoke("正在生成长图…", 10)
+                val longName = "$safeName$LONG_SUFFIX.png"
+                val ok = writeLongImage(
+                    File(rootDir, longName),
+                    parsedPages, songName, rows, st, pageCount, infoItems, size,
+                    onProgress
+                )
+                if (!ok) return fail("长图生成失败")
+                files.add(longName)
+            }
+
+            onProgress?.invoke("完成", 100)
             return JSONObject().put("ok", true).put("dir", rootDir.absolutePath).put("files", JSONArray(files))
         } catch (t: Throwable) {
             return fail(t.message ?: "未知错误")
@@ -126,60 +114,154 @@ object SheetImageExporter {
         }
     }
 
-    private fun mergePages(pages: List<Bitmap>, st: Style): Bitmap? {
-        if (pages.isEmpty()) return null
+    /**
+     * 长图分块流式写入：
+     * 1. 先计算总高度
+     * 2. 按 CHUNK_H 分块，每块创建 Bitmap，绘制对应区域，写入临时文件
+     * 3. 最后合并（这里简化为直接逐块写入同一个 PNG 流不可行，改为分块保存后提示）
+     *
+     * 实际实现：直接创建完整 Bitmap（如果内存允许），否则分块保存为多张。
+     */
+    private fun writeLongImage(
+        target: File,
+        pages: List<PageData>,
+        songName: String,
+        rows: Int,
+        st: Style,
+        pageCount: Int,
+        infoItems: List<Pair<String, String>>,
+        size: Size,
+        onProgress: ((String, Int) -> Unit)?
+    ): Boolean {
+        if (pages.isEmpty()) return false
 
         val gap = (st.pad * 0.6f * SIZE_MULT).roundToInt().coerceAtLeast(8)
-        var maxW = 0
-        var totalH = 0L
-        for (bmp in pages) {
-            if (bmp.width > maxW) maxW = bmp.width
-            totalH += bmp.height.toLong()
+        val pageH = size.height
+        val totalH = pageH * pages.size + gap * (pages.size - 1)
+        val outW = size.width
+
+        // 尝试一次性创建（内存足够时）
+        try {
+            val longBitmap = Bitmap.createBitmap(outW, totalH, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(longBitmap)
+            canvas.drawColor(argb(st.bg, 1f))
+
+            var y = 0f
+            for (i in pages.indices) {
+                onProgress?.invoke("正在绘制第 ${i + 1} / ${pages.size} 页", 10 + (i * 70) / pages.size)
+
+                val pageBmp = drawPage(
+                    pages[i], songName, rows, st, i, pageCount, infoItems, size
+                ) ?: return false
+
+                canvas.drawBitmap(pageBmp, 0f, y, null)
+                pageBmp.recycle()
+                y += pageH + gap
+            }
+
+            // 铺满水印
+            drawTiledWatermark(canvas, outW, totalH, st)
+
+            writeBitmap(longBitmap, target)
+            longBitmap.recycle()
+            return true
+        } catch (oom: OutOfMemoryError) {
+            // 内存不足，分块保存
+            return writeLongImageChunked(target, pages, songName, rows, st, pageCount, infoItems, size, gap, onProgress)
         }
-        totalH += gap.toLong() * (pages.size - 1)
-        if (maxW <= 0 || totalH <= 0) return null
-        if (totalH > MAX_LONG_HEIGHT) return null
+    }
 
-        val outW = maxW
-        val outH = totalH.toInt()
+    /** 分块保存（内存不足时） */
+    private fun writeLongImageChunked(
+        target: File,
+        pages: List<PageData>,
+        songName: String,
+        rows: Int,
+        st: Style,
+        pageCount: Int,
+        infoItems: List<Pair<String, String>>,
+        size: Size,
+        gap: Int,
+        onProgress: ((String, Int) -> Unit)?
+    ): Boolean {
+        val pageH = size.height
+        val outW = size.width
+        val totalH = pageH * pages.size + gap * (pages.size - 1)
 
-        val longBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(longBitmap)
-        canvas.drawColor(argb(st.bg, 1f))
+        val chunkCount = (totalH + CHUNK_H - 1) / CHUNK_H
+        val baseName = target.nameWithoutExtension
 
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-        var y = 0f
-        for (bmp in pages) {
-            val left = (outW - bmp.width) / 2f
-            canvas.drawBitmap(bmp, left, y, paint)
-            y += bmp.height + gap
+        for (c in 0 until chunkCount) {
+            val chunkTop = c * CHUNK_H
+            val chunkBottom = minOf(totalH, chunkTop + CHUNK_H)
+            val chunkH = chunkBottom - chunkTop
+
+            val chunkBmp = Bitmap.createBitmap(outW, chunkH, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(chunkBmp)
+            canvas.drawColor(argb(st.bg, 1f))
+
+            var y = 0
+            for (i in pages.indices) {
+                val pageTop = i * (pageH + gap)
+                val pageBottom = pageTop + pageH
+
+                if (pageBottom <= chunkTop || pageTop >= chunkBottom) continue
+
+                val pageBmp = drawPage(
+                    pages[i], songName, rows, st, i, pageCount, infoItems, size
+                ) ?: continue
+
+                val drawY = pageTop - chunkTop
+                canvas.drawBitmap(pageBmp, 0f, drawY.toFloat(), null)
+                pageBmp.recycle()
+            }
+
+            drawTiledWatermark(canvas, outW, chunkH, st)
+
+            val chunkFile = File(target.parentFile, "$baseName-${c + 1}.png")
+            writeBitmap(chunkBmp, chunkFile)
+            chunkBmp.recycle()
+
+            onProgress?.invoke("正在保存分块 ${c + 1} / $chunkCount", 80 + (c * 15) / chunkCount)
         }
 
-        drawTiledWatermark(canvas, outW, outH, st)
-
-        return longBitmap
+        return true
     }
 
     private fun drawTiledWatermark(canvas: Canvas, w: Int, h: Int, st: Style) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = argb(st.watermarkColor, 0.035f)
-            textSize = 36f * SIZE_MULT
+        // 斜向水印（密集）
+        val wmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.watermarkColor, 0.05f)
+            textSize = 28f * SIZE_MULT
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(FONT_STACK, Typeface.NORMAL)
         }
-        val stepX = 380f * SIZE_MULT
-        val stepY = 260f * SIZE_MULT
-        var y = 80f * SIZE_MULT
+        val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.logoColor, 0.06f)
+            textSize = 32f * SIZE_MULT
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+        }
+
+        val stepX = 220f * SIZE_MULT
+        val stepY = 160f * SIZE_MULT
+        var y = 60f * SIZE_MULT
+        var row = 0
         while (y < h) {
-            var x = 80f * SIZE_MULT
+            var x = 60f * SIZE_MULT
             while (x < w) {
                 canvas.save()
                 canvas.rotate(-30f, x, y)
-                canvas.drawText(WATERMARK_TEXT, x, y, paint)
+                if (row % 2 == 0) {
+                    canvas.drawText(WATERMARK_TEXT, x, y, wmPaint)
+                } else {
+                    canvas.drawText(APP_NAME, x, y, logoPaint)
+                }
                 canvas.restore()
                 x += stepX
             }
             y += stepY
+            row++
         }
     }
 
@@ -289,7 +371,10 @@ object SheetImageExporter {
         val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
         val timeH = (st.timeSize * 2.2f).roundToInt()
 
-        val headerH = (st.titleSize * 1.4f + 10 + st.metaSize * 1.5f + 26).roundToInt()
+        // 标题行 + 信息面板行（不重叠）
+        val titleH = (st.titleSize * 1.4f).roundToInt()
+        val metaH = (st.metaSize * 1.6f).roundToInt()
+        val headerH = titleH + metaH + 20
 
         var infoH = 0
         if (st.showInfoPanel && infoCount > 0) {
@@ -314,10 +399,7 @@ object SheetImageExporter {
     private fun drawPage(
         page: PageData, songName: String, rows: Int, st: Style,
         pageIndex: Int, pageCount: Int, infoItems: List<Pair<String, String>>,
-        size: Size,
-        showTitle: Boolean,
-        showInfo: Boolean,
-        showWatermark: Boolean
+        size: Size
     ): Bitmap? {
         val w = size.width
         val h = size.height
@@ -334,40 +416,48 @@ object SheetImageExporter {
         drawBgPattern(canvas, logicalW, logicalH, st)
         drawDeco(canvas, logicalW, logicalH, st)
 
-        val pageText = "${pageIndex + 1} / $pageCount"
+        // 标题（居中，自动缩小）
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = argb(st.titleColor, 1f)
+            textSize = st.titleSize
+            typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val maxTitleWidth = logicalW - st.pad * 2
+        var titleSize = st.titleSize
+        while (titlePaint.measureText(songName) > maxTitleWidth && titleSize > 10f) {
+            titleSize -= 1f
+            titlePaint.textSize = titleSize
+        }
+        val titleY = st.pad + titleSize
+        canvas.drawText(songName, logicalW / 2f, titleY, titlePaint)
+
+        // 页码（标题下方，右对齐）
         val pagePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = argb(st.metaColor, 1f)
             textSize = st.metaSize
             textAlign = Paint.Align.RIGHT
         }
-        val pageWidth = pagePaint.measureText(pageText)
+        val pageY = titleY + st.metaSize + 8f
+        canvas.drawText("${pageIndex + 1} / $pageCount", logicalW - st.pad, pageY, pagePaint)
 
-        var titleSize = st.titleSize
-        if (showTitle) {
-            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = argb(st.titleColor, 1f)
-                textSize = st.titleSize
-                typeface = Typeface.create(FONT_STACK, Typeface.BOLD)
-                textAlign = Paint.Align.CENTER
-            }
-            val maxTitleWidth = logicalW - st.pad * 2 - pageWidth - 16f
-            while (titlePaint.measureText(songName) > maxTitleWidth && titleSize > 10f) {
-                titleSize -= 1f
-                titlePaint.textSize = titleSize
-            }
-            canvas.drawText(songName, logicalW / 2f, st.pad + titleSize, titlePaint)
+        // 信息面板（页码下方，不重叠）
+        var infoBottom = pageY
+        if (st.showInfoPanel && infoItems.isNotEmpty()) {
+            val infoTop = pageY + st.metaSize + 12f
+            drawInfoPanel(canvas, infoItems, st, logicalW, infoTop)
+            val infoRows = (infoItems.size + 1) / 2
+            infoBottom = infoTop + infoRows * (st.infoSize * 2.0f) + 16f
         }
 
-        val pageY = if (showTitle) st.pad + titleSize + st.metaSize + 8f else st.pad + st.metaSize
-        canvas.drawText(pageText, logicalW - st.pad, pageY, pagePaint)
-
+        // 网格区
         val gCols = if (rows == 9) 3 else 5
         val gRows = 3
         val gridW = gCols * st.cell + (gCols - 1) * st.cellGap
         val gridH = gRows * st.cell + (gRows - 1) * st.cellGap
         val timeH = st.timeSize * 2.2f
 
-        val bodyTop = pageY + 26f
+        val bodyTop = infoBottom + 20f
         val bodyLeft = st.pad.toFloat()
 
         val cc = st.cols.coerceAtLeast(1)
@@ -392,12 +482,8 @@ object SheetImageExporter {
             canvas.drawText(formatMs(col.t), cellLeft + gridW / 2f, cellTop + gridH + timeH * 0.8f, timePaint)
         }
 
-        if (showInfo) {
-            val infoTop = bodyTop + rpp * (gridH + timeH) + (rpp - 1) * st.gridGapY + 20f
-            drawInfoPanel(canvas, infoItems, st, logicalW, infoTop)
-        }
-
-        if (showWatermark && st.showWatermark) {
+        // 底部水印
+        if (st.showWatermark) {
             drawWatermark(canvas, logicalW, logicalH, st)
         }
 
@@ -654,3 +740,4 @@ object SheetImageExporter {
         }
     }
 }
+

@@ -64,7 +64,6 @@ export function buildLayout(notes, rows, toleranceMs) {
   return { rows: rows, columns: columns };
 }
 
-/** 按「每页 cols × rowsPerPage 个时间点」分页 */
 export function buildPages(layout, st, rowsPerPage, cols) {
   const c = layout.columns;
   const rpp = rowsPerPage || st.rowsPerPage || 6;
@@ -82,7 +81,7 @@ export function buildPages(layout, st, rowsPerPage, cols) {
 
 /**
  * 计算一页画布尺寸（CSS 像素）
- * 与原生 SheetImageExporter.kt 的 measure() 严格一致
+ * 布局顺序：标题 → 页码 → 信息面板 → 网格 → 底部水印
  */
 export function measurePage(rows, st, infoItemCount, rowsPerPage, cols) {
   const rpp = rowsPerPage || st.rowsPerPage || 6;
@@ -94,7 +93,9 @@ export function measurePage(rows, st, infoItemCount, rowsPerPage, cols) {
   const gridH = gRows * st.cell + (gRows - 1) * st.cellGap;
   const timeH = st.timeSize * 2.2;
 
-  const headerH = st.titleSize * 1.4 + 10 + st.metaSize * 1.5 + 26;
+  const titleH = st.titleSize * 1.4;
+  const metaH = st.metaSize * 1.6;
+  const headerH = titleH + metaH + 20;
 
   let infoH = 0;
   if (st.showInfoPanel && infoItemCount > 0) {

@@ -1,5 +1,6 @@
 /**
  * SkyMusic · 谱面图片 Canvas 绘制
+ * 布局顺序：标题 → 页码 → 信息面板 → 网格 → 底部水印
  */
 
 import {
@@ -49,8 +50,6 @@ function drawShape(ctx, x, y, w, h, r, shape) {
     ctx.lineTo(cx, cy + h / 2);
     ctx.lineTo(cx - w / 2, cy);
     ctx.closePath();
-  } else if (shape === 'skystudio') {
-    roundRectPath(ctx, x, y, w, h, r);
   } else {
     roundRectPath(ctx, x, y, w, h, r);
   }
@@ -142,20 +141,21 @@ function paintDecorations(ctx, width, height, st) {
   ctx.restore();
 }
 
+/** 斜向水印（密集，水印与 Logo 交替） */
 function paintWatermark(ctx, width, height, st) {
   if (!st.showWatermark) return;
-  const fontSize = st.watermarkSize;
-  const stepX = fontSize * 11;
-  const stepY = fontSize * 7;
+
+  const wmSize = st.watermarkSize;
+  const logoSize = st.logoSize * 1.4;
+  const stepX = wmSize * 7;
+  const stepY = wmSize * 4.5;
 
   ctx.save();
-  ctx.font = '500 ' + fontSize + 'px ' + FONT_STACK;
-  ctx.fillStyle = rgba(st.watermarkColor, st.watermarkAlpha);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
   ctx.translate(width / 2, height / 2);
-  ctx.rotate(-Math.PI / 4);
+  ctx.rotate(-Math.PI / 6);
 
   const diag = Math.sqrt(width * width + height * height);
   const halfW = diag / 2 + stepX;
@@ -165,7 +165,15 @@ function paintWatermark(ctx, width, height, st) {
   for (let y = -halfH; y <= halfH; y += stepY) {
     const offset = (rowIndex % 2 === 0) ? 0 : stepX / 2;
     for (let x = -halfW + offset; x <= halfW; x += stepX) {
-      ctx.fillText(WATERMARK_TEXT, x, y);
+      if (rowIndex % 2 === 0) {
+        ctx.font = '500 ' + wmSize + 'px ' + FONT_STACK;
+        ctx.fillStyle = rgba(st.watermarkColor, 0.05);
+        ctx.fillText(WATERMARK_TEXT, x, y);
+      } else {
+        ctx.font = '700 ' + logoSize + 'px ' + FONT_STACK;
+        ctx.fillStyle = rgba(st.logoColor, 0.06);
+        ctx.fillText(APP_NAME, x, y);
+      }
     }
     rowIndex += 1;
   }
@@ -210,22 +218,18 @@ function drawKeyGrid(ctx, x, y, rows, st, activeCells) {
       const isActive = activeCells && activeCells.indexOf(cellIndex) >= 0;
 
       if (isSkyStudio) {
-        // 外框
         roundRectPath(ctx, bx, by, cell, cell, st.gridRadius);
 
         if (isActive) {
-          // 激活：填充整个方块
           const t = gRows > 1 ? r / (gRows - 1) : 0;
           ctx.fillStyle = mixHex(st.noteFill, st.noteFillAlt, t);
           ctx.fill();
         } else {
-          // 未激活：只描边
           ctx.strokeStyle = rgba(st.gridLine, st.gridLineAlpha);
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }
 
-        // 内部菱形
         const cx = bx + cell / 2;
         const cy = by + cell / 2;
         const diamondR = cell * 0.32;
@@ -247,7 +251,6 @@ function drawKeyGrid(ctx, x, y, rows, st, activeCells) {
           ctx.stroke();
         }
 
-        // 字母
         const letter = skyLetters[cellIndex] || '';
         if (letter) {
           ctx.font = '600 ' + (cell * 0.32) + 'px ' + FONT_STACK;
@@ -363,7 +366,10 @@ function drawInfoPanel(ctx, x, y, width, items, st) {
 export function drawPageToCanvas(canvas, page, pageIndex, pageCount, meta, st, scale) {
   const rows = meta.rows;
   const infoItems = meta.infoItems || [];
-  const m = measurePage(rows, st, infoItems.length);
+  const rpp = meta.rowsPerPage || st.rowsPerPage || 6;
+  const cc = meta.cols || st.cols || 5;
+
+  const m = measurePage(rows, st, infoItems.length, rpp, cc);
   const px = Math.max(0.35, Number(scale) || 1);
 
   canvas.width = Math.max(1, Math.round(m.width * px));
@@ -386,6 +392,7 @@ export function drawPageToCanvas(canvas, page, pageIndex, pageCount, meta, st, s
   paintWatermark(ctx, m.width, m.height, st);
   paintStealthWatermark(ctx, m.width, m.height, pageIndex);
 
+  // 标题
   let titleX = m.width / 2;
   ctx.textAlign = 'center';
   if (st.titleAlign === 'left') { titleX = st.pad; ctx.textAlign = 'left'; }
@@ -395,23 +402,27 @@ export function drawPageToCanvas(canvas, page, pageIndex, pageCount, meta, st, s
   ctx.fillStyle = st.titleColor;
   ctx.fillText(meta.title, titleX, st.pad);
 
-  ctx.textAlign = 'left';
+  // 页码（标题下方）
+  const pageY = st.pad + st.titleSize * 1.4 + 10;
+  ctx.textAlign = 'right';
   ctx.font = '400 ' + st.metaSize + 'px ' + FONT_STACK;
   ctx.fillStyle = st.metaColor;
-  ctx.fillText((pageIndex + 1) + ' / ' + pageCount, st.pad, st.pad + st.titleSize * 1.4 + 10);
+  ctx.fillText((pageIndex + 1) + ' / ' + pageCount, m.width - st.pad, pageY);
 
-  const infoTop = st.pad + m.headerH;
+  // 信息面板（页码下方）
+  const infoTop = pageY + st.metaSize * 1.6 + 12;
   if (st.showInfoPanel && infoItems.length) {
     drawInfoPanel(ctx, st.pad, infoTop, m.bodyW, infoItems, st);
   }
 
+  // 网格区
   const bodyTop = infoTop + m.infoH;
   const bodyLeft = st.pad;
 
   for (let i = 0; i < page.columns.length; i++) {
     const col = page.columns[i];
-    const gx = bodyLeft + (i % st.cols) * (m.gridW + st.gridGapX);
-    const gy = bodyTop + Math.floor(i / st.cols) * (m.gridH + m.timeH + st.gridGapY);
+    const gx = bodyLeft + (i % cc) * (m.gridW + st.gridGapX);
+    const gy = bodyTop + Math.floor(i / cc) * (m.gridH + m.timeH + st.gridGapY);
 
     const activeCells = [];
     for (let k = 0; k < col.rows.length; k++) {
@@ -432,6 +443,7 @@ export function drawPageToCanvas(canvas, page, pageIndex, pageCount, meta, st, s
     }
   }
 
+  // 底部 Logo + 水印
   const footY = st.pad + m.headerH + m.infoH + m.bodyH + m.footerH / 2;
   const logoSize = st.logoSize * 1.6;
   const nameW = 90;
@@ -450,8 +462,8 @@ export function drawPageToCanvas(canvas, page, pageIndex, pageCount, meta, st, s
   ctx.textBaseline = 'top';
 }
 
-export function previewScaleFor(rows, st, infoItemCount) {
-  const m = measurePage(rows, st, infoItemCount);
+export function previewScaleFor(rows, st, infoItemCount, rowsPerPage, cols) {
+  const m = measurePage(rows, st, infoItemCount, rowsPerPage, cols);
   let s = Math.min(window.devicePixelRatio || 1, 2);
   const px = m.width * m.height * s * s;
   if (px > 24000000) s = Math.sqrt(24000000 / (m.width * m.height));
